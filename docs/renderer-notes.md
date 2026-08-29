@@ -108,3 +108,17 @@ driver's NGX runtime loads; `EvaluateFeature_C` is not exported by driver 616.56
 - Rewriting the composite draw's SRV descriptor in place (`CreateShaderResourceView` at the slot's original CPU handle)
   is enough to make it sample the full-size DLSS output; bgfx rewrites the slot next frame anyway.
 - Frame generation: DLSS-G/MFG is Streamline-only and needs real motion vectors; deferred until Phase 1b.
+
+## Phase 1b findings (2026-08-28, night)
+
+- Main geometry shaders: vertex constants c[0..3] = row-major view-projection (rows = clip x,y,z,w); c[4..7] = bare
+  projection (x-scale 1.73, y-scale -3.08, z-row (0,0,0,near), w-row (0,0,1,0)); c[8..10] look like a view/texture
+  matrix; c[12] = a world position (camera). Reversed-Z with infinite far: z_clip == near (48.3 in one scene, 49.4 in another).
+- 445 of ~600 scene draws share the c[0..3] block exactly (world geometry with identity model matrix) - that block is
+  the VP. Rotating props carry model*VP at c[1..4] (same translation column, rotated x/z rows). Another family has
+  c[0] = packed NaN + a view matrix (rotation rows + position) at c[1..4] and no clip matrix in the first 5 registers.
+- bgfx reuses a constant region for consecutive draws with unchanged constants, so patch once per (buffer, offset).
+- Upload-heap constant regions can be patched from the CPU after bgfx wrote them and before the list executes.
+- Laplacian-variance sharpness metrics cannot judge jitter correctness: proper supersampling lowers them (fewer jaggies).
+- Launching mgs4.exe directly bounces through Steam (exit 53) and fails when the Master Collection launcher is already
+  open; steam_appid.txt next to the exe avoids the relaunch entirely.

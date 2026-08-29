@@ -17,15 +17,20 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d12.h>
+#include <imgui.h>
 #include <reshade.hpp>
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_helpers.h>
+#include "mv_cs.h"   // g_mv_cs[]: compiled src/mv_cs.hlsl (camera-only motion vectors from depth)
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
+#include <algorithm>
+#include <cmath>
 #include <mutex>
 
 using namespace reshade::api;
@@ -69,6 +74,8 @@ struct cl_state {
     bool table_set[5] = {};
     D3D12_GPU_VIRTUAL_ADDRESS cbv[5] = {};
     bool cbv_set[5] = {};
+    resource cbv_res[5] = {};           // buffer + offset behind each root CBV (for reading draw constants)
+    uint64_t cbv_off[5] = {};
     ID3D12RootSignature* root_sig = nullptr;
     ID3D12PipelineState* pso = nullptr;
     uint32_t bb_draws = 0;
@@ -77,6 +84,8 @@ static std::unordered_map<command_list*, cl_state> g_cl;
 static std::mutex g_clMutex;
 
 static ID3D12Device* g_d3d = nullptr;
+static void reload_config();
+static bool g_dumpPending = false;
 static bool tracing();
 static bool scene_sized(device* dev, resource r, resource_desc* out = nullptr);
 static std::string desc_str(device* dev, resource r);
@@ -160,8 +169,263 @@ static uint32_t g_evalCount = 0, g_failCount = 0;
 static bool g_featureCreatedThisFrame = false;
 static uint32_t g_createdFrame = 0;
 static bool g_recreated = false;
+static bool g_recreateRequested = false;   // overlay changed the preset
 static NVSDK_NGX_Handle* g_oldFeature = nullptr;
 static uint32_t g_oldFeatureFrame = 0;
+static ULONGLONG g_evalRateT0 = 0; static uint32_t g_evalRateN = 0; static float g_evalRate = 0;
+
+// ---- Phase 1b: camera jitter ---------------------------------------------------------------------------------------
+// Scene draws carry a row-major clip matrix (rows = clip x,y,z,w) in their vertex constants: c[0..3] for the main
+// geometry shaders, c[1..4] for others. Signature: the w-row's xyz is unit length (view-space depth direction) and the
+// z-row has no x/y (reversed-Z: z_clip = near). We add the sub-pixel jitter to the x/y rows in place
+// (x' = x + jx_ndc * w) once per constant region and report the same offset to DLSS.
+static int g_cfgJitter = 1;
+static int g_cfgMotionVectors = 1;
+static float g_cfgJitterSignX = 1.0f, g_cfgJitterSignY = -1.0f;   // NDC y is up, DLSS jitter is reported in pixel space (y down)
+static float g_jitterX = 0.0f, g_jitterY = 0.0f;   // pixels, this frame
+static uint32_t g_jitterIndex = 0;
+static std::unordered_set<uint64_t> g_patchedRegions;   // per frame
+static uint32_t g_patchedDraws = 0, g_matrixMisses = 0;
+static float g_frameVP[16] = {}; static bool g_haveFrameVP = false;   // unjittered VP of this frame (majority of c[0] blocks)
+static float g_prevVP[16] = {};  static bool g_havePrevVP = false;
+struct vp_vote { uint32_t count = 0; float m[16]; };
+static std::unordered_map<uint64_t, vp_vote> g_vpVotes;              // per frame: hash -> block
+static uint32_t g_missLogBudget = 0;
+
+static float halton(uint32_t i, uint32_t b) { float f = 1.0f, r = 0.0f; while (i > 0) { f /= b; r += f * (i % b); i /= b; } return r; }
+static void advance_jitter()
+{
+    if (!g_cfgJitter) { g_jitterX = g_jitterY = 0; return; }
+    const uint32_t phases = g_scaling ? (uint32_t)(8.0f * (float(g_internalW) / float(g_renderW)) * (float(g_internalW) / float(g_renderW)) + 0.5f) : 8;
+    g_jitterIndex = (g_jitterIndex + 1) % (phases ? phases : 8);
+    g_jitterX = halton(g_jitterIndex + 1, 2) - 0.5f;
+    g_jitterY = halton(g_jitterIndex + 1, 3) - 0.5f;
+}
+static bool looks_like_clip_matrix(const float* m)   // m = 16 floats, rows of 4
+{
+    const float* zr = m + 8; const float* wr = m + 12;
+    const float n = sqrtf(wr[0] * wr[0] + wr[1] * wr[1] + wr[2] * wr[2]);
+    if (fabsf(n - 1.0f) > 0.05f) return false;
+    if (fabsf(zr[0]) > 1e-3f || fabsf(zr[1]) > 1e-3f) return false;
+    for (int i = 0; i < 16; ++i) if (!(m[i] == m[i])) return false;
+    return true;
+}
+static uint32_t g_jitStat[6] = {};   // 0 calls, 1 no cbv, 2 already patched, 3 map failed, 4 patched, 5 no matrix
+static void jitter_scene_draw(const cl_state& s)
+{
+    g_jitStat[0]++;
+    if (!g_cfgJitter || !s.cbv_set[2] || !s.cbv_res[2].handle || (g_renderW == 0 && g_internalW == 0)) { g_jitStat[1]++; return; }
+    const uint64_t key = s.cbv_res[2].handle ^ (s.cbv_off[2] * 0x9E3779B97F4A7C15ull);
+    if (!g_patchedRegions.insert(key).second) { g_jitStat[2]++; return; }   // this constant region was already jittered
+    ID3D12Resource* r = reinterpret_cast<ID3D12Resource*>(s.cbv_res[2].handle);
+    const UINT64 size = r->GetDesc().Width;
+    if (s.cbv_off[2] + 5 * 16 > size) { g_jitStat[3]++; return; }
+    void* p = nullptr; D3D12_RANGE rr = { (SIZE_T)s.cbv_off[2], (SIZE_T)(s.cbv_off[2] + 80) };
+    if (FAILED(r->Map(0, &rr, &p)) || !p) { g_jitStat[3]++; return; }
+    float* c = reinterpret_cast<float*>(static_cast<char*>(p) + s.cbv_off[2]);
+    float m[20]; memcpy(m, c, sizeof(m));          // read once (write-combined memory)
+    int k = -1;
+    if (looks_like_clip_matrix(m)) k = 0; else if (looks_like_clip_matrix(m + 4)) k = 4;
+    if (k >= 0) {
+        if (k == 0) {   // vote: the block shared by most draws is the view-projection (identity model matrix)
+            uint64_t hsh = 1469598103934665603ull; const uint32_t* u = reinterpret_cast<const uint32_t*>(m);
+            for (int i = 0; i < 16; ++i) { hsh ^= u[i]; hsh *= 1099511628211ull; }
+            vp_vote& v = g_vpVotes[hsh]; if (v.count++ == 0) memcpy(v.m, m, 64);
+        }
+        const uint32_t w = g_scaling ? g_renderW : g_internalW, h = g_scaling ? g_renderH : g_internalH;
+        const float ox = g_cfgJitterSignX * 2.0f * g_jitterX / float(w), oy = g_cfgJitterSignY * 2.0f * g_jitterY / float(h);
+        float row0[4], row1[4];
+        for (int i = 0; i < 4; ++i) { row0[i] = m[k + i] + ox * m[k + 12 + i]; row1[i] = m[k + 4 + i] + oy * m[k + 12 + i]; }
+        memcpy(c + k, row0, 16); memcpy(c + k + 4, row1, 16);
+        g_patchedDraws++; g_jitStat[4]++;
+        static bool once = false;
+        if (!once) { once = true; logmsg("first jittered matrix at c[%d]: row0 %.4f %.4f %.4f %.2f -> %.4f %.4f %.4f %.2f (jitter %.3f,%.3f px)", k / 4, m[k], m[k + 1], m[k + 2], m[k + 3], row0[0], row0[1], row0[2], row0[3], g_jitterX, g_jitterY); }
+    } else {
+        g_matrixMisses++; g_jitStat[5]++;
+        if (g_missLogBudget > 0) { g_missLogBudget--; logmsg("no clip matrix (pso=%p rt=%p): c0=(%.3f %.3f %.3f %.2f) c1=(%.3f %.3f %.3f %.2f) c2=(%.3f %.3f %.3f %.2f) c3=(%.3f %.3f %.3f %.2f) c4=(%.3f %.3f %.3f %.2f)", (void*)s.pso, (void*)s.rt.handle, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15], m[16], m[17], m[18], m[19]); }
+    }
+    D3D12_RANGE wr = { (SIZE_T)s.cbv_off[2], (SIZE_T)(s.cbv_off[2] + 80) }; r->Unmap(0, &wr);
+}
+
+static void select_frame_vp()
+{
+    g_haveFrameVP = false; uint32_t best = 0;
+    for (auto& kv : g_vpVotes) if (kv.second.count > best) { best = kv.second.count; memcpy(g_frameVP, kv.second.m, 64); g_haveFrameVP = true; }
+}
+
+// ---- Phase 1b: camera-only motion vectors (compute pass, see src/mv_cs.hlsl) ---------------------------------------
+static ID3D12RootSignature* g_mvRootSig = nullptr;
+static ID3D12PipelineState* g_mvPso = nullptr;
+static ID3D12DescriptorHeap* g_mvHeap = nullptr;    // shader visible: 4 slots x (SRV depth, UAV mv)
+static ID3D12Resource* g_mvCb = nullptr; static uint8_t* g_mvCbPtr = nullptr;   // 4 x 256 B upload ring
+static uint32_t g_mvSlot = 0;
+static bool g_mvReady = false, g_mvInitTried = false;
+static resource_usage g_mvState = resource_usage::shader_resource_non_pixel;
+static uint32_t g_mvDispatches = 0, g_mvResets = 0;
+static float g_camDeltaRot = 0, g_camDeltaPos = 0;
+struct MvCB { float invVP[16]; float prevVP[16]; float size[2]; float nearZ; float reset; };
+
+static bool invert4x4(const float* m, float* out)
+{
+    float inv[16];
+    inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+    inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+    inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+    inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+    inv[1] = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+    inv[5] = m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+    inv[9] = -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+    inv[13] = m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+    inv[2] = m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+    inv[6] = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+    inv[10] = m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+    inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+    inv[3] = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+    inv[7] = m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+    inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11] - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+    inv[15] = m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10] + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+    double det = (double)m[0]*inv[0] + (double)m[1]*inv[4] + (double)m[2]*inv[8] + (double)m[3]*inv[12];
+    if (fabs(det) < 1e-30) return false;
+    for (int i = 0; i < 16; ++i) out[i] = (float)(inv[i] / det);
+    return true;
+}
+
+static bool mv_init()
+{
+    if (g_mvInitTried) return g_mvReady;
+    g_mvInitTried = true;
+    D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_DESCRIPTOR_RANGE uavRange = { D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_ROOT_PARAMETER params[3] = {};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[1].DescriptorTable = { 1, &srvRange }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[2].DescriptorTable = { 1, &uavRange }; params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC rs = { 3, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+    ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
+    if (FAILED(hr)) { logmsg("MV: root signature serialize failed 0x%08lX %s", (unsigned long)hr, err ? (const char*)err->GetBufferPointer() : ""); return false; }
+    hr = g_d3d->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&g_mvRootSig)); blob->Release();
+    if (FAILED(hr)) { logmsg("MV: CreateRootSignature failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pso = {}; pso.pRootSignature = g_mvRootSig; pso.CS = { g_mv_cs, sizeof(g_mv_cs) };
+    hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_mvPso));
+    if (FAILED(hr)) { logmsg("MV: CreateComputePipelineState failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 8, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+    hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_mvHeap));
+    if (FAILED(hr)) { logmsg("MV: CreateDescriptorHeap failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
+    D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = 4 * 256; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    hr = g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_mvCb));
+    if (FAILED(hr)) { logmsg("MV: constant buffer creation failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_RANGE none = { 0, 0 }; g_mvCb->Map(0, &none, reinterpret_cast<void**>(&g_mvCbPtr));
+    g_mvReady = g_mvCbPtr != nullptr;
+    logmsg("MV: compute pass ready (%s)", g_mvReady ? "ok" : "map failed");
+    return g_mvReady;
+}
+
+// Writes camera-only motion vectors into g_mv (depth must be in a shader-readable state). Returns the reset flag used.
+static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t w, uint32_t h)
+{
+    if (!mv_init()) return 1;
+    int reset = 0;
+    if (!g_cfgMotionVectors || !g_haveFrameVP || !g_havePrevVP) reset = 1;
+    else {
+        // camera cut heuristic: view direction (w-row xyz) or its offset jumps
+        float dr = 0, dp = fabsf(g_frameVP[15] - g_prevVP[15]);
+        for (int i = 12; i < 15; ++i) dr += fabsf(g_frameVP[i] - g_prevVP[i]);
+        g_camDeltaRot = dr; g_camDeltaPos = dp;
+        if (dr > 0.25f || dp > 3000.0f) { reset = 1; g_mvResets++; }
+    }
+    MvCB cb = {};
+    if (!reset) {
+        if (!invert4x4(g_frameVP, cb.invVP)) reset = 1;
+        memcpy(cb.prevVP, g_prevVP, 64);
+    }
+    cb.size[0] = float(w); cb.size[1] = float(h); cb.nearZ = g_frameVP[11] != 0 ? g_frameVP[11] : 1.0f; cb.reset = reset ? 1.0f : 0.0f;
+    const uint32_t slot = g_mvSlot++ % 4;
+    memcpy(g_mvCbPtr + slot * 256, &cb, sizeof(cb));
+
+    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 2 * inc;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(slot) * 2 * inc;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+    srv.Format = (depthFmt == format::r32_typeless || depthFmt == format::d32_float || depthFmt == format::r32_float) ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(depth.handle), &srv, cpu);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R16G16_FLOAT; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuUav = cpu; cpuUav.ptr += inc;
+    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mv.handle), nullptr, &uav, cpuUav);
+
+    cmd->barrier(g_mv, g_mvState, resource_usage::unordered_access); g_mvState = resource_usage::unordered_access;
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_mvRootSig);
+    native->SetPipelineState(g_mvPso);
+    native->SetComputeRootConstantBufferView(0, g_mvCb->GetGPUVirtualAddress() + slot * 256);
+    native->SetComputeRootDescriptorTable(1, gpu);
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuUav = gpu; gpuUav.ptr += inc;
+    native->SetComputeRootDescriptorTable(2, gpuUav);
+    native->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
+    cmd->barrier(g_mv, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
+    g_mvDispatches++;
+    return reset;
+}
+
+// ---- draw-constant analysis (Phase 1b: find the view-projection matrix) --------------------------------------------
+static uint32_t g_dumpUntil = 0;           // frame index until which scene draw constants are analysed
+static uint32_t g_dumpDrawsLogged = 0;
+struct block_stat { uint32_t count = 0; float row0[4] = {}; };
+static std::unordered_map<uint64_t, block_stat> g_blockHist;   // (offset << 48) ^ hash(64 bytes) -> stats
+static bool dumping() { return g_frame < g_dumpUntil; }
+
+static bool read_cbv(const cl_state& s, int param, float* out, size_t nfloats)
+{
+    static int fails = 0;
+    if (!s.cbv_set[param] || !s.cbv_res[param].handle) { if (fails++ < 3) logmsg("read_cbv: root[%d] not a CBV / no buffer (set=%d res=%p)", param, (int)s.cbv_set[param], (void*)s.cbv_res[param].handle); return false; }
+    ID3D12Resource* r = reinterpret_cast<ID3D12Resource*>(s.cbv_res[param].handle);
+    const D3D12_RESOURCE_DESC d = r->GetDesc();
+    if (s.cbv_off[param] + nfloats * 4 > d.Width) { if (fails++ < 3) logmsg("read_cbv: offset %llu + %zu > buffer size %llu", (unsigned long long)s.cbv_off[param], nfloats * 4, (unsigned long long)d.Width); return false; }
+    D3D12_HEAP_PROPERTIES hp = {}; D3D12_HEAP_FLAGS hf = {};
+    HRESULT hr = r->GetHeapProperties(&hp, &hf);
+    if (FAILED(hr) || (hp.Type != D3D12_HEAP_TYPE_UPLOAD && !(hp.Type == D3D12_HEAP_TYPE_CUSTOM && hp.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE))) {
+        if (fails++ < 3) logmsg("read_cbv: buffer %p heap type %u (hr=0x%08lX) is not CPU-readable", (void*)r, (unsigned)hp.Type, (unsigned long)hr); return false;
+    }
+    void* p = nullptr; D3D12_RANGE rr = { (SIZE_T)s.cbv_off[param], (SIZE_T)(s.cbv_off[param] + nfloats * 4) };
+    hr = r->Map(0, &rr, &p);
+    if (FAILED(hr) || !p) { if (fails++ < 3) logmsg("read_cbv: Map failed 0x%08lX", (unsigned long)hr); return false; }
+    memcpy(out, static_cast<char*>(p) + s.cbv_off[param], nfloats * 4);
+    D3D12_RANGE wr = { 0, 0 }; r->Unmap(0, &wr);
+    return true;
+}
+static void analyse_scene_draw(const cl_state& s)
+{
+    float c[128];
+    if (!read_cbv(s, 2, c, 128)) return;
+    if (g_dumpDrawsLogged < 6) {
+        g_dumpDrawsLogged++;
+        logmsg("draw constants (root[2], pso=%p, rt=%p ds=%p):", (void*)s.pso, (void*)s.rt.handle, (void*)s.ds.handle);
+        for (int i = 0; i < 16; ++i) logmsg("   c[%2d] = %10.4f %10.4f %10.4f %10.4f", i, c[i * 4], c[i * 4 + 1], c[i * 4 + 2], c[i * 4 + 3]);
+    }
+    for (uint32_t off = 0; off + 16 <= 128; off += 4) {
+        const float* b = c + off;
+        bool zero = true, ident = true, finite = true;
+        for (int i = 0; i < 16; ++i) { if (b[i] != 0) zero = false; if (b[i] != ((i % 5 == 0) ? 1.0f : 0.0f)) ident = false; if (!(b[i] == b[i]) || fabsf(b[i]) > 1e6f) finite = false; }
+        if (zero || ident || !finite) continue;
+        uint64_t hsh = 1469598103934665603ull; const uint32_t* u = reinterpret_cast<const uint32_t*>(b);
+        for (int i = 0; i < 16; ++i) { hsh ^= u[i]; hsh *= 1099511628211ull; }
+        block_stat& st = g_blockHist[(uint64_t(off) << 48) ^ (hsh & 0xFFFFFFFFFFFFull)];
+        if (st.count++ == 0) memcpy(st.row0, b, 16);
+    }
+}
+static void report_blocks()
+{
+    std::vector<std::pair<uint64_t, block_stat>> v(g_blockHist.begin(), g_blockHist.end());
+    std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second.count > b.second.count; });
+    logmsg("f%u: most shared 4x4 blocks across scene draws (offset in float4s, draws sharing it, first row):", g_frame);
+    for (size_t i = 0; i < v.size() && i < 8; ++i)
+        logmsg("   c[%2llu] x%-5u  %10.4f %10.4f %10.4f %10.4f", (unsigned long long)(v[i].first >> 48), v[i].second.count, v[i].second.row0[0], v[i].second.row0[1], v[i].second.row0[2], v[i].second.row0[3]);
+    g_blockHist.clear();
+}
 
 static const char* ngx_str(NVSDK_NGX_Result r)
 {
@@ -254,7 +518,7 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     if (!g_dlss && g_mv.handle && g_out.handle && same) return create_feature(cmd, w, h, outW, outH, fmt);
     release_dlss_resources(dev);
 
-    if (!dev->create_resource(resource_desc(w, h, 1, 1, format::r16g16_float, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource),
+    if (!dev->create_resource(resource_desc(w, h, 1, 1, format::r16g16_float, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource | resource_usage::unordered_access),
                               nullptr, resource_usage::render_target, &g_mv)) { logmsg("create MV texture failed"); return false; }
     if (!dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::copy_source | resource_usage::shader_resource),
                               nullptr, resource_usage::unordered_access, &g_out)) { logmsg("create output texture failed"); return false; }
@@ -268,7 +532,7 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
         cmd->clear_render_target_view(rtv, zero);
         dev->destroy_resource_view(rtv);
     }
-    cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel);
+    cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
     g_dlssW = w; g_dlssH = h; g_dlssOutW = outW; g_dlssOutH = outH; g_dlssFmt = fmt;
     return create_feature(cmd, w, h, outW, outH, fmt);
 }
@@ -336,6 +600,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         const resource_usage to[3] = { resource_usage::shader_resource_non_pixel, resource_usage::shader_resource_non_pixel, resource_usage::unordered_access };
         cmd->barrier(3, res, from, to); g_outState = resource_usage::unordered_access;
     }
+    // Camera-only motion vectors from this frame's depth (VP = majority block of this frame's scene draws).
+    select_frame_vp();
+    const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, cd.texture.width, cd.texture.height);
+
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
     ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(color.handle);
@@ -343,20 +611,21 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     ep.Feature.InSharpness = g_cfgSharpness100 / 100.0f;
     ep.pInDepth = reinterpret_cast<ID3D12Resource*>(depth.handle);
     ep.pInMotionVectors = reinterpret_cast<ID3D12Resource*>(g_mv.handle);
-    ep.InJitterOffsetX = 0.0f; ep.InJitterOffsetY = 0.0f;
+    ep.InJitterOffsetX = g_cfgJitter ? g_jitterX : 0.0f; ep.InJitterOffsetY = g_cfgJitter ? g_jitterY : 0.0f;
     ep.InRenderSubrectDimensions = { g_dlssW, g_dlssH };
-    ep.InReset = (g_frame <= g_createdFrame + 1) ? 1 : 0;
+    ep.InReset = (g_frame <= g_createdFrame + 1 || (mvReset && g_cfgMotionVectors)) ? 1 : 0;
     ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f;
     ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
     NVSDK_NGX_Result r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
     if (NVSDK_NGX_FAILED(r)) { if (g_failCount++ < 5) logmsg("NGX EvaluateFeature -> %s", ngx_str(r)); }
     else { if (++g_evalCount == 1 || (g_cfgLogEveryN && g_evalCount % g_cfgLogEveryN == 0)) logmsg("NGX EvaluateFeature ok (#%u)", g_evalCount); }
 
-    if (!g_recreated && g_cfgRecreateAfter > 0 && g_evalCount >= (uint32_t)g_cfgRecreateAfter) {
-        g_recreated = true;
+    if ((!g_recreated && g_cfgRecreateAfter > 0 && g_evalCount >= (uint32_t)g_cfgRecreateAfter) || (g_recreateRequested && !g_oldFeature)) {
+        g_recreated = true; g_recreateRequested = false;
         g_oldFeature = g_dlss; g_oldFeatureFrame = g_frame; g_dlss = nullptr;
-        logmsg("re-creating DLSS feature so NGX-hooking add-ons capture CreateFeature (old feature released in a few frames)");
+        logmsg("re-creating DLSS feature (old feature released in a few frames)");
     }
+    { ULONGLONG t = GetTickCount64(); g_evalRateN++; if (t - g_evalRateT0 >= 1000) { g_evalRate = g_evalRateN * 1000.0f / float(t - g_evalRateT0); g_evalRateN = 0; g_evalRateT0 = t; } }
 
     if (upscale) {
         // Composite draw samples the full-size output instead of the shrunk texture: rewrite its SRV descriptor in place.
@@ -403,6 +672,10 @@ static bool on_create_resource(device* dev, resource_desc& desc, subresource_dat
 }
 static void on_init_resource(device* dev, const resource_desc& desc, const subresource_data*, resource_usage, resource res)
 {
+    if (desc.type == resource_type::texture_2d && g_frame > 200 && desc.texture.width >= 640 && desc.texture.height >= 360 &&
+        (desc.usage & (resource_usage::render_target | resource_usage::depth_stencil)) != 0) {
+        static int n = 0; if (n++ < 20) logmsg("f%u: game created a render target/depth texture at runtime: %ux%u fmt=%u", g_frame, desc.texture.width, desc.texture.height, (unsigned)desc.texture.format);
+    }
     if (!g_scaling || desc.type != resource_type::texture_2d) return;
     if (desc.texture.width == g_renderW && desc.texture.height == g_renderH) {
         std::lock_guard<std::mutex> lock(g_scaledMutex);
@@ -507,6 +780,7 @@ static void on_push_descriptors(command_list* cmd, shader_stage stages, pipeline
     cl_state& s = g_cl[cmd];
     s.root_sig = reinterpret_cast<ID3D12RootSignature*>(layout.handle);
     s.cbv[param] = buf->GetGPUVirtualAddress() + br->offset; s.cbv_set[param] = true; s.table_set[param] = false;
+    s.cbv_res[param] = br->buffer; s.cbv_off[param] = br->offset;
 }
 static void on_bind_pipeline(command_list* cmd, pipeline_stage stages, pipeline p)
 {
@@ -556,12 +830,19 @@ static void handle_draw(command_list* cmd)
         if (s.rt_w >= 640 && s.rt_h >= 360) {
             g_sceneDrawsThisFrame++;
             g_drawsPerRt[s.rt.handle]++;
-            if (s.ds.handle) { g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++; }
+            if (s.ds.handle) {
+                g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
+                if (dumping()) analyse_scene_draw(s);
+                if (g_cfgEnabled && g_cfgDebugMode != 2) jitter_scene_draw(s);
+            }
         }
         return;
     }
     if (g_sceneDrawsThisFrame < 20) return;
-    if (!g_traceArmed) { g_traceArmed = true; g_traceUntil = g_frame + 3; logmsg("tracing backbuffer draws/copies for frames %u..%u", g_frame, g_traceUntil - 1); }
+    if (!g_traceArmed) {
+        g_traceArmed = true; g_traceUntil = g_frame + 3; logmsg("tracing backbuffer draws/copies for frames %u..%u", g_frame, g_traceUntil - 1);
+        if (g_dumpPending) { g_dumpPending = false; g_dumpUntil = g_frame + 3; g_dumpDrawsLogged = 0; logmsg("analysing scene draw constants for frames %u..%u", g_frame + 1, g_dumpUntil - 1); }
+    }
 
     uint32_t drawIdx;
     { std::lock_guard<std::mutex> lock(g_clMutex); drawIdx = g_cl[cmd].bb_draws++; }
@@ -608,9 +889,14 @@ static void reload_config()
     g_cfgEnabled = GetPrivateProfileIntA("DLSS", "Enabled", 1, g_iniPath);
     g_cfgSharpness100 = GetPrivateProfileIntA("DLSS", "Sharpness", 0, g_iniPath);
     g_cfgDebugMode = GetPrivateProfileIntA("DLSS", "DebugMode", 0, g_iniPath);
+    g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
+    g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
+    g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
+    g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
         logmsg("DebugMode -> %d", g_cfgDebugMode); g_cfgLastDebugMode = g_cfgDebugMode;
         if (g_cfgDebugMode == 3) { g_traceUntil = g_frame + 3; logmsg("tracing backbuffer draws/copies for frames %u..%u", g_frame, g_traceUntil - 1); }
+        if (g_cfgDebugMode == 4) { if (g_traceArmed) { g_dumpUntil = g_frame + 2; g_dumpDrawsLogged = 0; logmsg("analysing scene draw constants for frames %u..%u", g_frame, g_dumpUntil - 1); } else g_dumpPending = true; }
     }
 }
 
@@ -622,10 +908,23 @@ static void on_present(command_queue*, swapchain*, const rect*, const rect*, uin
         logmsg("released previous DLSS feature -> %s", ngx_str(r));
     }
     if (tracing()) { logmsg("f%u: %u shader-view creations, %u descriptor copies this frame", g_frame - 1, g_viewEvents, g_copyEvents); g_viewSamples = 0; }
+    if (dumping() && !g_blockHist.empty()) report_blocks();
     g_viewEvents = 0; g_copyEvents = 0;
     g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsThisFrame = 0;
     g_drawsPerRt.clear(); g_drawsPerDs.clear();
+    // jitter bookkeeping for the next frame
+    static uint32_t lastLogged = 0;
+    if (g_frame > 1300 && (g_frame - lastLogged) >= 1200) {
+        lastLogged = g_frame; g_missLogBudget = 3;
+        logmsg("jitter (this frame): calls %u, no-cbv %u, dup-region %u, map-fail %u, patched %u, no-matrix %u; VP found=%d (votes %zu); MV dispatches %u, resets %u, cam delta rot %.3f pos %.1f",
+               g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos);
+    }
+    memset(g_jitStat, 0, sizeof(g_jitStat));
+    if (!g_haveFrameVP) select_frame_vp();
+    if (g_haveFrameVP) { memcpy(g_prevVP, g_frameVP, 64); g_havePrevVP = true; }
+    g_haveFrameVP = false; g_vpVotes.clear(); g_patchedRegions.clear(); g_patchedDraws = 0; g_matrixMisses = 0;
+    advance_jitter();
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }
     if (g_frame % 120 == 0) reload_config();
 }
@@ -652,6 +951,11 @@ static void on_init_device(device* dev)
 static void on_destroy_device(device* dev)
 {
     release_dlss_resources(dev);
+    if (g_mvCb) { g_mvCb->Unmap(0, nullptr); g_mvCb->Release(); g_mvCb = nullptr; g_mvCbPtr = nullptr; }
+    if (g_mvHeap) { g_mvHeap->Release(); g_mvHeap = nullptr; }
+    if (g_mvPso) { g_mvPso->Release(); g_mvPso = nullptr; }
+    if (g_mvRootSig) { g_mvRootSig->Release(); g_mvRootSig = nullptr; }
+    g_mvReady = false; g_mvInitTried = false;
     if (g_ngxParams) { NVSDK_NGX_D3D12_DestroyParameters(g_ngxParams); g_ngxParams = nullptr; }
     if (g_ngxReady) { NVSDK_NGX_D3D12_Shutdown1(g_d3d); g_ngxReady = false; }
 }
@@ -676,6 +980,44 @@ static void load_config()
     g_cfgLastDebugMode = -1;
     reload_config();
     logmsg("config: Enabled=%d Mode=%s InternalRes=%ux%u Preset=%d Sharpness=%d%% DebugMode=%d", g_cfgEnabled, g_cfgModeName, g_internalW, g_internalH, g_cfgPreset, g_cfgSharpness100, g_cfgDebugMode);
+}
+
+// ---- overlay (ReShade Add-ons tab) ---------------------------------------------------------------------------------
+static const char* kModeNames[5] = { "DLAA (native)", "Quality", "Balanced", "Performance", "Ultra Performance" };
+static const char* kModeIni[5] = { "DLAA", "Quality", "Balanced", "Performance", "UltraPerformance" };
+static const NVSDK_NGX_PerfQuality_Value kModeVals[5] = { NVSDK_NGX_PerfQuality_Value_DLAA, NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf, NVSDK_NGX_PerfQuality_Value_UltraPerformance };
+static int g_uiMode = -1;
+static int mode_index(NVSDK_NGX_PerfQuality_Value v) { for (int i = 0; i < 5; ++i) if (kModeVals[i] == v) return i; return 0; }
+static void write_ini(const char* key, const char* val) { WritePrivateProfileStringA("DLSS", key, val, g_iniPath); }
+static void write_ini_int(const char* key, int val) { char b[16]; snprintf(b, sizeof(b), "%d", val); write_ini(key, b); }
+
+static void draw_overlay(effect_runtime*)
+{
+    if (g_uiMode < 0) g_uiMode = mode_index(g_cfgMode);
+    bool en = g_cfgEnabled != 0;
+    if (ImGui::Checkbox("Enable DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
+    if (ImGui::Combo("DLSS mode", &g_uiMode, kModeNames, 5)) write_ini("Mode", kModeIni[g_uiMode]);
+    const int active = mode_index(g_cfgMode);
+    if (g_uiMode != active)
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Restart the game to switch to %s (active now: %s)", kModeNames[g_uiMode], kModeNames[active]);
+    int preset = g_cfgPreset == 10 ? 0 : 1; const char* presets[] = { "J", "K (transformer, default)" };
+    if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
+    if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
+    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants" };
+    int d = g_cfgDebugMode >= 0 && g_cfgDebugMode <= 4 ? g_cfgDebugMode : 0;
+    if (ImGui::Combo("Debug", &d, dbg, 5)) { write_ini_int("DebugMode", d); reload_config(); }
+    ImGui::Separator();
+    ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialised yet"));
+    if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
+    else ImGui::Text("Feature: none yet");
+    ImGui::Text("Evaluations: %u  (%.0f/s)", g_evalCount, g_evalRate);
+    ImGui::Text("Internal res %ux%u, render %ux%u%s", g_internalW, g_internalH, g_scaling ? g_renderW : g_internalW, g_scaling ? g_renderH : g_internalH, g_scaling ? " (textures shrunk)" : "");
+    bool jit = g_cfgJitter != 0;
+    if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
+    bool mvs = g_cfgMotionVectors != 0;
+    if (ImGui::Checkbox("Camera motion vectors (reprojected from depth)", &mvs)) { g_cfgMotionVectors = mvs ? 1 : 0; write_ini_int("MotionVectors", g_cfgMotionVectors); }
+    ImGui::Text("Jitter (%.3f, %.3f) px | VP: %s | MV pass: %s, %u resets | cam delta rot %.3f pos %.0f", g_jitterX, g_jitterY, g_havePrevVP ? "found" : "missing",
+                g_mvReady ? "ok" : (g_mvInitTried ? "FAILED" : "idle"), g_mvResets, g_camDeltaRot, g_camDeltaPos);
 }
 
 extern "C" __declspec(dllexport) const char* NAME = "MGS4 DLSS";
@@ -713,8 +1055,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         reshade::register_event<reshade::addon_event::copy_resource>(on_copy_resource);
         reshade::register_event<reshade::addon_event::copy_texture_region>(on_copy_texture_region);
         reshade::register_event<reshade::addon_event::present>(on_present);
+        reshade::register_overlay(nullptr, draw_overlay);
         break; }
     case DLL_PROCESS_DETACH:
+        reshade::unregister_overlay(nullptr, draw_overlay);
         reshade::unregister_addon(hModule);
         if (g_log) fclose(g_log);
         break;

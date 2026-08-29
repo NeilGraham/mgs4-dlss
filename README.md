@@ -9,7 +9,8 @@ Work toward real DLSS (DLAA first) in the PC port of *Metal Gear Solid 4* (Maste
 | Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — `d3d12-switch/` |
 | Phase 0 — map the frame (scene target, depth, composite draw) | **Done** — see docs |
 | Phase 1a — NGX DLSS (DLAA) created + evaluated every frame, NGX add-ons can hook it | **Done** — `dlss-addon/` (v1: zero jitter / zero motion vectors) |
-| Phase 1b — camera jitter + camera-only motion vectors | next |
+| Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
+| In-overlay controls (ReShade Add-ons tab) | **Done** |
 | Phase 2 — per-object motion vectors | planned |
 | Phase 3 — real upscaling (internal res < output res) | maybe |
 
@@ -49,7 +50,11 @@ Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=120
-DebugMode=0              ; live: 1 = paint the displayed texture magenta (path test), 2 = bypass DLSS (A/B), 3 = trace 3 frames
+DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants
+Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
+JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
+JitterSignY=-1
+MotionVectors=1          ; live: camera-only motion vectors from depth (compute pass)
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
@@ -72,10 +77,33 @@ Because the game's render-target size follows the in-game resolution, `InternalR
 - **DLSS Frame Generation / Multi-Frame Generation (2x/3x/4x)** is only exposed through NVIDIA Streamline (`sl.dlssg`), not through the plain NGX API this add-on uses. Doing it from an add-on means initialising Streamline in-process, letting it take over the DXGI swapchain (which ReShade also proxies), and feeding it **real motion vectors + depth + HUD-less color** every frame. With this game's zero motion vectors the generated frames would be wrong on any camera movement, so it makes no sense before Phase 1b (camera motion vectors) exists. It is a separate project on the order of the DLSS integration itself.
 - Alternative once motion vectors exist: OptiScaler (loaded as `winmm.dll`, which the game imports) can hook the NGX DLSS feature this add-on creates and provide FSR/XeSS frame generation.
 
+### Overlay controls
+
+The add-on has its own panel in ReShade's **Add-ons** tab (Home key): Enable, DLSS mode (applies on restart — the game creates its render targets once at startup; the panel says so when the selection differs from the active mode), DLSS preset (J/K, applied live by re-creating the feature), sharpness, camera jitter, camera motion vectors, debug modes, and live status (feature size, evaluations/s, jitter, VP detection, MV resets). Every control writes `mgs4_dlss.ini`.
+
+### Phase 1b: camera jitter and camera-only motion vectors
+
+Scene draws carry a row-major clip matrix (rows = clip x, y, z, w) in their vertex constants — `c[0..3]` for the main
+geometry shaders, `c[1..4]` for others. It is recognisable without knowing the shader: the w-row's xyz is a unit vector
+(view-space depth direction) and the z-row has no x/y (reversed-Z, `z_clip = near`). Per frame the add-on:
+
+1. Patches every scene draw's matrix in bgfx's upload heap once per constant region: `row_x += ox·row_w`,
+   `row_y += oy·row_w` with `ox = +2·jx/W`, `oy = −2·jy/H` (Halton 2,3; 8 phases at DLAA), and reports `(jx, jy)` to
+   DLSS. This is the same convention as Unreal's DLSS integration. `JitterSignX/Y` in the ini flip it if needed.
+2. Picks the frame's view-projection by majority vote over the `c[0]` blocks (identity-model geometry), keeps the
+   previous frame's, and runs a compute pass (`src/mv_cs.hlsl`) that reprojects each depth pixel through
+   `prevVP · inv(VP)` into camera-only motion vectors (pixels, pointing to the previous position).
+3. Detects camera cuts (view direction or offset jumps) and raises `InReset`.
+
+State of tuning: ~60–75% of scene draws expose a recognisable matrix; the rest (HUD/orthographic draws, one shader family
+with a different constant layout) render unjittered, so overlay elements can look slightly softer with jitter on.
+Character animation still has no motion vectors (Phase 2). Use the overlay toggles to compare.
+
 ### Known limitations
 
-- No sub-pixel jitter and zero motion vectors: DLSS behaves as a temporal filter with no sub-pixel information, so static shots converge cleanly but camera/object motion ghosts, and upscaling modes are soft. Phase 1b adds Halton jitter via the projection upload and camera-only motion vectors reconstructed from depth.
+- Per-object motion (characters) has no motion vectors yet; expect ghosting on fast character movement.
 - `Mode` changes need a restart (render targets are created at startup).
+- `steam_appid.txt` (2492670) is placed next to `mgs4.exe` so the exe can be launched directly for testing; harmless for Steam launches.
 
 ## d3d12-switch (`MGS4_D3D12.asi`)
 
