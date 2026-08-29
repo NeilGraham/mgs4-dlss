@@ -7,7 +7,7 @@
 #
 # Stage ids: see tools\stages.md. "_D<n>" entries are the cutscenes ("demos") of a stage, "_<n>" its gameplay sections.
 param(
-    [string]$Stages = "s00a00l,s02a50l_D1,s03a10l_1,s04a10l_D1",
+    [string]$Stages = "s00a00l,s02a50l_D1,s02a40l,s02a60l",
     [int]$HoldSeconds = 40,        # time in the stage after the first 3D frame before the screenshots
     [int]$Screens = 1,             # normal screenshots per stage (5 s apart)
     [switch]$MvVis,                # also capture the motion-vector visualiser (DebugMode 5)
@@ -44,17 +44,19 @@ foreach ($stage in $list) {
     & powershell -ExecutionPolicy Bypass -File (Join-Path $tools "launch_stage.ps1") -Stage $stage -PressFor 60 2>&1 | Select-Object -Last 1 | ForEach-Object { Log "  launcher: $_" }
     $p = Get-Process mgs4 -ErrorAction SilentlyContinue
     if (-not $p) { Log "  game did not start"; continue }
-    $sceneOk = (Get-Content $addonLog | Select-Object -Skip $logStart | Select-String -SimpleMatch "tracing backbuffer draws" | Measure-Object).Count -gt 0
-    Log ("  3D scene: " + $(if ($sceneOk) { "detected" } else { "NOT detected (still in menus / cutscene failed?)" }) + " after " + [int]((Get-Date) - $t0).TotalSeconds + " s")
     Start-Sleep $HoldSeconds
+    $sceneOk = (Get-Content $addonLog | Select-Object -Skip $logStart | Select-String -SimpleMatch "NGX EvaluateFeature ok" | Measure-Object).Count -gt 0
+    Log ("  3D scene: " + $(if ($sceneOk) { "rendering (DLSS evaluating)" } else { "NOT rendering after the hold (menu / black screen / stage id not bootable?)" }))
     if (-not (Get-Process mgs4 -ErrorAction SilentlyContinue)) { Log "  CRASHED during hold"; }
     else {
         $p = Get-Process mgs4
         for ($i = 1; $i -le $Screens; $i++) { if (Snapshot $p (Join-Path $out "${stage}_$i.png")) { Log "  screenshot $i" } else { Log "  screenshot $i failed" }; if ($i -lt $Screens) { Start-Sleep 5 } }
         if ($MvVis) { SetKey "DebugMode" 5; Start-Sleep 5; if (Snapshot $p (Join-Path $out "${stage}_mv.png")) { Log "  MV visualiser screenshot" }; SetKey "DebugMode" 0; Start-Sleep 2 }
     }
-    $lines = Get-Content $addonLog | Select-Object -Skip $logStart
-    $lines | Where-Object { $_ -match "DRS:|scene viewport|object motion|NGX CreateFeature DLSS \(|NGX EvaluateFeature ok|injecting|insertion:|FG: (options|UI layer)|crash|\[SL\].*error|failed" } | Set-Content (Join-Path $out "$stage.log")
+    $all = @(Get-Content $addonLog); if ($all.Count -lt $logStart) { $logStart = 0 }   # log was rotated
+    $lines = @($all | Select-Object -Skip $logStart)
+    $digest = @($lines | Where-Object { $_ -match "config: Enabled|DRS:|scene viewport|object motion|NGX CreateFeature DLSS \(|NGX EvaluateFeature ok|injecting|insertion:|FG: (options|UI layer)|crash|\[SL\].*error|failed" })
+    Set-Content (Join-Path $out "$stage.log") ($(if ($digest.Count) { $digest } else { @("(no add-on log lines for this stage - " + $lines.Count + " lines total in the slice)") }))
     $evals = @($lines | Select-String "NGX EvaluateFeature ok \(#(\d+)\)" | ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
     $drs = @($lines | Select-String -SimpleMatch "DRS: scene viewport").Count
     $vp = ($lines | Select-String "scene viewport \(last dynamic draw\):\s*\S*\s*\(([^)]*)\)" | Select-Object -Last 1)
