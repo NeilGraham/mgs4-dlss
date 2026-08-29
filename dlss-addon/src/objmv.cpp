@@ -35,10 +35,14 @@ struct PsoRec {
     D3D12_INDEX_BUFFER_STRIP_CUT_VALUE stripCut = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
     UINT nodeMask = 0;
     ID3D12RootSignature* rootSig = nullptr;
-    ID3D12PipelineState* soPso = nullptr;
+    ID3D12PipelineState* soPso = nullptr;   // not owned: shared entry in g_soShared
+    uint64_t shareKey = 0;
     bool failed = false, skinned = false;
 };
 static std::unordered_map<ID3D12PipelineState*, PsoRec> g_psos;
+struct SoShared { ID3D12PipelineState* pso = nullptr; bool failed = false; uint32_t users = 0; };
+static std::unordered_map<uint64_t, SoShared> g_soShared;   // bgfx re-creates pipeline objects continuously; the VS + layout repeat
+static uint64_t fnv(const void* data, size_t n, uint64_t h = 1469598103934665603ull) { const uint8_t* b = static_cast<const uint8_t*>(data); for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; } return h; }
 
 typedef HRESULT (STDMETHODCALLTYPE* PFN_CreateRootSignature)(ID3D12Device*, UINT, const void*, SIZE_T, REFIID, void**);
 typedef HRESULT (STDMETHODCALLTYPE* PFN_CreateGraphicsPipelineState)(ID3D12Device*, const D3D12_GRAPHICS_PIPELINE_STATE_DESC*, REFIID, void**);
@@ -63,6 +67,10 @@ static void remember_pso(ID3D12PipelineState* pso, const D3D12_SHADER_BYTECODE& 
     }
     for (UINT i = 0; i < il.NumElements; ++i) { D3D12_INPUT_ELEMENT_DESC e = il.pInputElementDescs[i]; e.SemanticName = p.names[i].c_str(); p.elems.push_back(e); }
     p.raster = raster; p.topo = topo; p.stripCut = stripCut; p.nodeMask = nodeMask; p.rootSig = rootSig;
+    uint64_t k = fnv(p.vs.data(), p.vs.size());
+    for (const D3D12_INPUT_ELEMENT_DESC& e : p.elems) { k = fnv(e.SemanticName, strlen(e.SemanticName), k); k = fnv(&e.SemanticIndex, sizeof(e.SemanticIndex), k); k = fnv(&e.Format, sizeof(e.Format), k); k = fnv(&e.InputSlot, sizeof(e.InputSlot), k); k = fnv(&e.AlignedByteOffset, sizeof(e.AlignedByteOffset), k); k = fnv(&e.InputSlotClass, sizeof(e.InputSlotClass), k); k = fnv(&e.InstanceDataStepRate, sizeof(e.InstanceDataStepRate), k); }
+    k = fnv(&rootSig, sizeof(rootSig), k); k = fnv(&topo, sizeof(topo), k); k = fnv(&stripCut, sizeof(stripCut), k);
+    p.shareKey = k;
     g_st.psosSeen++;
 }
 
@@ -167,8 +175,7 @@ void forget_pso(ID3D12PipelineState* pso)
     std::lock_guard<std::mutex> lock(g_mutex);
     auto it = g_psos.find(pso);
     if (it == g_psos.end()) return;
-    if (it->second.soPso) it->second.soPso->Release();
-    g_psos.erase(it);
+    g_psos.erase(it);   // shared stream-out variants stay cached (the same VS comes back with the next pipeline object)
 }
 
 // root signature clone with the stream-output flag
@@ -210,7 +217,10 @@ static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso)
     if (it == g_psos.end()) { g_st.skipped++; return nullptr; }
     PsoRec& p = it->second;
     if (p.soPso || p.failed) return p.soPso;
-    p.failed = true;
+    SoShared& sh = g_soShared[p.shareKey];
+    if (sh.pso) { p.soPso = sh.pso; sh.users++; return sh.pso; }
+    if (sh.failed) { p.failed = true; return nullptr; }
+    p.failed = true; sh.failed = true;
     ID3D12RootSignature* rs = so_root_signature(p.rootSig);
     if (!rs) { g_st.soPsoFailures++; return nullptr; }
     static const D3D12_SO_DECLARATION_ENTRY decl[1] = { { 0, "SV_Position", 0, 0, 4, 0 } };
@@ -241,8 +251,8 @@ static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso)
         snprintf(g_st.lastError, sizeof(g_st.lastError), "stream-out PSO creation failed 0x%08lX", (unsigned long)hr);
         return nullptr;
     }
-    p.soPso = out; p.failed = false; g_st.soPsos++;
-    if (g_st.soPsos <= 3) LOG("objmv: stream-out PSO #%u created for %p (%zu input elements%s)", g_st.soPsos, (void*)pso, p.elems.size(), p.skinned ? ", skinned" : "");
+    p.soPso = out; p.failed = false; sh.pso = out; sh.failed = false; sh.users = 1; g_st.soPsos++;
+    if (g_st.soPsos <= 3) LOG("objmv: stream-out PSO #%u created for %p (%zu input elements%s, shared by VS hash)", g_st.soPsos, (void*)pso, p.elems.size(), p.skinned ? ", skinned" : "");
     return out;
 }
 
@@ -373,8 +383,9 @@ void init(ID3D12Device* device, LogFn log)
 void shutdown()
 {
     g_st.ready = false;
-    for (auto& kv : g_psos) if (kv.second.soPso) kv.second.soPso->Release();
     g_psos.clear();
+    for (auto& kv : g_soShared) if (kv.second.pso) kv.second.pso->Release();
+    g_soShared.clear();
     for (auto& kv : g_rootSigs) if (kv.second.soVariant) kv.second.soVariant->Release();
     g_rootSigs.clear();
     ID3D12DeviceChild* objs[] = { g_cbUpload, g_soBuf[0], g_soBuf[1], g_counters, g_zero, g_args, g_velRs, g_velPso, g_argsRs, g_argsPso, g_cmdSig, g_heap, g_velCb };

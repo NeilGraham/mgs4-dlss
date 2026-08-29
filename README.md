@@ -12,7 +12,8 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 | Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
 | In-overlay controls (ReShade Add-ons tab) | **Done** |
 | Frame generation (Streamline DLSS-G: 2x/3x/4x, dynamic target fps, Reflex; live switching) | **Done** — `dlss-addon/src/fg.cpp` |
-| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Implemented, experimental** (`ObjectMV=1`; off by default until validated at a fixed render resolution) |
+| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Implemented, experimental** (`ObjectMV=1`; off by default: correct output, but currently halves the frame rate — needs the single-pass/ping-pong design) |
+| Dynamic resolution handling (DLSS on the scene sub-rect) | **Done** — `DRS=1` |
 | Phase 3 — real upscaling (internal res < output res) | maybe |
 
 See [docs/renderer-notes.md](docs/renderer-notes.md) for what we know about the port and the full plan.
@@ -119,9 +120,9 @@ Characters and props get real motion vectors without touching a single shader: f
 - The velocity pass uses the viewport the scene was rendered with (see dynamic resolution below).
 - Overlay: "Object motion: N draws recorded, N streamed out, N without history, ..."; the MV visualiser (Debug mode 5) shows object motion as colour differing from the camera field.
 
-### Dynamic resolution in the port
+### Dynamic resolution in the port (`DRS=1`)
 
-On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2208x1240, 1536x862, ... inside 3024x1701) — dynamic resolution scaling driven by GPU load, which DLSS/NR/FG add to. The add-on currently assumes the full target (the overlay warns when the scene viewport is smaller), so with DRS active DLAA runs on a partly-filled texture and the image gets soft. Set the game's resolution/dynamic-resolution option to a fixed native value if it offers one; proper DRS support (DLSS render sub-rect + the add-on's own composite) is the next step.
+On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2624x1474, 2208x1240, 1536x862 inside 3024x1701; the composite stretches it to the screen) — dynamic resolution scaling driven by GPU load (loading stretches, heavy cutscene shots, anything the add-on adds). Left alone this breaks any temporal technique: the picture zooms in texture space on every step. The add-on handles it: the scene viewport is detected per frame (the most common viewport among the scene's depth-tested draws — a few full-size depth-tested quads exist too), the DLSS feature is created in a scalable mode (DLAA becomes a Quality-mode feature: same model and preset, but NGX accepts render sub-rects down to ~50 %), each frame is evaluated on the sub-rect (`InRenderSubrectDimensions`), jitter/motion vectors/FG inputs use viewport units, and the full-size DLSS output is resampled (4-tap bilinear) back into the sub-rect so the game's composite and post chain stay untouched. The overlay shows the current viewport and whether the sub-rect path is active. Next quality step: sample the full-size output directly in the composite (true super-resolution from the sub-rect) — needs the composite's scale constant or a replacement blit.
 
 ### Known limitations
 
