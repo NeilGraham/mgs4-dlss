@@ -150,6 +150,8 @@ def record_one(cl, pad, index, stage, args):
     # guaranteed to contain the whole scene. The offset of the detected start is stored for a later trim.
     start_record(cl, log)
     t_rec = time.time()
+    info["started_at"] = time.strftime("%H:%M:%S", time.localtime(t_rec))   # OBS writes no creation time into the
+                                                                           # file, so the analysis needs this
     cut_at = None
     # phase 1: get into the cutscene (auto-save notice, "press any button", loading)
     while time.time() - t0 < args.start_timeout:

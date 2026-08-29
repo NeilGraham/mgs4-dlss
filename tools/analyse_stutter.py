@@ -14,7 +14,10 @@ import argparse, os, re, subprocess, sys, datetime, collections
 
 FRAME_RE = re.compile(r"pts_time:([\d.]+)")
 VAL_RE = re.compile(r"lavfi\.signalstats\.YAVG=([\d.]+)")
-DUP_LIMIT = 0.02        # mean absolute difference below this: the frame is a repeat of the previous one
+# A repeated frame is not bit-identical in the recording - AV1 re-encodes it - so it shows up as a very small but
+# non-zero difference. Measured distribution over a scene: minimum 0.0004, 5th percentile 0.019, median 1.47, so
+# anything under ~0.005 is a re-presented frame while genuinely near-static shots sit above it.
+DUP_LIMIT = 0.005
 
 
 def frame_diffs(path):
@@ -45,15 +48,26 @@ def per_second(diffs):
 
 
 def file_start_time(path):
-    """Wall-clock time the recording started, so add-on log lines can be matched to it."""
+    """Wall-clock time the recording started. OBS writes no creation time into the file, so the recorder stores it
+    in recordings.json; failing that, fall back to the file's end time minus its duration."""
+    import json
+    rec = os.path.join(os.path.dirname(path), "recordings.json")
+    if os.path.exists(rec):
+        try:
+            for r in json.load(open(rec)):
+                if r.get("file") == os.path.basename(path) and r.get("started_at"):
+                    h, m, s2 = (int(x) for x in r["started_at"].split(":"))
+                    d = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+                    return d.replace(hour=h, minute=m, second=s2, microsecond=0)
+        except Exception:
+            pass
+    dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                         capture_output=True, text=True).stdout.strip()
+    end = datetime.datetime.fromtimestamp(os.path.getmtime(path))
     try:
-        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags=creation_time",
-                              "-of", "default=nw=1:nk=1", path], capture_output=True, text=True).stdout.strip()
-        if out:
-            return datetime.datetime.fromisoformat(out.replace("Z", "+00:00")).astimezone()
+        return end - datetime.timedelta(seconds=float(dur))
     except Exception:
-        pass
-    return datetime.datetime.fromtimestamp(os.path.getmtime(path))
+        return end
 
 
 def addon_events(log_path, start, seconds):
