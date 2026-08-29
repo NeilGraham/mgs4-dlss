@@ -158,3 +158,14 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
   game frame rate. Reflex through `slReflexSetOptions`.
 - **Pixel-format note:** depth is tagged with its R24G8 typeless format; MVs are R16G16_FLOAT in pixels (top-left
   origin, `prev - cur`), which matches DLSS-G's expectation with `mvecScale = (1/w, 1/h)`.
+
+### What the testing showed (same night)
+- bgfx resizes with `ResizeBuffers1` right after creation; through Streamline that crashed inside the plugin /
+  ReShade / DXGI chain, so the proxy's `ResizeBuffers1` is turned into `ResizeBuffers`.
+- Streamline must get the **native** device: with ReShade's proxy device NGX (process-wide, initialised first by
+  sl.common) made the DLSS SR DLL crash in D3D12Core at `CreateFeature`.
+- DLSS-G creates its own high-priority present queue *inside its CreateSwapChain hook* and creates the real swapchain
+  on it. ReShade only wraps swapchains whose queue is one of its proxies, so the add-on hooks the native device's
+  `CreateCommandQueue`/`CreateCommandQueue1` and routes calls that do not come from ReShade's own module through
+  ReShade's device proxy (return-address check). Result: ReShade overlay/add-ons keep working under DLSS-G.
+- Streamline is loaded only when `FrameGen != 0` at startup; the default build is the pre-FG behaviour.
