@@ -165,10 +165,12 @@ the final image at full strength, at the cost of the vignette/HUD reprojection a
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
-`tools\launch_stage.ps1` automates a test setup: boots a stage, waits, and sends real key presses (SendInput, so the
-game ignores scan-code SendInput) with the window forced to the foreground. Explicit sequences also work, e.g.
-`powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 55 -Keys "E,3,E"`
-(`-NoRestart` sends the keys to the running game).
+`tools\launch_stage.ps1` automates a test setup: boots a stage, waits for the game window, then taps Enter every
+0.5 s until the add-on log reports the first 3D frame (auto-save notice and title are gone, the cutscene is running),
+for at most 60 s. Keys go through `keybd_event` with the window forced to the foreground - this port ignores
+scan-code `SendInput` events. Explicit sequences also work:
+`powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -Keys "5,ENTER,4,ENTER"`
+(`-NoRestart` sends the keys to the running game; log in `MGS4\logs\launch_stage.log`).
 
 ### Robustness
 
