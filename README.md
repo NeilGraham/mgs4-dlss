@@ -205,6 +205,10 @@ scan-code `SendInput` events. Explicit sequences also work:
 `powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -Keys "5,ENTER,4,ENTER"`
 (`-NoRestart` sends the keys to the running game; log in `MGS4\logs\launch_stage.log`).
 
+### Stage rotation for testing
+
+`tools	est_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `MGS4\stage_tests\<timestamp>\`.
+
 ### Robustness
 
 Level transitions destroy and recreate render targets; every cross-frame handle (busiest/geometry/final targets, last
