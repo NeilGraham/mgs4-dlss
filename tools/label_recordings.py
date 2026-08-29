@@ -3,8 +3,8 @@
   python label_recordings.py thumbs          - pull 3 frames out of every recording into D:\\mgs4-dlss5\\thumbs
                                                (contact sheets to look at, one per recording)
   python label_recordings.py apply           - rename the recordings using labels.json:
-                                               {"s02a50l_D1": "naomi-lab-rose-garden", ...}
-                                               -> 23_act2-south-america_naomi-lab-rose-garden_s02a50l_D1.mkv
+                                               {"s02a50l_D1": "act2-naomi-in-the-lab", ...}
+                                               -> 02_act2-naomi-in-the-lab_s02a50l_D1.mkv
   python label_recordings.py index           - write index.csv / index.md (order, act, stage, label, length, size)
 """
 import csv, json, os, re, subprocess, sys
@@ -58,7 +58,9 @@ def apply_labels():
         src = os.path.join(OUT_DIR, r["file"])
         if not os.path.exists(src):
             continue
-        name = f"{r['index']:02d}_{r['act']}_{label}_{r['stage']}.mkv"
+        # the label already carries the act ("act4-...", "epilogue-..."), and it is the reliable one: the stage
+        # number is not the act (s00a10l holds the epilogue, not the prologue)
+        name = f"{r['index']:02d}_{label}_{r['stage']}.mkv"
         dst = os.path.join(OUT_DIR, name)
         if os.path.abspath(src) != os.path.abspath(dst):
             os.replace(src, dst)

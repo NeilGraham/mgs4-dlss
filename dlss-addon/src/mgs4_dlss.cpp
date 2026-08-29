@@ -468,30 +468,55 @@ static bool mv_init()
 }
 
 // Writes camera-only motion vectors into g_mv (depth must be in a shader-readable state). Returns the reset flag used.
+static float g_lastGoodVP[16] = {}; static bool g_haveLastGoodVP = false;   // most recent frame whose camera matrix was found
+static uint32_t g_vpMissStreak = 0, g_vpMissesCovered = 0;
+
 static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t w, uint32_t h)
 {
     if (!mv_init()) return 1;
     int reset = 0;
-    if (!g_cfgMotionVectors || !g_haveFrameVP || !g_havePrevVP) reset = 1;
-    else {
+    // The camera matrix is recovered from the draw constants and is occasionally missed for a frame. Clearing the
+    // DLSS history on such a frame is far worse than a frame of stale motion: it throws away the accumulated detail
+    // (and the history of anything layered on it, such as DLSS 5 NR), which shows up as a periodic flicker. So a
+    // short run of misses reuses the last known camera - the camera is simply treated as still for that frame.
+    const float* curVP = g_frameVP;
+    const float* prevVP = g_prevVP;
+    bool haveCam = g_haveFrameVP && g_havePrevVP;
+    if (!g_cfgMotionVectors) {
+        reset = 1;
+        if (g_mvResets++ <= 200) logmsg("RESET f%u: motion vectors disabled", g_frame);
+    } else if (!haveCam) {
+        if (g_haveLastGoodVP && ++g_vpMissStreak <= 30) {
+            curVP = prevVP = g_lastGoodVP;   // no camera motion this frame, history kept
+            haveCam = true; g_vpMissesCovered++;
+        } else {
+            reset = 1;
+            if (g_mvResets++ <= 200) logmsg("RESET f%u: no camera matrix for %u frames (thisVP %d, prevVP %d)", g_frame, g_vpMissStreak, (int)g_haveFrameVP, (int)g_havePrevVP);
+        }
+    }
+    if (haveCam && !reset) {
+        g_vpMissStreak = g_haveFrameVP && g_havePrevVP ? 0 : g_vpMissStreak;
         // Camera cut heuristic on the real camera: position (the point where clip x, y and w are all zero) and the
         // viewing direction (w-row xyz). Pure rotation keeps the position still; walking moves it a few units per frame.
         float cur[3], prev[3];
-        const bool okC = camera_position(g_frameVP, cur), okP = camera_position(g_prevVP, prev);
+        const bool okC = camera_position(curVP, cur), okP = camera_position(prevVP, prev);
         float dp = okC && okP ? sqrtf((cur[0] - prev[0]) * (cur[0] - prev[0]) + (cur[1] - prev[1]) * (cur[1] - prev[1]) + (cur[2] - prev[2]) * (cur[2] - prev[2])) : 0.0f;
-        float dot = g_frameVP[12] * g_prevVP[12] + g_frameVP[13] * g_prevVP[13] + g_frameVP[14] * g_prevVP[14];
+        float dot = curVP[12] * prevVP[12] + curVP[13] * prevVP[13] + curVP[14] * prevVP[14];
         float dr = 1.0f - dot;   // 0 = same direction; 0.06 ~ 20 degrees
         g_camDeltaRot = dr; g_camDeltaPos = dp;
         if (dr > g_camDeltaRotMax) g_camDeltaRotMax = dr; if (dp > g_camDeltaPosMax) g_camDeltaPosMax = dp;
-        if (memcmp(g_frameVP, g_prevVP, 64) != 0) g_vpChanges++;
-        if (dr > 0.06f || dp > 1500.0f) { reset = 1; g_mvResets++; }
+        if (memcmp(curVP, prevVP, 64) != 0) g_vpChanges++;
+        if (dr > 0.06f || dp > 1500.0f) {
+            reset = 1; g_mvResets++;
+            if (g_mvResets <= 200) logmsg("RESET f%u: camera delta rot %.4f (limit 0.06) pos %.1f (limit 1500) -> DLSS history cleared", g_frame, dr, dp);
+        }
     }
     MvCB cb = {};
     if (!reset) {
-        if (!invert4x4(g_frameVP, cb.invVP)) reset = 1;
-        memcpy(cb.prevVP, g_prevVP, 64);
+        if (!invert4x4(curVP, cb.invVP)) { reset = 1; if (g_mvResets++ <= 200) logmsg("RESET f%u: view-projection not invertible", g_frame); }
+        memcpy(cb.prevVP, prevVP, 64);
     }
-    cb.size[0] = float(w); cb.size[1] = float(h); cb.nearZ = g_frameVP[11] != 0 ? g_frameVP[11] : 1.0f; cb.reset = reset ? 1.0f : 0.0f;
+    cb.size[0] = float(w); cb.size[1] = float(h); cb.nearZ = curVP[11] != 0 ? curVP[11] : 1.0f; cb.reset = reset ? 1.0f : 0.0f;
     cb.dynZeroMV = (g_cfgDynMask && g_cfgDynZeroMV) ? 1.0f : 0.0f;
     const uint32_t slot = g_mvSlot++ % 4;
     memcpy(g_mvCbPtr + slot * 256, &cb, sizeof(cb));
@@ -782,7 +807,7 @@ static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t o
     NVSDK_NGX_Handle* handle = nullptr;
     logmsg("NGX CreateFeature DLSS: cmd %p (%s), nvngx_dlss.dll %s, _nvngx %p, DLSS5 add-on %s", (void*)native, fg::inside_streamline() ? "inside SL?" : "game", GetModuleHandleA("nvngx_dlss.dll") ? "loaded" : "not loaded", (void*)GetModuleHandleA("_nvngx.dll"), GetModuleHandleA("renodx-dlss5.addon64") ? "loaded" : "absent");
     NVSDK_NGX_Result r = NGX_D3D12_CREATE_DLSS_EXT(native, 1, 1, &handle, g_ngxParams, &cp);
-    logmsg("NGX CreateFeature DLSS (%s %ux%u -> %ux%u, fmt=%u, preset=%d) -> %s", g_cfgModeName, w, h, outW, outH, (unsigned)fmt, g_cfgPreset, ngx_str(r));
+    logmsg("NGX CreateFeature DLSS (%s %ux%u -> %ux%u, fmt=%u, preset=%d) at frame %u -> %s", g_cfgModeName, w, h, outW, outH, (unsigned)fmt, g_cfgPreset, g_frame, ngx_str(r));
     if (NVSDK_NGX_FAILED(r)) return false;
     g_dlss = handle;
     g_dlssW = w; g_dlssH = h; g_dlssOutW = outW; g_dlssOutH = outH; g_dlssFmt = fmt;
@@ -1667,7 +1692,7 @@ static void frame_rollover()
     }
     memset(g_jitStat, 0, sizeof(g_jitStat));
     if (!g_haveFrameVP) select_frame_vp();
-    if (g_haveFrameVP) { memcpy(g_prevVP, g_frameVP, 64); g_havePrevVP = true; }
+    if (g_haveFrameVP) { memcpy(g_prevVP, g_frameVP, 64); g_havePrevVP = true; memcpy(g_lastGoodVP, g_frameVP, 64); g_haveLastGoodVP = true; }
     g_haveFrameVP = false; g_vpVotes.clear(); g_patchedRegions.clear(); g_patchedDraws = 0; g_matrixMisses = 0;
     advance_jitter();
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }

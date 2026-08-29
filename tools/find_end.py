@@ -1,72 +1,57 @@
 """Finds where a recorded MGS4 cutscene actually ends, from the video itself.
 
-Two signals, sampled once a second:
-  * HUD chroma - MGS4's HUD is orange, so the mean V (red-difference) of the bottom strip, where the ration and
-    weapon boxes sit, jumps from ~128 (neutral: a cutscene) to ~137+ (gameplay).
-  * frozen picture - a "PRESS ANY BUTTON" / results screen barely changes, so consecutive frames are near-identical.
+The decision comes from the picture (see screen_signals.py): the solid orange "OLD SNAKE" bar means gameplay has
+started, and a black frame carrying the red MGS4 emblem in the bottom-left means the loading / continue screen. Both
+were calibrated against frames whose timing was checked by hand.
 
   python find_end.py <file> [...]        - report the end point of each file
-  python find_end.py --all               - report for every recording in D:\\mgs4-dlss5
+  python find_end.py --all               - report for every recording in the output folder
   python find_end.py --trim <file> [...] - cut the file at the detected end (stream copy, keeps the original as .orig)
 """
-import json, os, re, subprocess, sys
+import json, os, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from screen_signals import classify        # noqa: E402
 
 OUT_DIR = r"D:\mgs4-dlss5"
-# The HUD is orange, so the mean V (red-difference) of the two bottom corners - where the ration box and the weapon
-# box sit - rises well above neutral (128) in gameplay. Scene content can tint one corner for a moment, so both
-# corners have to be lit at once, and stay lit.
-LEFT_CROP = "iw*0.22:ih*0.09:iw*0.03:ih*0.88"
-RIGHT_CROP = "iw*0.26:ih*0.09:iw*0.70:ih*0.88"
-LEFT_MIN, RIGHT_MIN = 133.0, 136.0
-HUD_HOLD = 4           # seconds both corners must stay lit
-STILL_DIFF = 1.2       # mean absolute difference between consecutive samples: below this the picture is still
-STILL_MIN = 3          # seconds of stillness before it counts as a prompt/results screen
-STILL_MAX = 25         # if the file just ends inside a still stretch, cut this far into it
+PROBE_W, PROBE_H = 320, 180
+HOLD = 3               # seconds the same verdict must hold
 HEAD_SKIP = 15         # the recording starts at the boot prompts; ignore those
 
 
-def _series(path, vf, key):
-    cmd = ["ffmpeg", "-v", "error", "-i", path, "-vf", vf + f",metadata=print:key={key}:file=-", "-f", "null", "-"]
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
-    vals, t = [], None
-    for line in out.splitlines():
-        m = re.search(r"pts_time:([\d.]+)", line)
-        if m:
-            t = float(m.group(1))
-        m = re.search(re.escape(key) + r"=([\d.]+)", line)
-        if m and t is not None:
-            vals.append((t, float(m.group(1))))
-    return vals
-
-
-def sample(path):
-    left = _series(path, f"fps=1,crop={LEFT_CROP},signalstats", "lavfi.signalstats.VAVG")
-    right = dict(_series(path, f"fps=1,crop={RIGHT_CROP},signalstats", "lavfi.signalstats.VAVG"))
-    diff = dict(_series(path, "fps=1,scale=320:180,tblend=all_mode=difference,signalstats", "lavfi.signalstats.YAVG"))
-    return [(t, v, right.get(t, 0.0), diff.get(t, 99.0)) for t, v in left]
+def sample(path, fps=1):
+    """Classify one frame a second; returns [(t, verdict)]."""
+    cmd = ["ffmpeg", "-v", "error", "-i", path, "-vf", f"fps={fps},scale={PROBE_W}:{PROBE_H}",
+           "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
+    frame_bytes = PROBE_W * PROBE_H * 3
+    out = []
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+        idx = 0
+        while True:
+            buf = proc.stdout.read(frame_bytes)
+            if len(buf) < frame_bytes:
+                break
+            verdict, _ = classify(buf, PROBE_W, PROBE_H)
+            out.append((idx / fps, verdict))
+            idx += 1
+    return out
 
 
 def find_end(path, verbose=False):
     s = sample(path)
     if not s:
         return None, "no samples", []
-    hud, still_from = 0, None
-    for t, lv, rv, d in s:
+    run, kind = 0, None
+    for t, verdict in s:
         if t < HEAD_SKIP:
             continue
-        hud = hud + 1 if (lv > LEFT_MIN and rv > RIGHT_MIN) else 0
-        if hud >= HUD_HOLD:                       # the gameplay HUD is up: the scene ended when it appeared
-            return t - HUD_HOLD + 1, "hud", s
-        if d < STILL_DIFF:
-            still_from = t if still_from is None else still_from
+        if verdict in ("gameplay", "end-screen"):
+            run = run + 1 if verdict == kind else 1
+            kind = verdict
+            if run >= HOLD:
+                return t - HOLD + 1, kind, s
         else:
-            # a prompt ("PRESS ANY BUTTON") or results screen holds still and then the game moves on: the scene is
-            # over when the picture starts moving again, which is also where the game itself left the cutscene
-            if still_from is not None and t - still_from >= STILL_MIN:
-                return t, "still-screen", s
-            still_from = None
-    if still_from is not None and s[-1][0] - still_from >= STILL_MIN:
-        return min(still_from + STILL_MAX, s[-1][0]), "still-to-end", s
+            run, kind = 0, None
     return None, "none", s
 
 

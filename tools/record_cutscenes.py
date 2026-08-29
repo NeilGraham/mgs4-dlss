@@ -16,10 +16,11 @@ import argparse, csv, json, os, re, subprocess, sys, time, shutil, ctypes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from winfocus import find_window, focus, is_foreground          # noqa: E402
+from winfocus import find_window, focus, is_foreground, abort_requested   # noqa: E402
 from ds4 import DS4, CROSS                                       # noqa: E402
 import obs_control as obsc                                       # noqa: E402
 from letterbox import read_ppm                                   # noqa: E402
+from screen_signals import classify                              # noqa: E402
 
 GAME_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4"
 GAME_EXE = os.path.join(GAME_DIR, "mgs4.exe")
@@ -96,15 +97,11 @@ def start_game(stage, width=3840, height=2160):
     return hwnd
 
 
-# MGS4's HUD is orange, so the two bottom corners of the frame - the ration box and the weapon box - turn much
-# redder than neutral in gameplay while a cutscene leaves them near-neutral. Measured on the recordings:
-# cutscene R-B = +14 / +20, gameplay = +39 / +85. This is the most reliable end-of-cutscene signal available.
-HUD_LEFT_MIN, HUD_RIGHT_MIN = 30.0, 45.0
-PROBE_PATH = os.path.join(os.environ.get("TEMP", "."), "mgs4_hud_probe.ppm")
+PROBE_PATH = os.path.join(os.environ.get("TEMP", "."), "mgs4_probe.ppm")
 
 
-def hud_probe(cl):
-    """(left, right) mean R-B of the bottom corners, or None when no frame is available."""
+def screen_state(cl):
+    """What the capture currently shows: "gameplay", "end-screen" or "scene" (see screen_signals.py)."""
     try:
         cl.save_source_screenshot(obsc.CAPTURE, "ppm", PROBE_PATH, 320, 180, -1)
         img = read_ppm(PROBE_PATH)
@@ -113,14 +110,8 @@ def hud_probe(cl):
     if not img:
         return None
     w, h, px = img
-    def region(x0, x1, y0, y1):
-        tot, n = 0, 0
-        for y in range(int(h * y0), int(h * y1)):
-            base = y * w * 3
-            for x in range(int(w * x0), int(w * x1)):
-                tot += px[base + x * 3] - px[base + x * 3 + 2]; n += 1
-        return tot / max(1, n)
-    return region(0.03, 0.25, 0.88, 0.97), region(0.70, 0.96, 0.88, 0.97)
+    verdict, _ = classify(px, w, h)
+    return verdict
 
 
 def start_record(cl, log):
@@ -162,6 +153,17 @@ def record_one(cl, pad, index, stage, args):
     cut_at = None
     # phase 1: get into the cutscene (auto-save notice, "press any button", loading)
     while time.time() - t0 < args.start_timeout:
+        if abort_requested():
+            log("    Escape pressed - stopping")
+            info["status"] = "aborted"
+            try:
+                r = cl.stop_record(); time.sleep(1)
+                src = getattr(r, "output_path", None)
+                if src and os.path.exists(src):
+                    os.remove(src)
+            except Exception:
+                pass
+            kill_game(); return info
         if not is_foreground(hwnd):
             focus(hwnd)
         pad.tap(hold=args.press_hold)
@@ -192,9 +194,12 @@ def record_one(cl, pad, index, stage, args):
     t_cut = time.time()
     last_bytes, last_check, static_since, gameplay_since, frozen_since = 0, time.time(), None, None, None
     baseline_draws, busy_ticks = None, 0     # gameplay draws far more than a cutscene: a second, independent signal
-    hud_ticks, last_probe = 0, time.time()
+    hud_ticks, last_probe, last_verdict = 0, time.time(), None
     end_reason = "max-duration"
     while time.time() - t_cut < args.max_minutes * 60:
+        if abort_requested():
+            log("    Escape pressed - ending this recording")
+            end_reason = "aborted"; break
         if not is_foreground(hwnd):
             focus(hwnd)
         pad.tap(hold=args.press_hold)           # flashback prompts: MGS4 wants the button mashed
@@ -229,13 +234,15 @@ def record_one(cl, pad, index, stage, args):
         now = time.time()
         if now - last_probe >= 2 and now - t_cut > args.min_seconds:
             last_probe = now
-            pr = hud_probe(cl)
-            if pr:
-                lv, rv = pr
-                hud_ticks = hud_ticks + 1 if (lv > HUD_LEFT_MIN and rv > HUD_RIGHT_MIN) else 0
-                if hud_ticks >= 4:                 # both corners lit for ~8 s
-                    log(f"    HUD on screen (corners {lv:.0f}/{rv:.0f}) -> gameplay")
-                    end_reason = "gameplay-hud-pixels"; break
+            verdict = screen_state(cl)
+            if verdict in ("gameplay", "end-screen"):
+                hud_ticks = hud_ticks + 1 if verdict == last_verdict else 1
+                last_verdict = verdict
+                if hud_ticks >= 3:                 # ~6 s of the same picture verdict
+                    log(f"    screen shows {verdict} -> scene over")
+                    end_reason = verdict; break
+            else:
+                hud_ticks, last_verdict = 0, None
         if now - last_check >= 5:
             st = cl.get_record_status()
             rate = (st.output_bytes - last_bytes) / (now - last_check)
@@ -275,6 +282,11 @@ def record_one(cl, pad, index, stage, args):
             log(f"    rename failed ({e}); keeping {src}")
             dst = src
         info["file"] = os.path.basename(dst)
+        try:    # keep the add-on's log next to the clip: it is overwritten at every launch, and the stutter
+                # analysis needs the events that happened while this clip was being recorded
+            shutil.copyfile(ADDON_LOG, os.path.splitext(dst)[0] + ".log")
+        except Exception:
+            pass
         info["mb"] = round(os.path.getsize(dst) / 1048576, 1)
         info["status"] = "ok"
         log(f"    recorded {secs:.0f}s -> {info['file']} ({info['mb']} MB, end: {end_reason})")
@@ -334,6 +346,9 @@ def main():
                 log(f"STOPPING: only {gb:.1f} GB free on D: (floor {args.min_free_gb} GB)")
                 break
             info = record_one(cl, pad, i, stage, args)
+            if info.get("status") == "aborted" or info.get("end_reason") == "aborted":
+                results.append(info); json.dump(results, open(results_path, "w"), indent=1)
+                log("run stopped by Escape"); break
             info["free_gb_after"] = round(free_gb(), 1)
             results.append(info)
             json.dump(results, open(results_path, "w"), indent=1)

@@ -50,3 +50,11 @@ if __name__ == "__main__":
     print("hwnd:", h, "foreground:", is_foreground(h))
     if h:
         print("focus ->", focus(h))
+
+
+VK_ESCAPE = 0x1B
+
+
+def abort_requested():
+    """True while Escape is down anywhere on the machine - the manual stop for unattended runs."""
+    return bool(u.GetAsyncKeyState(VK_ESCAPE) & 0x8000)
