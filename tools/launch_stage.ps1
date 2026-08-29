@@ -1,11 +1,11 @@
-# Boots MGS4 straight into a stage and optionally presses keys to set the scene up (e.g. skip the intro).
-#   powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 55 -Keys "E,3,E"
+﻿# Boots MGS4 straight into a stage and optionally presses keys to set the scene up (e.g. skip the intro).
+#   powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 55 -Keys "5,ENTER,4,ENTER"
 # Keys: comma-separated list of key names (E, SPACE, ENTER, ESC, F1..) and numbers (seconds to wait).
 # Keys are sent with SendInput while the game window is in the foreground, so the game's raw-input path sees them.
 param(
     [string]$Stage = "s00a00l",
     [int]$WaitSeconds = 55,
-    [string]$Keys = "E,3,E",
+    [string]$Keys = "5,ENTER,4,ENTER",
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4",
     [switch]$NoRestart
 )
