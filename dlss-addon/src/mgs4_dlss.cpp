@@ -218,6 +218,7 @@ static uint32_t g_uiDrawsThisFrame = 0, g_uiDrawsLast = 0, g_uiPostSkippedThisFr
 // HUD + a 3D scene = gameplay; no 3D scene at all = menu, loading screen or a prerecorded video playing.
 static uint32_t g_hudDrawsThisFrame = 0, g_hudDrawsLast = 0;
 static int g_sceneState = -1, g_sceneStateRaw = -1; static uint32_t g_sceneStateFrames = 0;
+static uint32_t g_sceneDrawsLast = 0;   // scene draws of the frame just finished (the counter itself is reset each frame)
 static int g_cfgSceneLog = 1;
 static bool g_uiClearedThisFrame = false;
 // pre-HUD capture of the final texture (taken right before the first HUD draw) and the HUD-less image built from the
@@ -1607,16 +1608,16 @@ static void frame_rollover()
     g_viewEvents = 0; g_copyEvents = 0;
     if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
     g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
-    g_sceneDrawsThisFrame = 0;
+    g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
-        const int raw = (g_sceneDrawsThisFrame < 20) ? 2 : (g_hudDrawsLast > 0 ? 1 : 0);
+        const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast > 0 ? 1 : 0);
         if (raw != g_sceneStateRaw) { g_sceneStateRaw = raw; g_sceneStateFrames = 0; }
         else if (++g_sceneStateFrames == 30 && raw != g_sceneState) {   // ~0.5 s of the same reading
             static const char* names[3] = { "cutscene", "gameplay", "no-3d" };
-            logmsg("SCENE-STATE %s (frame %u, scene draws %u, HUD draws %u, viewport %.0fx%.0f)", names[raw], g_frame, g_sceneDrawsThisFrame, g_hudDrawsLast, g_sceneVp.width, g_sceneVp.height);
+            logmsg("SCENE-STATE %s (frame %u, scene draws %u, HUD draws %u, viewport %.0fx%.0f)", names[raw], g_frame, g_sceneDrawsLast, g_hudDrawsLast, g_sceneVp.width, g_sceneVp.height);
             g_sceneState = raw;
         }
     }
@@ -1780,7 +1781,7 @@ static void draw_overlay(effect_runtime*)
     }
     ImGui::Text("Dynamic draws replayed last frame: %u (skinned %u)", g_dynDrawsLastFrame, g_skinnedDrawsLast);
     { static const char* names[3] = { "in-game cutscene", "gameplay (HUD visible)", "no 3D scene (menu / loading / video)" };
-      ImGui::Text("Scene state: %s | HUD draws %u, scene draws %u", g_sceneState >= 0 && g_sceneState < 3 ? names[g_sceneState] : "?", g_hudDrawsLast, g_sceneDrawsThisFrame); }
+      ImGui::Text("Scene state: %s | HUD draws %u, scene draws %u", g_sceneState >= 0 && g_sceneState < 3 ? names[g_sceneState] : "?", g_hudDrawsLast, g_sceneDrawsLast); }
     ImGui::Separator();
     {
         const fg::Status& st = fg::status();

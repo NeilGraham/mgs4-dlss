@@ -205,6 +205,24 @@ scan-code `SendInput` events. Explicit sequences also work:
 `powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -Keys "5,ENTER,4,ENTER"`
 (`-NoRestart` sends the keys to the running game; log in `MGS4\logs\launch_stage.log`).
 
+### Recording the in-game cutscenes (4K60 AV1)
+
+`toolsecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
+
+- boots each `<stage>_D<n>` entry in chronological order (`tools/scenes.csv`),
+- drives OBS over obs-websocket (`tools/obs_control.py`): a dedicated scene with a Game Capture source cropped to the
+  game's 16:9 image and fitted to a 3840x2160 / 60 fps canvas, NVENC **AV1** at CQP 22 into `D:\mgs4-dlss5`,
+- taps **Cross** on a virtual DualShock 4 (`tools/ds4.py`, ViGEmBus through ctypes - no installer) about once a second:
+  it gets past the auto-save notice and "press any button" screens and triggers MGS4's in-cutscene **flashback**
+  prompts. The game only accepts input while it is the foreground window, so `tools/winfocus.py` re-focuses it,
+- decides that a cutscene is over from the add-on's `SCENE-STATE` log (HUD appearing = gameplay) or from a static
+  screen - the recording's byte rate separates a static continue/act-end screen from a prerecorded video playing
+  inside the cutscene, so long Bink segments are not cut off,
+- checks the free space on `D:` after every recording and stops below the configured floor (default 100 GB).
+
+`tools/label_recordings.py` then pulls thumbnails out of the recordings, applies semantic names from `labels.json`
+(`23_act2-south-america_naomi-lab-rose-garden_s02a50l_D1.mkv`) and writes `index.csv` / `index.md`.
+
 ### Stage rotation for testing
 
 `tools	est_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `MGS4\stage_tests\<timestamp>\`.

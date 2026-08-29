@@ -81,8 +81,9 @@ def kill_game():
     time.sleep(3)
 
 
-def start_game(stage):
-    subprocess.Popen([GAME_EXE, "--stage", stage], cwd=GAME_DIR)
+def start_game(stage, width=3840, height=2160):
+    # the port takes the render resolution on the command line, so every recording is a real 4K one
+    subprocess.Popen([GAME_EXE, "--stage", stage, "--res_width", str(width), "--res_height", str(height)], cwd=GAME_DIR)
     hwnd = None
     for _ in range(90):
         hwnd = find_window()
@@ -99,7 +100,7 @@ def record_one(cl, pad, index, stage, args):
     tail = Tail(ADDON_LOG)
     log(f"--- [{index:02d}] {stage} ({act})")
     kill_game()
-    hwnd = start_game(stage)
+    hwnd = start_game(stage, args.width, args.height)
     if not hwnd:
         info["status"] = "no-window"; return info
     state, t0 = "unknown", time.time()
@@ -186,11 +187,13 @@ def main():
     ap.add_argument("--skip", type=int, default=0)
     ap.add_argument("--max-minutes", type=float, default=30)
     ap.add_argument("--min-free-gb", type=float, default=100)
-    ap.add_argument("--start-timeout", type=float, default=150)
+    ap.add_argument("--start-timeout", type=float, default=100)
     ap.add_argument("--press-period", type=float, default=1.0)
     ap.add_argument("--gameplay-grace", type=float, default=4)
     ap.add_argument("--static-grace", type=float, default=25)
     ap.add_argument("--moving-bytes-per-s", type=float, default=700_000)
+    ap.add_argument("--width", type=int, default=3840)
+    ap.add_argument("--height", type=int, default=2160)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
