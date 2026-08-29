@@ -1,5 +1,8 @@
-// Camera-only motion vectors from depth: reproject each pixel of the current frame with the previous frame's
-// view-projection and write (prev - cur) in pixels, pointing to where the pixel was last frame (DLSS convention).
+// Camera-only motion vectors from depth, plus the dynamic-object mask.
+// For each pixel: reproject with the previous frame's view-projection and write (prev - cur) in pixels, pointing to
+// where the pixel was last frame (DLSS convention). Pixels covered by dynamic draws (character/prop depth written into
+// dynDepth by the add-on's replayed draws) get mask = 1 and, optionally, zero motion (third-person characters mostly
+// keep their screen position while the camera turns).
 // Matrices are the game's row-major clip matrices (rows = clip x,y,z,w), reversed-Z with z_clip == near.
 cbuffer CB : register(b0)
 {
@@ -8,16 +11,24 @@ cbuffer CB : register(b0)
     float2 size;                 // render resolution
     float  nearZ;                // z_clip constant (row 2, w component)
     float  reset;                // 1 = write zero motion (camera cut / no history)
+    float  dynZeroMV;            // 1 = zero motion on dynamic pixels
+    float3 pad;
 };
-Texture2D<float>  depthTex : register(t0);
-RWTexture2D<float2> mvTex  : register(u0);
+Texture2D<float>    depthTex : register(t0);
+Texture2D<float>    dynDepth : register(t1);
+RWTexture2D<float2> mvTex    : register(u0);
+RWTexture2D<float>  maskTex  : register(u1);
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)size.x || id.y >= (uint)size.y) return;
     float d = depthTex.Load(int3(id.xy, 0));
-    if (reset > 0.5) { mvTex[id.xy] = float2(0, 0); return; }
+    float dd = dynDepth.Load(int3(id.xy, 0));
+    // dynamic if the replayed draws wrote depth here and it is (about) the visible surface
+    bool dyn = dd > 1e-7 && dd >= d * 0.995;
+    maskTex[id.xy] = dyn ? 1.0 : 0.0;
+    if (reset > 0.5 || (dyn && dynZeroMV > 0.5)) { mvTex[id.xy] = float2(0, 0); return; }
 
     float2 cur = float2(id.x + 0.5, id.y + 0.5);
     float2 ndc = float2(cur.x / size.x * 2.0 - 1.0, 1.0 - cur.y / size.y * 2.0);

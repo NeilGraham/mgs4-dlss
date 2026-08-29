@@ -132,3 +132,14 @@ third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
 docs/                  reverse-engineering notes and the DLSS plan
 ```
+
+### Phase 2 (first step): dynamic-object mask
+
+Characters and props do not carry the camera view-projection at `c[0]` (their matrix sits elsewhere, or their shader
+uses a different constant layout), so the add-on can tell them apart from world geometry per draw. Each such draw is
+replayed once into a private depth buffer (same PSO, same jittered constants, no colour target); the motion-vector
+pass turns that depth into DLSS's **bias-current-colour mask** and, by default, zeroes the camera vector on those pixels
+(third-person characters keep their screen position while the camera turns). Result: no halo/ghosting around the
+player at the cost of less temporal accumulation on the character. Toggles in the panel: "Dynamic-object mask" and
+"Zero motion on dynamic objects"; the MV visualiser shows the mask in blue. True per-object velocity (replaying skinned
+draws with previous-frame bones) remains future work.
