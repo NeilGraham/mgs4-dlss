@@ -1,0 +1,6 @@
+build/
+*.asi
+*.o
+*.obj
+*.log
+*.png

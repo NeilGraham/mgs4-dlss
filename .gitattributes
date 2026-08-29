@@ -1,0 +1,6 @@
+* text=auto
+*.sh text eol=lf
+*.c text
+*.h text
+*.md text
+*.ini text
