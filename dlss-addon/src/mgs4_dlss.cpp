@@ -187,6 +187,7 @@ static bool g_featureCreatedThisFrame = false;
 static uint32_t g_createdFrame = 0;
 static bool g_recreated = false;
 static bool g_recreateRequested = false;   // overlay changed the preset
+static uint32_t g_autoRecreateAt = 0;       // an NGX-hooking add-on installed its hooks during our first CreateFeature: re-create once at this evaluation count
 static NVSDK_NGX_Handle* g_oldFeature = nullptr;
 static uint32_t g_oldFeatureFrame = 0;
 static ULONGLONG g_evalRateT0 = 0; static uint32_t g_evalRateN = 0; static float g_evalRate = 0;
@@ -802,6 +803,17 @@ static void release_dlss_resources(device* dev)
     if (g_scratch.handle) { dev->destroy_resource(g_scratch); g_scratch = { 0 }; }
 }
 
+// Whether an NGX-hooking add-on (renodx-dlss5) has detoured the NGX D3D12 CreateFeature export: Detours rewrites the
+// function's first bytes with a jump. Such add-ons capture their "DLSS contract" from CreateFeature, so the first
+// create must happen after their hooks exist.
+static int ngx_create_hooked()
+{
+    HMODULE m = GetModuleHandleA("_nvngx.dll");
+    if (!m) return -1;
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(GetProcAddress(m, "NVSDK_NGX_D3D12_CreateFeature"));
+    if (!p) return -1;
+    return (p[0] == 0xE9 || (p[0] == 0xFF && p[1] == 0x25) || p[0] == 0xEB) ? 1 : 0;
+}
 static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t outW, uint32_t outH, format fmt)
 {
     if (g_cfgMode != NVSDK_NGX_PerfQuality_Value_UltraPerformance) {
@@ -821,7 +833,13 @@ static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t o
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     NVSDK_NGX_Handle* handle = nullptr;
     logmsg("NGX CreateFeature DLSS: cmd %p (%s), nvngx_dlss.dll %s, _nvngx %p, DLSS5 add-on %s", (void*)native, fg::inside_streamline() ? "inside SL?" : "game", GetModuleHandleA("nvngx_dlss.dll") ? "loaded" : "not loaded", (void*)GetModuleHandleA("_nvngx.dll"), GetModuleHandleA("renodx-dlss5.addon64") ? "loaded" : "absent");
+    const int hookedBefore = ngx_create_hooked();
     NVSDK_NGX_Result r = NGX_D3D12_CREATE_DLSS_EXT(native, 1, 1, &handle, g_ngxParams, &cp);
+    const int hookedAfter = ngx_create_hooked();
+    if (!g_dlss && !g_recreated && !g_oldFeature) {   // first create of this run
+        logmsg("NGX CreateFeature export hooked by an add-on: before %d, after %d%s", hookedBefore, hookedAfter, g_nrAddonLoaded ? "" : " (no NGX post-processing add-on loaded)");
+        if (hookedBefore != 1 && hookedAfter == 1 && g_nrAddonLoaded) { g_autoRecreateAt = 4; logmsg("the add-on hooked NGX during our first CreateFeature (it did not see it) - re-creating the feature once at evaluation %u, while the scene fades in", g_autoRecreateAt); }
+    }
     logmsg("NGX CreateFeature DLSS (%s %ux%u -> %ux%u, fmt=%u, preset=%d) at frame %u -> %s", g_cfgModeName, w, h, outW, outH, (unsigned)fmt, g_cfgPreset, g_frame, ngx_str(r));
     if (NVSDK_NGX_FAILED(r)) return false;
     g_dlss = handle;
@@ -1074,7 +1092,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fg::frame_inputs(g_frame, fi, ci);
     }
 
-    if ((!g_recreated && g_cfgRecreateAfter > 0 && g_evalCount >= (uint32_t)g_cfgRecreateAfter) || (g_recreateRequested && !g_oldFeature)) {
+    if ((!g_recreated && ((g_cfgRecreateAfter > 0 && g_evalCount >= (uint32_t)g_cfgRecreateAfter) || (g_autoRecreateAt && g_evalCount >= g_autoRecreateAt))) || (g_recreateRequested && !g_oldFeature)) {
         g_recreated = true; g_recreateRequested = false;
         g_oldFeature = g_dlss; g_oldFeatureFrame = g_frame; g_dlss = nullptr;
         logmsg("re-creating DLSS feature (old feature released in a few frames)");
@@ -1735,7 +1753,12 @@ static void on_init_device(device* dev)
     // Streamline (frame generation) is only loaded when FrameGen is enabled at startup: it takes over the swapchain,
     // so everything else (ReShade, the DLAA path, NGX add-ons) must be known to work with it before it is on by default.
     if (g_cfgFgMode != 0) { fg::init(g_d3d, g_gameDirW, logmsg); fg::set_frame_callback(frame_rollover); }   // before the game creates its swapchain
-    else logmsg("frame generation off at startup: Streamline not loaded (set FrameGen in the ini / overlay and restart to use it)");
+    else {
+        logmsg("frame generation off at startup: Streamline not loaded (set FrameGen in the ini / overlay and restart to use it)");
+        // Without Streamline nothing loads NGX before our first CreateFeature, and NGX-hooking add-ons (renodx-dlss5)
+        // install their hooks when _nvngx.dll loads: initialise NGX now so the first create is already hooked.
+        if (g_cfgEnabled && ngx_init(dev)) logmsg("NGX initialised at device creation (no Streamline): NGX-hooking add-ons can hook before the first CreateFeature");
+    }
     if (g_cfgEnabled && g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA) {
         if (!g_internalW) logmsg("Mode=%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgModeName);
         else if (ngx_init(dev)) setup_scaling();
