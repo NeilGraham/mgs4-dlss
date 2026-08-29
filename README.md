@@ -80,6 +80,7 @@ Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
+UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-colour mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
@@ -196,6 +197,23 @@ wrong for this port's composite and breaks NR's coverage.
 
 The sub-rect is detected per frame from the viewport most depth-tested draws into the frame's geometry target use
 (at least half the target); the 20-frame hysteresis copy is only a fallback before the first scene draw of a frame.
+
+### HUD (`UIMask`, on by default)
+
+The port draws its HUD into the final texture **before** the composite, so with DLAA on the final image (the DLSS 5 NR
+configuration) the HUD is inside the image DLSS reprojects, and under camera motion it ghosted opposite to the
+rotation. The add-on already replays the HUD draws into a UI layer for frame generation; with `UIMask=1` that layer
+also feeds DLSS: every pixel where the layer holds bright HUD detail (text, bars, icons) is set in DLSS's
+bias-current-colour mask and gets a zero motion vector, so DLSS takes it from the current frame. Dim translucent panel
+backgrounds keep their camera vectors and normal accumulation (a uniform tint cannot visibly ghost, while masking it
+would strip the anti-aliasing from the scene behind it). The UI layer is now built whether or not frame generation is
+on, so `DebugMode=6` (UI layer) and `7` (HUD-less) work in every configuration.
+
+HUD draws are told apart from the post-process passes into the same texture by shape: post passes are the <= 4-vertex
+fullscreen draws (sampling a scene-sized input or using the scene's dynamic-resolution viewport), HUD elements are
+6+-vertex quads at the full viewport. The earlier "samples anything scene-sized" test mis-filed about a third of the
+HUD draws every frame - descriptor slots a HUD shader does not use carry stale scene-sized textures - which is what
+made the UI layer (and the DLSS-G UI recomposition) flicker.
 
 ### Known limitations
 

@@ -25,7 +25,8 @@
 #include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualisation of the motion vectors)
 #include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
 #include "resample_cs.h"
-#include "depth_stretch_cs.h"   // g_depth_stretch_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
+#include "depth_stretch_cs.h"   // g_depth_stretch_cs
+#include "uimask_cs.h"          // g_uimask_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include "objmv.h"   // per-object motion vectors via stream output (objmv.cpp)
 #include <cstdio>
@@ -208,6 +209,7 @@ static char g_nrAddonName[64] = "";          // which one
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
 // into a private depth buffer; the MV pass turns that into DLSS's bias-current-colour mask (and optionally zero motion).
 static int g_cfgDynMask = 0;
+static int g_cfgUiMask = 1;                  // UI layer -> DLSS bias-current-colour mask + zero vectors on the HUD
 static int g_cfgDynZeroMV = 1;
 static resource g_dynDepth = { 0 }; static resource_view g_dynDsv = { 0 };
 static resource_usage g_dynState = resource_usage::depth_stencil_write;
@@ -387,6 +389,7 @@ static ID3D12PipelineState* g_visPso = nullptr;
 static ID3D12PipelineState* g_hudlessPso = nullptr;
 static ID3D12PipelineState* g_resamplePso = nullptr;
 static ID3D12PipelineState* g_stretchPso = nullptr;
+static ID3D12PipelineState* g_uimaskPso = nullptr;
 static ID3D12DescriptorHeap* g_mvHeap = nullptr;    // shader visible: 4 slots x (SRV depth, UAV mv) + 4 slots x (SRV mv, UAV out)
 static ID3D12Resource* g_mvCb = nullptr; static uint8_t* g_mvCbPtr = nullptr;   // 8 x 256 B upload ring
 static ID3D12Resource* g_dummyUav = nullptr;   // 8x8 R8 texture bound where a shader declares a UAV it never writes
@@ -471,6 +474,9 @@ static bool mv_init()
     pso.CS = { g_depth_stretch_cs, sizeof(g_depth_stretch_cs) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_stretchPso));
     if (FAILED(hr)) { logmsg("MV: depth stretch PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    pso.CS = { g_uimask_cs, sizeof(g_uimask_cs) };
+    hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_uimaskPso));
+    if (FAILED(hr)) { logmsg("MV: UI mask PSO failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 96, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // 24 slots x [srv0, srv1, uav0, uav1]: mv 0-3, vis 8-11, hudless 12-15, resample 16-19
     hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_mvHeap));
     if (FAILED(hr)) { logmsg("MV: CreateDescriptorHeap failed 0x%08lX", (unsigned long)hr); return false; }
@@ -633,6 +639,53 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
     native->Dispatch((fullW + 7) / 8, (fullH + 7) / 8, 1);
     cmd->barrier(g_depthFull, resource_usage::unordered_access, resource_usage::shader_resource); g_depthFullState = resource_usage::shader_resource;
     cbSlot++;
+}
+
+// UI mask: the replayed UI layer marks HUD pixels in the bias-current-colour mask and zeroes their motion vectors.
+static uint32_t g_uiMaskFrames = 0;
+static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h)
+{
+    if (!g_mvReady || !g_uimaskPso || !g_ui.handle || !g_mv.handle || !g_mask.handle) return;
+    static ID3D12Resource* cbRes = nullptr; static uint8_t* cbPtr = nullptr; static uint32_t cbSlot = 0;
+    if (!cbRes) {
+        D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
+        D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = 4 * 256; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        if (FAILED(g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&cbRes)))) return;
+        D3D12_RANGE none = { 0, 0 }; cbRes->Map(0, &none, reinterpret_cast<void**>(&cbPtr));
+        if (!cbPtr) return;
+    }
+    const uint32_t slot = 4 + (cbSlot % 4);
+    float cb[4] = { float(w), float(h), 0, 0 };
+    memcpy(cbPtr + (cbSlot % 4) * 256, cb, sizeof(cb));
+    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 4 * inc;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(slot) * 4 * inc;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_R8G8B8A8_UNORM; srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_ui.handle), &srv, cpu);
+    D3D12_CPU_DESCRIPTOR_HANDLE h1 = cpu; h1.ptr += inc;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_ui.handle), &srv, h1);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R16G16_FLOAT; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
+    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mv.handle), nullptr, &uav, h2);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavMask = {}; uavMask.Format = DXGI_FORMAT_R8_UNORM; uavMask.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE h3 = cpu; h3.ptr += 3 * inc;
+    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mask.handle), nullptr, &uavMask, h3);
+    if (g_uiState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_non_pixel); g_uiState = resource_usage::shader_resource_non_pixel; }
+    cmd->barrier(g_mv, g_mvState, resource_usage::unordered_access); g_mvState = resource_usage::unordered_access;
+    cmd->barrier(g_mask, g_maskState, resource_usage::unordered_access); g_maskState = resource_usage::unordered_access;
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_mvRootSig);
+    native->SetPipelineState(g_uimaskPso);
+    native->SetComputeRootConstantBufferView(0, cbRes->GetGPUVirtualAddress() + (cbSlot % 4) * 256);
+    native->SetComputeRootDescriptorTable(1, gpu);
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuUav = gpu; gpuUav.ptr += 2 * inc;
+    native->SetComputeRootDescriptorTable(2, gpuUav);
+    native->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
+    cmd->barrier(g_mv, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
+    cmd->barrier(g_mask, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_maskState = resource_usage::shader_resource_non_pixel;
+    g_uiMaskFrames++; cbSlot++;
 }
 
 // Debug: paint the motion-vector field into g_out (must be in unordered_access state).
@@ -1091,13 +1144,16 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             g_objMvFrames++;
         }
     }
+    // HUD: bias-current-colour mask + zero vectors from the replayed UI layer (the HUD is inside the image DLSS sees)
+    const bool uiMasked = g_cfgUiMask && !g_cfgPrePost && !upscale && g_cfgDRS != 2 && g_ui.handle && g_uiDrawsThisFrame > 0 && g_uimaskPso;
+    if (uiMasked) uimask_dispatch(cmd, cd.texture.width, cd.texture.height);
     NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
     ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(color.handle);
     ep.Feature.pInOutput = reinterpret_cast<ID3D12Resource*>(g_out.handle);
     ep.Feature.InSharpness = g_cfgSharpness100 / 100.0f;
     ep.pInDepth = reinterpret_cast<ID3D12Resource*>(dlssDepth.handle);
     ep.pInMotionVectors = reinterpret_cast<ID3D12Resource*>(g_mv.handle);
-    ep.pInBiasCurrentColorMask = (g_cfgDynMask && g_mask.handle) ? reinterpret_cast<ID3D12Resource*>(g_mask.handle) : nullptr;
+    ep.pInBiasCurrentColorMask = ((g_cfgDynMask || uiMasked) && g_mask.handle) ? reinterpret_cast<ID3D12Resource*>(g_mask.handle) : nullptr;
     g_lastDepth = depth.handle;
     ep.InJitterOffsetX = g_cfgJitter ? g_jitterX : 0.0f; ep.InJitterOffsetY = g_cfgJitter ? g_jitterY : 0.0f;
     // DRS=1: DLSS evaluates the whole texture (the sub-rect content at its native scale, garbage outside it that the
@@ -1539,15 +1595,28 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // input (half the frame size or more), HUD draws only sample atlases.
             const bool uiCandidate = !g_injectedThisFrame && !depthOn && g_geoRt
                 && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
-            const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && g_cfgFgMode != 0 && !g_cfgPrePost;
+            const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && !g_cfgPrePost;
             if (uiCandidate) {
                 auto itd = g_depthDrawsPerRt.find(g_geoRt);
                 const uint32_t done = itd != g_depthDrawsPerRt.end() ? itd->second : 0;
+                if (tracing()) {
+                    std::string texs;
+                    for (int p = 1; p < 5; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { char b[48]; snprintf(b, sizeof(b), " r%d[%d]=%ux%u", p, i, d.texture.width, d.texture.height); texs += b; } } }
+                    logmsg("f%u ui-cand rt=%p done=%u/%u count=%u pso=%p vp=%.0fx%.0f%s", g_frame, (void*)s.rt.handle, done, g_geoDrawsLast, da.count, (void*)s.pso, s.vp.width, s.vp.height, texs.c_str());
+                }
                 if (done >= 20 && done * 10 >= g_geoDrawsLast * 8) {
+                    // Post-process passes into the final texture are fullscreen triangles/quads (<= 4 vertices) that sample a
+                    // scene-sized input or use the scene's (dynamic-resolution) viewport; HUD elements are 6+-vertex quads at
+                    // the full viewport. Descriptor slots beyond the ones a HUD shader uses carry stale scene-sized textures,
+                    // so a plain "samples something big" test mis-files a third of the HUD draws (and flickers the UI layer).
                     bool post = false;
-                    for (int p = 1; p < 5 && !post; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !post; ++i) {
-                        resource r = resolve_descriptor(dev, s.tables[p], i);
-                        if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width * 2 >= g_dlssW && d.texture.height * 2 >= g_dlssH) post = true; }
+                    if (da.count <= 4) {
+                        const bool fullVp = s.vp_valid && fabsf(s.vp.width - float(g_dlssW)) < 2.0f && fabsf(s.vp.height - float(g_dlssH)) < 2.0f;
+                        post = !fullVp;
+                        for (int p = 1; p < 5 && !post; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !post; ++i) {
+                            resource r = resolve_descriptor(dev, s.tables[p], i);
+                            if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width * 2 >= g_dlssW && d.texture.height * 2 >= g_dlssH) post = true; }
+                        }
                     }
                     if (post) g_uiPostSkippedThisFrame++;
                     else if (!uiReplay) g_hudDrawsThisFrame++;   // classification only
@@ -1632,6 +1701,11 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     }
     if (tracing() && drawIdx < 4)
         logmsg("f%u bb-draw#%u vp=(%.0f,%.0f %.0fx%.0f) -> color=%s (param %d idx %d)", g_frame, drawIdx, s.vp.x, s.vp.y, s.vp.width, s.vp.height, desc_str(dev, color).c_str(), colorParam, colorIdx);
+    else if (tracing() && drawIdx < 200) {
+        std::string texs;
+        for (int p = 0; p < 5; ++p) if (s.table_set[p]) for (int i = 0; i < 4; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { char b[48]; snprintf(b, sizeof(b), " r%d[%d]=%ux%u", p, i, d.texture.width, d.texture.height); texs += b; } } }
+        logmsg("f%u bb-draw#%u count=%u depth=%d pso=%p vp=%.0fx%.0f%s", g_frame, drawIdx, da.count, (int)pso_depth_enabled(s.pso), (void*)s.pso, s.vp.width, s.vp.height, texs.c_str());
+    }
 
     if (color.handle && color.handle != g_finalRt[0]) { g_finalRt[1] = g_finalRt[0]; g_finalRt[0] = color.handle; }
     if (color.handle && s.vp.width > 0) { g_gameVp[0] = s.vp.x; g_gameVp[1] = s.vp.y; g_gameVp[2] = s.vp.width; g_gameVp[3] = s.vp.height; }
@@ -1693,6 +1767,7 @@ static void reload_config()
     g_cfgDebugMode = GetPrivateProfileIntA("DLSS", "DebugMode", 0, g_iniPath);
     g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
+    g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
@@ -1713,6 +1788,7 @@ static void reload_config()
         g_cfgPrePost = eff;
     }
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
+    g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     {

@@ -46,9 +46,14 @@ class DS4:
             raise RuntimeError("vigem_target_add failed: 0x%08X" % (r & 0xFFFFFFFF))
         self.neutral()
 
-    def _report(self, buttons=0):
-        rep = DS4Report(0x80, 0x80, 0x80, 0x80, DPAD_NONE | buttons, 0, 0, 0)
+    def _report(self, buttons=0, lx=0.0, ly=0.0, rx=0.0, ry=0.0):
+        def ax(v): return max(0, min(255, int(round(128 + v * 127))))
+        rep = DS4Report(ax(lx), ax(ly), ax(rx), ax(ry), DPAD_NONE | buttons, 0, 0, 0)
         self.lib.vigem_target_ds4_update(self.client, self.pad, rep)
+
+    def stick(self, lx=0.0, ly=0.0, rx=0.0, ry=0.0, buttons=0):
+        # axes in -1..1 (DS4: +x right, +y down); hold until the next report
+        self._report(buttons, lx, ly, rx, ry)
 
     def neutral(self):
         self._report(0)
