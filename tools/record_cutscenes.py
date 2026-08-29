@@ -25,6 +25,8 @@ GAME_EXE = os.path.join(GAME_DIR, "mgs4.exe")
 ADDON_LOG = os.path.join(GAME_DIR, "logs", "mgs4_dlss.log")
 OUT_DIR = r"D:\mgs4-dlss5"
 STATE_RE = re.compile(r"SCENE-STATE (cutscene|gameplay|no-3d)")
+# heartbeat: SCENE-STATE-TICK <state> (frame N, scene draws X, HUD draws Y, post-skipped Z, ...)
+TICK_RE = re.compile(r"SCENE-STATE-TICK (cutscene|gameplay|no-3d) \(frame (\d+), scene draws (\d+), HUD draws (\d+)")
 
 ACTS = {"00": "prologue", "01": "act1-middle-east", "02": "act2-south-america", "03": "act3-eastern-europe",
         "04": "act4-shadow-moses", "05": "act5-outer-haven", "10": "interlude", "20": "briefing", "30": "epilogue"}
@@ -124,7 +126,8 @@ def record_one(cl, pad, index, stage, args):
     # phase 2: record
     cl.start_record()
     t_rec = time.time()
-    last_bytes, last_check, static_since, gameplay_since = 0, time.time(), None, None
+    last_bytes, last_check, static_since, gameplay_since, frozen_since = 0, time.time(), None, None, None
+    baseline_draws, busy_ticks = None, 0     # gameplay draws far more than a cutscene: a second, independent signal
     end_reason = "max-duration"
     while time.time() - t_rec < args.max_minutes * 60:
         if not is_foreground(hwnd):
@@ -134,18 +137,46 @@ def record_one(cl, pad, index, stage, args):
         if find_window() is None:
             end_reason = "game-exited"; break
         for line in tail.new_lines():
+            t = TICK_RE.search(line)
+            if t:
+                draws, hud = int(t.group(3)), int(t.group(4))
+                if time.time() - t_rec < 45 and (baseline_draws is None or draws < baseline_draws):
+                    baseline_draws = draws          # quietest reading of the opening seconds
+                elif baseline_draws and draws > max(800, baseline_draws * 2.5):
+                    busy_ticks += 1
+                    if busy_ticks >= 2:
+                        log(f"    draw count {draws} vs cutscene baseline {baseline_draws} -> gameplay")
+                        end_reason = "gameplay-drawcount"; break
+                else:
+                    busy_ticks = 0
+                if hud > 0 and time.time() - t_rec > args.min_seconds:
+                    log(f"    HUD draws {hud} in tick -> gameplay")
+                    end_reason = "gameplay-hud"; break
+                continue
             m = STATE_RE.search(line)
             if m:
                 state = m.group(1)
                 log(f"    state -> {state} at {time.time() - t_rec:.0f}s")
                 if state == "cutscene":
                     static_since = gameplay_since = None
+        if end_reason in ("gameplay-drawcount", "gameplay-hud"):
+            break
         now = time.time()
         if now - last_check >= 5:
             st = cl.get_record_status()
             rate = (st.output_bytes - last_bytes) / (now - last_check)
             last_bytes, last_check = st.output_bytes, now
             moving = rate > args.moving_bytes_per_s
+            if now - t_rec < args.min_seconds:
+                # the HUD flickers on for a moment at the start of some cutscenes; never end on that
+                static_since = gameplay_since = frozen_since = None
+                continue
+            if rate < args.frozen_bytes_per_s:      # frozen picture regardless of the classified state
+                frozen_since = frozen_since or now
+                if now - frozen_since >= args.static_grace:
+                    end_reason = "frozen-picture"; break
+            else:
+                frozen_since = None
             if state == "gameplay":
                 gameplay_since = gameplay_since or now
                 if now - gameplay_since >= args.gameplay_grace:
@@ -189,9 +220,11 @@ def main():
     ap.add_argument("--min-free-gb", type=float, default=100)
     ap.add_argument("--start-timeout", type=float, default=100)
     ap.add_argument("--press-period", type=float, default=1.0)
-    ap.add_argument("--gameplay-grace", type=float, default=4)
+    ap.add_argument("--gameplay-grace", type=float, default=9)
     ap.add_argument("--static-grace", type=float, default=25)
     ap.add_argument("--moving-bytes-per-s", type=float, default=700_000)
+    ap.add_argument("--frozen-bytes-per-s", type=float, default=300_000)
+    ap.add_argument("--min-seconds", type=float, default=30)
     ap.add_argument("--width", type=int, default=3840)
     ap.add_argument("--height", type=int, default=2160)
     ap.add_argument("--dry-run", action="store_true")
@@ -215,7 +248,7 @@ def main():
     pad = DS4()
     results_path = os.path.join(OUT_DIR, "recordings.json")
     results = json.load(open(results_path)) if os.path.exists(results_path) else []
-    done = {r["stage"] for r in results if r.get("status") == "ok"}
+    done = {r["stage"] for r in results if r.get("status") in ("ok", "no-cutscene")}
     try:
         for i, stage in enumerate(entries, 1):
             if stage in done:

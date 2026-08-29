@@ -1615,7 +1615,12 @@ static void frame_rollover()
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast > 0 ? 1 : 0);
         if (raw != g_sceneStateRaw) { g_sceneStateRaw = raw; g_sceneStateFrames = 0; }
-        else if (++g_sceneStateFrames == 30 && raw != g_sceneState) {   // ~0.5 s of the same reading
+        // periodic heartbeat so the classifier can be diagnosed from the log even when it never changes state
+        if ((g_frame % 600) == 0)
+            logmsg("SCENE-STATE-TICK %s (frame %u, scene draws %u, HUD draws %u, post-skipped %u, geoRt %p, finalRt %p, rt %ux%u vs dlss %ux%u)",
+                   raw == 2 ? "no-3d" : (raw == 1 ? "gameplay" : "cutscene"), g_frame, g_sceneDrawsLast, g_hudDrawsLast, g_uiPostSkippedLast,
+                   (void*)g_geoRt, (void*)g_finalRt[0], g_internalW, g_internalH, g_dlssW, g_dlssH);
+        if (++g_sceneStateFrames == 30 && raw != g_sceneState) {   // ~0.5 s of the same reading
             static const char* names[3] = { "cutscene", "gameplay", "no-3d" };
             logmsg("SCENE-STATE %s (frame %u, scene draws %u, HUD draws %u, viewport %.0fx%.0f)", names[raw], g_frame, g_sceneDrawsLast, g_hudDrawsLast, g_sceneVp.width, g_sceneVp.height);
             g_sceneState = raw;
