@@ -5,6 +5,7 @@ call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\
 if not exist ..\build mkdir ..\build
 set FXC="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe"
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\mv_cs.h /Vn g_mv_cs src\mv_cs.hlsl || exit /b 1
+%FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\mv_vis.h /Vn g_mv_vis src\mv_vis.hlsl || exit /b 1
 set INC=/I ..\build /I ..\third_party\imgui /I ..\third_party\reshade\include /I ..\third_party\DLSS\include
 set LIBS=d3d12.lib dxgi.lib advapi32.lib user32.lib ..\third_party\DLSS\lib\Windows_x86_64\x64\nvsdk_ngx_s.lib
 cl /nologo /std:c++17 /O2 /MT /EHsc /W3 /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS %INC% /LD src\mgs4_dlss.cpp /Fe:..\build\mgs4_dlss.addon64 /Fo:..\build\ /link %LIBS%

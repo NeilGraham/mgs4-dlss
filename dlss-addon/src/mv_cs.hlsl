@@ -17,12 +17,17 @@ void main(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)size.x || id.y >= (uint)size.y) return;
     float d = depthTex.Load(int3(id.xy, 0));
-    if (reset > 0.5 || d <= 0.0) { mvTex[id.xy] = float2(0, 0); return; }
+    if (reset > 0.5) { mvTex[id.xy] = float2(0, 0); return; }
 
     float2 cur = float2(id.x + 0.5, id.y + 0.5);
     float2 ndc = float2(cur.x / size.x * 2.0 - 1.0, 1.0 - cur.y / size.y * 2.0);
-    float w = nearZ / d;                                   // depth = z_clip / w = nearZ / w
-    float4 clip = float4(ndc.x * w, ndc.y * w, nearZ, w);
+    float4 clip;
+    if (d <= 1e-7)
+        clip = float4(ndc.x, ndc.y, 0.0, 1.0);             // far plane: a direction (point at infinity), still moves under rotation
+    else {
+        float w = nearZ / d;                               // depth = z_clip / w = nearZ / w
+        clip = float4(ndc.x * w, ndc.y * w, nearZ, w);
+    }
     float4 world = mul(invVP, clip);
     float4 pc = mul(prevVP, world);
     if (pc.w <= 1e-3) { mvTex[id.xy] = float2(0, 0); return; }
