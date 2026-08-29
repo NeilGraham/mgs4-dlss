@@ -209,11 +209,15 @@ backgrounds keep their camera vectors and normal accumulation (a uniform tint ca
 would strip the anti-aliasing from the scene behind it). The UI layer is now built whether or not frame generation is
 on, so `DebugMode=6` (UI layer) and `7` (HUD-less) work in every configuration.
 
-HUD draws are told apart from the post-process passes into the same texture by shape: post passes are the <= 4-vertex
-fullscreen draws (sampling a scene-sized input or using the scene's dynamic-resolution viewport), HUD elements are
-6+-vertex quads at the full viewport. The earlier "samples anything scene-sized" test mis-filed about a third of the
-HUD draws every frame - descriptor slots a HUD shader does not use carry stale scene-sized textures - which is what
-made the UI layer (and the DLSS-G UI recomposition) flicker.
+HUD draws are told apart from the post-process passes into the same texture by shape: HUD elements are drawn with
+the full viewport, post passes are the <= 4-vertex fullscreen draws that sample a scene-sized input, and anything
+drawn with the scene's (dynamic-resolution) viewport is scene-space whatever its vertex count (tints, vignettes, the
+game's upscale). Nothing counts as HUD until the final texture has received this frame's scene (the fullscreen pass
+sampling a scene-sized input), so the pre-HUD capture behind the HUD-less image is never taken from a texture still
+holding the previous frame or the pre-upscale sub-rect. The earlier "samples anything scene-sized" test mis-filed
+about a third of the HUD draws every frame - descriptor slots a HUD shader does not use carry stale scene-sized
+textures - which is what made the UI layer (and the DLSS-G UI recomposition) flicker; a scene-space tint quad
+classified as HUD made the HUD-less view shrink with the dynamic resolution and flash during camera turns.
 
 ### Known limitations
 
