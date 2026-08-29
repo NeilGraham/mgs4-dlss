@@ -1,6 +1,6 @@
 # mgs4-dlss
 
-Work toward real DLSS (DLAA first) in the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), so the game can be hooked by NGX-based add-ons such as `renodx-dlss5`.
+Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
 
 ## Status
 

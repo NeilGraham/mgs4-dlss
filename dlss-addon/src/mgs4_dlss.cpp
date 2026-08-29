@@ -189,7 +189,8 @@ static int g_cfgJitter = 1;
 static int g_cfgMotionVectors = 1;
 static int g_cfgPrePostMode = -1;            // -1 auto (pre-post unless the DLSS 5 NR add-on is loaded), 0 off, 1 on
 static int g_cfgPrePost = 1;                 // effective: DLAA runs before the post-process/HUD passes
-static bool g_nrAddonLoaded = false;         // renodx-dlss5.addon64 present in the process
+static bool g_nrAddonLoaded = false;         // one of the CompositeIfLoaded modules is present in the process
+static char g_nrAddonName[64] = "";          // which one
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
 // into a private depth buffer; the MV pass turns that into DLSS's bias-current-colour mask (and optionally zero motion).
 static int g_cfgDynMask = 1;
@@ -1173,11 +1174,17 @@ static void reload_config()
     {
         char pp[16] = "auto"; GetPrivateProfileStringA("DLSS", "PrePost", "auto", pp, sizeof(pp), g_iniPath);
         g_cfgPrePostMode = (_stricmp(pp, "auto") == 0 || strcmp(pp, "-1") == 0) ? -1 : (atoi(pp) != 0 ? 1 : 0);
-        // The DLSS 5 NR add-on runs its pass on whatever we evaluate; it needs the final image, so with it loaded we
-        // insert at the composite. Without it, pre-post gives the cleanest AA (vignette/HUD outside DLSS).
-        g_nrAddonLoaded = GetModuleHandleA("renodx-dlss5.addon64") != nullptr;
+        // Add-ons that post-process DLSS's output (the DLSS 5 Neural Rendering add-on renodx-dlss5 is the known one)
+        // need the final image, so when one of the listed modules is loaded we insert at the composite. Without any,
+        // pre-post gives the cleanest AA (vignette/HUD outside DLSS). Extend the list in the ini for other tools.
+        char list[512] = ""; GetPrivateProfileStringA("DLSS", "CompositeIfLoaded", "renodx-dlss5.addon64", list, sizeof(list), g_iniPath);
+        g_nrAddonLoaded = false; g_nrAddonName[0] = 0;
+        for (char* tok = strtok(list, ";,"); tok; tok = strtok(nullptr, ";,")) {
+            while (*tok == ' ') ++tok;
+            if (*tok && GetModuleHandleA(tok) != nullptr) { g_nrAddonLoaded = true; strncpy_s(g_nrAddonName, tok, _TRUNCATE); break; }
+        }
         const int eff = g_cfgPrePostMode < 0 ? (g_nrAddonLoaded ? 0 : 1) : g_cfgPrePostMode;
-        if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS 5 NR add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? "loaded" : "not loaded");
+        if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS post-processing add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? g_nrAddonName : "not loaded");
         g_cfgPrePost = eff;
     }
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 1, g_iniPath);
@@ -1322,10 +1329,10 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
     bool mvs = g_cfgMotionVectors != 0;
     if (ImGui::Checkbox("Camera motion vectors (reprojected from depth)", &mvs)) { g_cfgMotionVectors = mvs ? 1 : 0; write_ini_int("MotionVectors", g_cfgMotionVectors); }
-    const char* ppNames[] = { "Auto (composite when the DLSS 5 NR add-on is loaded, else pre-post)", "Pre-post: DLAA before post-process/HUD", "Composite: DLAA on the final image" };
+    const char* ppNames[] = { "Auto (composite when a DLSS post-processing add-on such as DLSS 5 NR is loaded, else pre-post)", "Pre-post: DLAA before post-process/HUD", "Composite: DLAA on the final image" };
     int ppSel = g_cfgPrePostMode < 0 ? 0 : (g_cfgPrePostMode ? 1 : 2);
     if (ImGui::Combo("Insertion point (DLAA)", &ppSel, ppNames, 3)) { write_ini("PrePost", ppSel == 0 ? "auto" : (ppSel == 1 ? "1" : "0")); reload_config(); }
-    ImGui::Text("Active: %s | DLSS 5 NR add-on: %s | pre-post %u frames, composite %u frames", g_cfgPrePost ? "pre-post" : "composite", g_nrAddonLoaded ? "loaded" : "not loaded", g_prePostInjections, g_compositeInjections);
+    ImGui::Text("Active: %s | DLSS post-processing add-on: %s | pre-post %u frames, composite %u frames", g_cfgPrePost ? "pre-post" : "composite", g_nrAddonLoaded ? g_nrAddonName : "none (CompositeIfLoaded list in ini)", g_prePostInjections, g_compositeInjections);
     bool dm = g_cfgDynMask != 0;
     if (ImGui::Checkbox("Character mask (skinned meshes -> bias current colour)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
     bool dp2 = g_cfgDynMaskProps != 0;
