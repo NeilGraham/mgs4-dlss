@@ -573,7 +573,7 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
     sl::Extent full{ 0, 0, in.renderW, in.renderH };
     sl::Resource depthRes(sl::ResourceType::eTex2d, in.depth, in.depthState); depthRes.width = in.renderW; depthRes.height = in.renderH; depthRes.nativeFormat = in.depthFormat;
     sl::Resource mvRes(sl::ResourceType::eTex2d, in.mv, in.mvState); mvRes.width = in.renderW; mvRes.height = in.renderH; mvRes.nativeFormat = DXGI_FORMAT_R16G16_FLOAT;
-    sl::ResourceTag tags[4] = {
+    sl::ResourceTag tags[5] = {
         sl::ResourceTag(&depthRes, sl::kBufferTypeDepth, sl::ResourceLifecycle::eOnlyValidNow, &full),
         sl::ResourceTag(&mvRes, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &full),
         sl::ResourceTag(nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent),
@@ -582,6 +582,8 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
     uint32_t n = 2;
     sl::Resource hudRes(sl::ResourceType::eTex2d, in.hudless, in.hudlessState);
     if (in.hudless) { hudRes.width = in.renderW; hudRes.height = in.renderH; hudRes.nativeFormat = in.hudlessFormat; tags[n++] = sl::ResourceTag(&hudRes, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eOnlyValidNow, &full); }
+    sl::Resource uiRes(sl::ResourceType::eTex2d, in.ui, in.uiState);
+    if (in.ui) { uiRes.width = in.renderW; uiRes.height = in.renderH; uiRes.nativeFormat = in.uiFormat; tags[n++] = sl::ResourceTag(&uiRes, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eOnlyValidNow, &full); }
     sl::Extent bbExt{ (uint32_t)(in.vpY < 0 ? 0 : in.vpY), (uint32_t)(in.vpX < 0 ? 0 : in.vpX), in.vpW, in.vpH };
     if (in.vpW && in.vpH && (in.vpW != in.bbW || in.vpH != in.bbH)) tags[n++] = sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &bbExt);   // FG only on the game image rectangle
     r = p_slSetTagForFrame(*g_token, kViewport, tags, n, in.cmd);

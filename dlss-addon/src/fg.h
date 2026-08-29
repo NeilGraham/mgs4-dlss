@@ -33,7 +33,8 @@ namespace fg {
         ID3D12GraphicsCommandList* cmd;
         ID3D12Resource* depth; DXGI_FORMAT depthFormat; uint32_t depthState;
         ID3D12Resource* mv;    uint32_t mvState;         // R16G16_FLOAT, pixels
-        ID3D12Resource* hudless; DXGI_FORMAT hudlessFormat; uint32_t hudlessState;   // optional (nullptr in composite mode)
+        ID3D12Resource* hudless; DXGI_FORMAT hudlessFormat; uint32_t hudlessState;   // optional
+        ID3D12Resource* ui; DXGI_FORMAT uiFormat; uint32_t uiState;                  // optional UI colour + alpha layer (same size as hudless)
         uint32_t renderW, renderH;
         uint32_t bbW, bbH;                                // backbuffer size
         int32_t vpX, vpY; uint32_t vpW, vpH;              // game image rectangle inside the backbuffer (subrect), 0 size = full

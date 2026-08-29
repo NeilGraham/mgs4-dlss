@@ -202,6 +202,12 @@ static int g_cfgDynMask = 1;
 static int g_cfgDynZeroMV = 1;
 static resource g_dynDepth = { 0 }; static resource_view g_dynDsv = { 0 };
 static resource_usage g_dynState = resource_usage::depth_stencil_write;
+// HUD layer for frame generation in composite mode: the game's HUD draws are replayed into this RGBA target (cleared to
+// zero each frame) and handed to DLSS-G as UI colour + alpha, so generated frames get the HUD re-composited unwarped.
+static resource g_ui = { 0 }; static resource_view g_uiRtv = { 0 };
+static resource_usage g_uiState = resource_usage::render_target;
+static uint32_t g_uiDrawsThisFrame = 0, g_uiDrawsLast = 0, g_uiPostSkippedThisFrame = 0, g_uiPostSkippedLast = 0;
+static bool g_uiClearedThisFrame = false;
 static resource g_mask = { 0 };
 static resource_usage g_maskState = resource_usage::unordered_access;
 static uint64_t g_lastDepth = 0;             // depth buffer DLSS used last frame (only draws with it bound are replayed)
@@ -641,6 +647,8 @@ static void release_dlss_resources(device* dev)
     if (g_dynDsv.handle) { dev->destroy_resource_view(g_dynDsv); g_dynDsv = { 0 }; }
     if (g_dynDepth.handle) { dev->destroy_resource(g_dynDepth); g_dynDepth = { 0 }; }
     if (g_mask.handle) { dev->destroy_resource(g_mask); g_mask = { 0 }; }
+    if (g_uiRtv.handle) { dev->destroy_resource_view(g_uiRtv); g_uiRtv = { 0 }; }
+    if (g_ui.handle) { dev->destroy_resource(g_ui); g_ui = { 0 }; }
 }
 
 static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t outW, uint32_t outH, format fmt)
@@ -693,6 +701,12 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r8_unorm, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource),
                              nullptr, resource_usage::unordered_access, &g_mask)) { dev->set_resource_name(g_mask, "MGS4DLSS dynamic mask"); g_maskState = resource_usage::unordered_access; }
     else { logmsg("mask texture failed"); return false; }
+    if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource | resource_usage::copy_source),
+                             nullptr, resource_usage::render_target, &g_ui)) {
+        dev->set_resource_name(g_ui, "MGS4DLSS UI layer"); g_uiState = resource_usage::render_target;
+        if (!dev->create_resource_view(g_ui, resource_usage::render_target, resource_view_desc(fmt), &g_uiRtv)) { logmsg("UI layer RTV failed"); dev->destroy_resource(g_ui); g_ui = { 0 }; }
+        else { const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); }
+    } else logmsg("UI layer texture failed");
 
     resource_view rtv = { 0 };
     if (dev->create_resource_view(g_mv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &rtv)) {
@@ -790,6 +804,12 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
     if (g_cfgDebugMode == 5) {
         vis_dispatch(cmd, cd.texture.width, cd.texture.height, outW, outH);   // show the MV field instead of the DLSS result
+    } else if (g_cfgDebugMode == 6 && g_ui.handle && !upscale) {
+        // show the replayed UI layer instead of the DLSS result (what DLSS-G gets as UI colour + alpha)
+        cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_dest);
+        if (g_uiState != resource_usage::copy_source) { cmd->barrier(g_ui, g_uiState, resource_usage::copy_source); g_uiState = resource_usage::copy_source; }
+        cmd->copy_resource(g_ui, g_out);
+        cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
     } else {
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (NVSDK_NGX_FAILED(r)) { if (g_failCount++ < 5) logmsg("NGX EvaluateFeature -> %s", ngx_str(r)); }
@@ -804,6 +824,14 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fi.depth = reinterpret_cast<ID3D12Resource*>(depth.handle); fi.depthFormat = static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         fi.mv = reinterpret_cast<ID3D12Resource*>(g_mv.handle); fi.mvState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         if (g_cfgPrePost && !upscale && g_cfgDebugMode != 5) { fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
+        else if (!g_cfgPrePost && !upscale && g_cfgDebugMode != 5 && g_ui.handle && g_uiDrawsThisFrame > 0) {
+            // composite mode: the image DLSS-G sees has the HUD baked in; hand it the replayed HUD layer as UI colour+alpha
+            // so it re-composites the HUD on generated frames instead of warping it with the scene
+            if (g_uiState != resource_usage::shader_resource_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_pixel); g_uiState = resource_usage::shader_resource_pixel; }
+            fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+            static bool once = false; if (!once) { once = true; logmsg("FG: UI layer tagged (%u HUD draws replayed this frame, %u post passes skipped)", g_uiDrawsThisFrame, g_uiPostSkippedThisFrame); }
+        }
         fi.renderW = cd.texture.width; fi.renderH = cd.texture.height; fi.bbW = g_bbW; fi.bbH = g_bbH;
         fi.vpX = (int32_t)g_gameVp[0]; fi.vpY = (int32_t)g_gameVp[1]; fi.vpW = (uint32_t)g_gameVp[2]; fi.vpH = (uint32_t)g_gameVp[3];
         fg::CameraInput ci = { g_frameVP, g_havePrevVP ? g_prevVP : g_frameVP, ep.InJitterOffsetX, ep.InJitterOffsetY, ep.InReset != 0, cd.texture.width, cd.texture.height };
@@ -1101,6 +1129,33 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 if (!g_curGeoRt && n >= 20 && n * 10 >= g_geoDrawsLast * 4) g_curGeoRt = s.rt.handle;
             }
             g_geoRt = g_curGeoRt;
+            // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
+            // final texture once the 3D scene is in; post-process passes into it are told apart by sampling a scene-sized
+            // input (half the frame size or more), HUD draws only sample atlases.
+            if (g_ui.handle && g_uiRtv.handle && g_cfgFgMode != 0 && !g_cfgPrePost && !g_injectedThisFrame && !depthOn && g_geoRt
+                && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH) {
+                auto itd = g_depthDrawsPerRt.find(g_geoRt);
+                const uint32_t done = itd != g_depthDrawsPerRt.end() ? itd->second : 0;
+                if (done >= 20 && done * 10 >= g_geoDrawsLast * 8) {
+                    bool post = false;
+                    for (int p = 1; p < 5 && !post; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !post; ++i) {
+                        resource r = resolve_descriptor(dev, s.tables[p], i);
+                        if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width * 2 >= g_dlssW && d.texture.height * 2 >= g_dlssH) post = true; }
+                    }
+                    if (post) g_uiPostSkippedThisFrame++;
+                    else {
+                        t_reentrant = true;
+                        if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
+                        if (!g_uiClearedThisFrame) { const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); g_uiClearedThisFrame = true; }
+                        cmd->bind_render_targets_and_depth_stencil(1, &g_uiRtv, resource_view{ 0 });
+                        if (da.indexed) cmd->draw_indexed(da.count, da.instances, da.first, da.vertex_offset, da.first_instance);
+                        else cmd->draw(da.count, da.instances, da.first, da.first_instance);
+                        cmd->bind_render_targets_and_depth_stencil(s.rtv_count, s.rtvs, s.dsv);
+                        t_reentrant = false;
+                        g_uiDrawsThisFrame++;
+                    }
+                }
+            }
             if (tracing()) {   // where does the 3D target go? log RT switches and every draw referencing it
                 static uint64_t lastRt = 0; static uint32_t drawsSince = 0;
                 std::string refs;
@@ -1256,6 +1311,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
+    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false;
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
     g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
     { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }
@@ -1369,9 +1425,9 @@ static void draw_overlay(effect_runtime*)
     int preset = g_cfgPreset == 10 ? 0 : 1; const char* presets[] = { "J", "K (transformer, default)" };
     if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
     if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
-    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants", "Visualise motion vectors" };
-    int d = g_cfgDebugMode >= 0 && g_cfgDebugMode <= 5 ? g_cfgDebugMode : 0;
-    if (ImGui::Combo("Debug", &d, dbg, 6)) { write_ini_int("DebugMode", d); reload_config(); }
+    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants", "Visualise motion vectors", "Visualise UI layer (frame generation)" };
+    int d = g_cfgDebugMode >= 0 && g_cfgDebugMode <= 6 ? g_cfgDebugMode : 0;
+    if (ImGui::Combo("Debug", &d, dbg, 7)) { write_ini_int("DebugMode", d); reload_config(); }
     ImGui::Separator();
     ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialised yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
@@ -1414,7 +1470,8 @@ static void draw_overlay(effect_runtime*)
         else if (!st.swapchainProxied) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Swapchain was not created through Streamline (restart the game)");
         else {
             ImGui::Text("%s | status 0x%X | max %ux | dynamic MFG %s | vsync %s | VRAM %.0f MB", st.slVersion, st.statusFlags, st.maxFrames + 1, st.dynamicSupported ? "yes" : "no", st.vsyncSupported ? "ok" : "off required", st.vramBytes / 1048576.0);
-            ImGui::Text("Presented %u frames | generated presents seen %u | HUD-less colour: %s", st.framesPresented, st.generatedPresents, g_cfgPrePost ? "yes (pre-post)" : "no (composite: UI inside the image)");
+            ImGui::Text("Presented %u frames | HUD-less colour: %s", st.framesPresented, g_cfgPrePost ? "yes (pre-post)" : "composite: DLAA output + replayed UI layer");
+            if (!g_cfgPrePost) ImGui::Text("UI layer: %u HUD draws replayed last frame, %u post passes skipped", g_uiDrawsLast, g_uiPostSkippedLast);
             if (st.lastError[0]) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", st.lastError);
         }
     }
