@@ -50,7 +50,7 @@ static int g_cfgEnabled = 1;
 static int g_cfgPreset = 11;          // NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer)
 static int g_cfgSharpness100 = 0;
 static int g_cfgLogEveryN = 600;
-static int g_cfgRecreateAfter = 120;
+static int g_cfgRecreateAfter = 0;
 static int g_cfgDebugMode = 0;        // 0 normal, 1 = paint the displayed texture magenta, 2 = bypass DLSS, 3 = trace 3 frames again
 static int g_cfgLastDebugMode = 0;
 static NVSDK_NGX_PerfQuality_Value g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA;
@@ -486,9 +486,15 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
         reset = 1;
         if (g_mvResets++ <= 200) logmsg("RESET f%u: motion vectors disabled", g_frame);
     } else if (!haveCam) {
-        if (g_haveLastGoodVP && ++g_vpMissStreak <= 30) {
+        // Codec calls / menus over a frozen 3D frame have no camera matrix for seconds at a time; resetting every one of
+        // those frames wiped the DLSS (and NR) history for the whole duration. Keep the last camera for as long as it
+        // takes: zero motion on a still image is harmless, and the camera-delta check below fires a single proper reset
+        // when a real camera comes back somewhere else.
+        if (g_haveLastGoodVP) {
+            ++g_vpMissStreak;
             curVP = prevVP = g_lastGoodVP;   // no camera motion this frame, history kept
             haveCam = true; g_vpMissesCovered++;
+            if (g_vpMissStreak == 31) logmsg("f%u: no camera matrix for 30+ frames - keeping the last camera (no history reset)", g_frame);
         } else {
             reset = 1;
             if (g_mvResets++ <= 200) logmsg("RESET f%u: no camera matrix for %u frames (thisVP %d, prevVP %d)", g_frame, g_vpMissStreak, (int)g_haveFrameVP, (int)g_havePrevVP);
@@ -1749,7 +1755,7 @@ static void load_config()
     snprintf(g_iniPath, MAX_PATH, "%s\\mgs4_dlss.ini", g_gameDir);
     g_cfgPreset = GetPrivateProfileIntA("DLSS", "Preset", 11, g_iniPath);
     g_cfgLogEveryN = GetPrivateProfileIntA("DLSS", "LogEveryN", 600, g_iniPath);
-    g_cfgRecreateAfter = GetPrivateProfileIntA("DLSS", "RecreateAfter", 120, g_iniPath);
+    g_cfgRecreateAfter = GetPrivateProfileIntA("DLSS", "RecreateAfter", 0, g_iniPath);
     char mode[32] = "DLAA"; GetPrivateProfileStringA("DLSS", "Mode", "DLAA", mode, sizeof(mode), g_iniPath);
     for (char* p = mode; *p; ++p) *p = (char)tolower((unsigned char)*p);
     struct { const char* n; NVSDK_NGX_PerfQuality_Value v; const char* pretty; } modes[] = {

@@ -26,7 +26,7 @@ A ReShade add-on (API 20, D3D12 only) that creates a real NGX DLSS Super Resolut
 2. Mirrors bgfx's `CopyDescriptors` traffic (`copy_descriptor_tables` event) into its own slot→resource map, because ReShade does not register copied CBV/SRV/UAV descriptors in its view map. That makes the SRVs of any draw resolvable.
 3. At the one draw per frame into the backbuffer-sized target (the 1:1 composite of the finished 3840x2160 frame, UI included), resolves the texture that draw samples — a double-buffered final texture, *not* the render target with the most draws — pairs it with the depth buffer that was bound with it, and calls `NGX_D3D12_EVALUATE_DLSS_EXT` with color/depth/(zero) motion vectors.
 4. Copies the DLSS output over the sampled texture, then natively re-applies bgfx's descriptor heaps, root signature, PSO and root parameters so the composite draw is unaffected.
-5. Re-creates the feature once after 120 evaluations: NGX-hooking add-ons install their hooks when `nvngx_dlss.dll` loads (inside our first `CreateFeature`), so they would otherwise never see the create call that carries the "DLSS contract".
+5. `RecreateAfter=N` (default in the ini: 0 = off) can re-create the feature once after N evaluations. It was needed by older builds of renodx-dlss5 that only hooked NGX after our first `CreateFeature`; current builds hook NGX at Streamline/NGX init and capture the first create (ReShade.log: `feature 18 created` right after it), and the re-create costs a ~70 ms stall, one raw frame and a DLSS + NR history reset mid-scene - leave it off.
 
 Because the NGX calls go through the standard `_nvngx.dll` exports, NGX-hooking add-ons see them: `renodx-dlss5` reports `DLSSNR ACTIVE`, creates its NR feature after ours and evaluates it every frame.
 
@@ -51,7 +51,7 @@ InternalRes=3840x2160    ; size of the game's render targets = your in-game reso
 Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10 = J
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
-RecreateAfter=120
+RecreateAfter=0              ; 0 = never re-create (recommended, see above); N = re-create once after N evaluations
 DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
 JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
