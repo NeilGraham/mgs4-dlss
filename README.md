@@ -152,12 +152,13 @@ never matches) and DLSS is inserted at the first draw that samples it, or at the
 comes first. Draws issued after the insertion (transparents, particles, HUD) are left unjittered. Upscaling modes keep
 the composite insertion (they need the SRV redirect).
 
-### DLSS 5 NR strength vs. pre-HUD insertion
+### DLSS 5 NR vs. pre-HUD insertion (auto)
 
-`renodx-dlss5` runs its NR pass on whatever DLSS evaluates. With the pre-HUD insertion (default in DLAA) that is the raw
-scene, and the game's DOF, colour grading and vignette are applied afterwards, which flattens most of the NR effect.
-Untick **"DLAA before post-process/HUD"** in the panel (`PrePost=0`) to evaluate at the composite instead: NR then sees
-the final image at full strength, at the cost of the vignette/HUD reprojection artifacts.
+`renodx-dlss5` runs its NR pass on whatever DLSS evaluates. With the pre-HUD insertion that is the raw scene, and the
+game's DOF, colour grading and vignette are applied afterwards, which flattens the NR effect (faces in particular).
+So the insertion point is **automatic** (`PrePost=auto`): if `renodx-dlss5.addon64` is loaded in the process, DLAA runs
+at the composite so NR gets the final image; without it, DLAA runs pre-post for the cleanest AA (vignette/HUD outside
+DLSS). Override with the "Insertion point" combo in the panel or `PrePost=1` / `PrePost=0`.
 
 ### Direct stage boot
 

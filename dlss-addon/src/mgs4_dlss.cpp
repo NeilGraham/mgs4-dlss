@@ -187,7 +187,9 @@ static ULONGLONG g_evalRateT0 = 0; static uint32_t g_evalRateN = 0; static float
 // (x' = x + jx_ndc * w) once per constant region and report the same offset to DLSS.
 static int g_cfgJitter = 1;
 static int g_cfgMotionVectors = 1;
-static int g_cfgPrePost = 1;                 // DLAA: run DLSS before the post-process/HUD passes (at the first pass sampling the geometry target)
+static int g_cfgPrePostMode = -1;            // -1 auto (pre-post unless the DLSS 5 NR add-on is loaded), 0 off, 1 on
+static int g_cfgPrePost = 1;                 // effective: DLAA runs before the post-process/HUD passes
+static bool g_nrAddonLoaded = false;         // renodx-dlss5.addon64 present in the process
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
 // into a private depth buffer; the MV pass turns that into DLSS's bias-current-colour mask (and optionally zero motion).
 static int g_cfgDynMask = 1;
@@ -1168,7 +1170,16 @@ static void reload_config()
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
-    g_cfgPrePost = GetPrivateProfileIntA("DLSS", "PrePost", 1, g_iniPath);
+    {
+        char pp[16] = "auto"; GetPrivateProfileStringA("DLSS", "PrePost", "auto", pp, sizeof(pp), g_iniPath);
+        g_cfgPrePostMode = (_stricmp(pp, "auto") == 0 || strcmp(pp, "-1") == 0) ? -1 : (atoi(pp) != 0 ? 1 : 0);
+        // The DLSS 5 NR add-on runs its pass on whatever we evaluate; it needs the final image, so with it loaded we
+        // insert at the composite. Without it, pre-post gives the cleanest AA (vignette/HUD outside DLSS).
+        g_nrAddonLoaded = GetModuleHandleA("renodx-dlss5.addon64") != nullptr;
+        const int eff = g_cfgPrePostMode < 0 ? (g_nrAddonLoaded ? 0 : 1) : g_cfgPrePostMode;
+        if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS 5 NR add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? "loaded" : "not loaded");
+        g_cfgPrePost = eff;
+    }
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
@@ -1311,9 +1322,10 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
     bool mvs = g_cfgMotionVectors != 0;
     if (ImGui::Checkbox("Camera motion vectors (reprojected from depth)", &mvs)) { g_cfgMotionVectors = mvs ? 1 : 0; write_ini_int("MotionVectors", g_cfgMotionVectors); }
-    bool pp = g_cfgPrePost != 0;
-    if (ImGui::Checkbox("DLAA before post-process/HUD (pre-post insertion)", &pp)) { g_cfgPrePost = pp ? 1 : 0; write_ini_int("PrePost", g_cfgPrePost); }
-    ImGui::Text("Insertion: pre-post %u frames, composite %u frames", g_prePostInjections, g_compositeInjections);
+    const char* ppNames[] = { "Auto (composite when the DLSS 5 NR add-on is loaded, else pre-post)", "Pre-post: DLAA before post-process/HUD", "Composite: DLAA on the final image" };
+    int ppSel = g_cfgPrePostMode < 0 ? 0 : (g_cfgPrePostMode ? 1 : 2);
+    if (ImGui::Combo("Insertion point (DLAA)", &ppSel, ppNames, 3)) { write_ini("PrePost", ppSel == 0 ? "auto" : (ppSel == 1 ? "1" : "0")); reload_config(); }
+    ImGui::Text("Active: %s | DLSS 5 NR add-on: %s | pre-post %u frames, composite %u frames", g_cfgPrePost ? "pre-post" : "composite", g_nrAddonLoaded ? "loaded" : "not loaded", g_prePostInjections, g_compositeInjections);
     bool dm = g_cfgDynMask != 0;
     if (ImGui::Checkbox("Character mask (skinned meshes -> bias current colour)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
     bool dp2 = g_cfgDynMaskProps != 0;
