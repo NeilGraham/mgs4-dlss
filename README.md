@@ -6,7 +6,7 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 
 | Step | State |
 |---|---|
-| Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — `d3d12-switch/` |
+| Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — the game has a native renderer option (Options -> Graphics, `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`); `d3d12-switch/` remains as a fallback |
 | Phase 0 — map the frame (scene target, depth, composite draw) | **Done** — see docs |
 | Phase 1a — NGX DLSS (DLAA) created + evaluated every frame, NGX add-ons can hook it | **Done** — `dlss-addon/` (v1: zero jitter / zero motion vectors) |
 | Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
@@ -118,7 +118,14 @@ Character animation still has no motion vectors (Phase 2). Use the overlay toggl
 - `Mode` changes need a restart (render targets are created at startup).
 - `steam_appid.txt` (2492670) is placed next to `mgs4.exe` so the exe can be launched directly for testing; harmless for Steam launches.
 
-## d3d12-switch (`MGS4_D3D12.asi`)
+## Native Direct3D 12 option (preferred)
+
+The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12**, stored as `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`. With it bgfx creates the D3D12 device directly, so the ASI switch below is unnecessary (set `Enabled = 0` in `scripts\MGS4_D3D12.ini` or remove it). Two things to keep in mind on that path:
+
+- bgfx never loads `d3d11.dll`, so an ASI loader installed under that name would not load any more. Install Ultimate ASI Loader as **`winmm.dll`** (imported by `mgs4.exe` at startup) instead — that is what this setup uses now, and `MGSFPSUnlock.asi` keeps working.
+- The same settings file has `enableFXAA` (turn it off with DLAA — it only blurs the DLSS input) and `vsync` / `fpsLimiter` (vsync off is better for frame-generation latency).
+
+## d3d12-switch (`MGS4_D3D12.asi`) — fallback
 
 The port renders through [bgfx](https://github.com/bkaradzic/bgfx) and picks Direct3D 11. bgfx tries backends in score order (D3D11, then D3D12, …) and moves on when one fails to create a device. The ASI hooks the system `d3d11.dll`'s `D3D11CreateDevice` / `D3D11CreateDeviceAndSwapChain` and returns `E_FAIL` for calls that carry `D3D11_CREATE_DEVICE_SINGLETHREADED` (0x1 — bgfx passes 0x21), so bgfx falls through to its D3D12 backend. Nothing else is patched.
 
