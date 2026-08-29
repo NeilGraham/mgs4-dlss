@@ -120,9 +120,14 @@ Characters and props get real motion vectors without touching a single shader: f
 - The velocity pass uses the viewport the scene was rendered with (see dynamic resolution below).
 - Overlay: "Object motion: N draws recorded, N streamed out, N without history, ..."; the MV visualiser (Debug mode 5) shows object motion as colour differing from the camera field.
 
-### Dynamic resolution in the port (`DRS=1`)
+### Dynamic resolution in the port (`DRS`, off by default)
 
-On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2624x1474, 2208x1240, 1536x862 inside 3024x1701; the composite stretches it to the screen) — dynamic resolution scaling driven by GPU load (loading stretches, heavy cutscene shots, anything the add-on adds). Left alone this breaks any temporal technique: the picture zooms in texture space on every step. The add-on handles it: the scene viewport is detected per frame (the most common viewport among the scene's depth-tested draws — a few full-size depth-tested quads exist too), the DLSS feature is created in a scalable mode (DLAA becomes a Quality-mode feature: same model and preset, but NGX accepts render sub-rects down to ~50 %), each frame is evaluated on the sub-rect (`InRenderSubrectDimensions`), jitter/motion vectors/FG inputs use viewport units, and the full-size DLSS output is resampled (4-tap bilinear) back into the sub-rect so the game's composite and post chain stay untouched. The overlay shows the current viewport and whether the sub-rect path is active. Next quality step: sample the full-size output directly in the composite (true super-resolution from the sub-rect) — needs the composite's scale constant or a replacement blit.
+On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2624x1474, 2208x1240, 1536x862 inside 3024x1701; the composite stretches it to the screen) — dynamic resolution scaling driven by GPU load (loading stretches, heavy cutscene shots, anything the add-on adds). Left alone this breaks any temporal technique: the picture zooms in texture space on every step. The add-on handles it: the scene viewport is detected per frame (the most common viewport among the scene's depth-tested draws — a few full-size depth-tested quads exist too), the DLSS feature is created in a scalable mode (DLAA becomes a Quality-mode feature: same model and preset, but NGX accepts render sub-rects down to ~50 %), each frame is evaluated on the sub-rect (`InRenderSubrectDimensions`), jitter/motion vectors/FG inputs use viewport units, and the full-size DLSS output is resampled (4-tap bilinear) back into the sub-rect so the game's composite and post chain stay untouched. The overlay shows the current viewport and whether the sub-rect path is active. **This is off by default** (`DRS=0`):
+the viewport detection can pick up a pass that is not the main scene, and then DLSS - and anything layered on its
+output, such as DLSS 5 NR - only processes a shrinking rectangle in the top-left corner of the frame. Detection is now
+restricted to draws into the frame's own geometry target with a viewport covering at least half of it, and a new
+sub-rect is adopted only after the same reading has held for 20 frames; enable `DRS=1` only if the port is actually
+seen scaling resolution. Next quality step: sample the full-size output directly in the composite (true super-resolution from the sub-rect) — needs the composite's scale constant or a replacement blit.
 
 ### Known limitations
 
@@ -207,7 +212,8 @@ scan-code `SendInput` events. Explicit sequences also work:
 
 ### Recording the in-game cutscenes (4K60 AV1)
 
-`toolsecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
+`tools
+ecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
 
 - boots each `<stage>_D<n>` entry in chronological order (`tools/scenes.csv`),
 - drives OBS over obs-websocket (`tools/obs_control.py`): a dedicated scene with a Game Capture source cropped to the

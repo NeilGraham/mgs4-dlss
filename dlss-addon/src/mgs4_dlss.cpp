@@ -239,7 +239,7 @@ static viewport g_sceneVpFrame = {}; static bool g_sceneVpFrameValid = false;   
 static std::unordered_map<uint64_t, std::pair<uint32_t, viewport>> g_vpHist;   // this frame: (w,h) -> draw count, viewport
 // Dynamic resolution: the port renders the scene into a variable sub-viewport of its targets. With DRS=1 the DLSS
 // feature is created in a scalable mode, evaluated on the sub-rect and its full-size output is resampled back into it.
-static int g_cfgDRS = 1;
+static int g_cfgDRS = 0;
 static resource g_scratch = { 0 }; static resource_usage g_scratchState = resource_usage::unordered_access;
 static uint32_t g_drsMinW = 0, g_drsMinH = 0;    // DLSS dynamic minimum for the feature's mode
 static uint32_t g_drsFrames = 0, g_drsSubW = 0, g_drsSubH = 0; static bool g_drsActiveLast = false;
@@ -1330,7 +1330,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             if (s.ds.handle) {
                 g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
                 if (s.dsv.handle) g_dsvForDs[s.ds.handle] = s.dsv;
-                if (s.vp_valid && s.rt_w >= 640 && s.vp.width <= s.rt_w && (g_dlssW == 0 || s.rt_w == g_dlssW)) {
+                if (s.vp_valid && s.rt_w >= 640 && s.vp.width <= s.rt_w && (g_dlssW == 0 || s.rt_w == g_dlssW)
+                    && (g_curGeoRt == 0 || s.rt.handle == g_curGeoRt)          // only the scene target, not shadow/reflection passes
+                    && s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f   // a plausible full-frame viewport
+                    && s.vp.x <= 1.0f && s.vp.y <= 1.0f) {
                     // the 3D scene's viewport = the one most depth-tested draws use (a few full-size depth-tested quads exist too)
                     auto& e = g_vpHist[(uint64_t)(uint32_t)(s.vp.width + 0.5f) << 32 | (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) e.second = s.vp;
@@ -1581,7 +1584,7 @@ static void reload_config()
         }
     }
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 0, g_iniPath);
-    g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 1, g_iniPath);
+    g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 0, g_iniPath);
     g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
@@ -1628,7 +1631,18 @@ static void frame_rollover()
     }
     g_hudDrawsLast = g_hudDrawsThisFrame; g_hudDrawsThisFrame = 0;
     objmv::new_frame(g_frame); g_drawOccurrence.clear();
-    if (g_sceneVpFrameValid) { g_sceneVp = g_sceneVpFrame; g_sceneVpValid = true; } g_sceneVpFrameValid = false; g_vpHist.clear();
+    if (g_sceneVpFrameValid) {
+        // hysteresis: a new sub-rect is only adopted after the same reading has held for several frames, so a
+        // one-off odd viewport can never shrink the region DLSS (and anything layered on it) processes
+        static uint32_t stable = 0; static viewport pending = {};
+        if (fabsf(pending.width - g_sceneVpFrame.width) < 2.0f && fabsf(pending.height - g_sceneVpFrame.height) < 2.0f) ++stable;
+        else { pending = g_sceneVpFrame; stable = 0; }
+        if (stable >= 20 && (fabsf(g_sceneVp.width - pending.width) >= 2.0f || fabsf(g_sceneVp.height - pending.height) >= 2.0f)) {
+            if (g_sceneVpValid) logmsg("scene viewport changed: %.0fx%.0f -> %.0fx%.0f (stable for %u frames)", g_sceneVp.width, g_sceneVp.height, pending.width, pending.height, stable);
+            g_sceneVp = pending; g_sceneVpValid = true;
+        } else if (!g_sceneVpValid && stable >= 20) { g_sceneVp = pending; g_sceneVpValid = true; }
+    }
+    g_sceneVpFrameValid = false; g_vpHist.clear();
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
     g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
     { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }

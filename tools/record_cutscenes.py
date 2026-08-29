@@ -124,7 +124,24 @@ def record_one(cl, pad, index, stage, args):
         kill_game(); return info
 
     # phase 2: record
-    cl.start_record()
+    try:
+        if cl.get_record_status().output_active:      # a previous run may have been killed mid-recording
+            log("    OBS was still recording; stopping that first")
+            cl.stop_record(); time.sleep(2)
+    except Exception:
+        pass
+    for attempt in range(3):
+        try:
+            cl.start_record(); break
+        except Exception as e:
+            log(f"    StartRecord failed ({e}); retrying")
+            try:
+                cl.stop_record()
+            except Exception:
+                pass
+            time.sleep(3)
+    else:
+        info["status"] = "obs-error"; kill_game(); return info
     t_rec = time.time()
     last_bytes, last_check, static_since, gameplay_since, frozen_since = 0, time.time(), None, None, None
     baseline_draws, busy_ticks = None, 0     # gameplay draws far more than a cutscene: a second, independent signal
@@ -140,11 +157,11 @@ def record_one(cl, pad, index, stage, args):
             t = TICK_RE.search(line)
             if t:
                 draws, hud = int(t.group(3)), int(t.group(4))
-                if time.time() - t_rec < 45 and (baseline_draws is None or draws < baseline_draws):
-                    baseline_draws = draws          # quietest reading of the opening seconds
-                elif baseline_draws and draws > max(800, baseline_draws * 2.5):
+                if time.time() - t_rec < 60:
+                    baseline_draws = max(baseline_draws or 0, draws)   # busiest reading of the opening minute
+                elif baseline_draws and draws > max(1200, baseline_draws * 3.0):
                     busy_ticks += 1
-                    if busy_ticks >= 2:
+                    if busy_ticks >= 4:             # sustained for ~40 s
                         log(f"    draw count {draws} vs cutscene baseline {baseline_draws} -> gameplay")
                         end_reason = "gameplay-drawcount"; break
                 else:
