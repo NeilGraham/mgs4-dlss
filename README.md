@@ -38,24 +38,44 @@ dlss-addon\build.bat                       :: -> build\mgs4_dlss.addon64
 copy build\mgs4_dlss.addon64 "<game>\MGS4\"
 ```
 
-Optional `MGS4\mgs4_dlss.ini`:
+`MGS4\mgs4_dlss.ini`:
 
 ```ini
 [DLSS]
-Enabled=1        ; live-reloaded every ~second
-Preset=11        ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10 = J
-Sharpness=0      ; 0..100 (live)
+Enabled=1                ; live-reloaded every ~second
+Mode=DLAA                ; DLAA (=Native) | Quality | Balanced | Performance | UltraPerformance  - needs a game restart
+InternalRes=3840x2160    ; size of the game's render targets = your in-game resolution; auto-detected and written on first run
+Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10 = J
+Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=120
-DebugMode=0      ; live: 1 = paint the displayed texture magenta (path test), 2 = bypass DLSS (A/B), 3 = trace 3 frames
+DebugMode=0              ; live: 1 = paint the displayed texture magenta (path test), 2 = bypass DLSS (A/B), 3 = trace 3 frames
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
 
-### Known limitations (v1)
+### DLSS modes (upscaling)
 
-- No sub-pixel jitter and zero motion vectors: DLSS behaves as a temporal filter with no sub-pixel information, so static shots converge cleanly but camera/object motion ghosts. Phase 1b adds Halton jitter via the projection upload and camera-only motion vectors reconstructed from depth.
-- DLAA only (render = output resolution). Real upscaling needs Phase 3.
+`Mode` other than DLAA makes the game render smaller and lets DLSS upscale:
+
+1. At device creation NGX's optimal settings give the render resolution for the mode (e.g. 3840x2160 Quality -> 2560x1440, Performance -> 1920x1080, Ultra Performance -> 1280x720).
+2. Every texture the game creates at `InternalRes` is shrunk to the render resolution (`create_resource` event); viewports and scissors of draws into shrunk targets are scaled to match.
+3. At the composite draw DLSS upscales the shrunk final texture into a full-size output and the draw's SRV descriptor is rewritten in place to sample that output, so the composite and the backbuffer are untouched.
+
+Because the game's render-target size follows the in-game resolution, `InternalRes` must match it; the add-on writes the detected value to the ini whenever it differs (change resolution in-game -> restart once). Verified in Performance mode (1512x850 -> 3024x1701): correct composition, HUD and pillarboxing; other modes use the same path but were not individually tested.
+
+**Expect it to look soft.** Without sub-pixel jitter DLSS has no extra information to reconstruct detail from, so the upscaling modes currently behave like a good temporal upscaler with no supersampling. They are useful for testing NR/DLSS at lower cost, not for image quality yet - DLAA is the quality mode until jitter lands. On an RTX 5090 the game is not GPU-bound anyway.
+
+### Frame generation (not implemented - here is why)
+
+- **2x today:** NVIDIA Smooth Motion (driver-level, RTX 40/50, works on DX12 titles without game support): NVIDIA App -> Graphics -> `mgs4.exe` -> Driver Settings -> Smooth Motion. Nothing to install.
+- **DLSS Frame Generation / Multi-Frame Generation (2x/3x/4x)** is only exposed through NVIDIA Streamline (`sl.dlssg`), not through the plain NGX API this add-on uses. Doing it from an add-on means initialising Streamline in-process, letting it take over the DXGI swapchain (which ReShade also proxies), and feeding it **real motion vectors + depth + HUD-less color** every frame. With this game's zero motion vectors the generated frames would be wrong on any camera movement, so it makes no sense before Phase 1b (camera motion vectors) exists. It is a separate project on the order of the DLSS integration itself.
+- Alternative once motion vectors exist: OptiScaler (loaded as `winmm.dll`, which the game imports) can hook the NGX DLSS feature this add-on creates and provide FSR/XeSS frame generation.
+
+### Known limitations
+
+- No sub-pixel jitter and zero motion vectors: DLSS behaves as a temporal filter with no sub-pixel information, so static shots converge cleanly but camera/object motion ghosts, and upscaling modes are soft. Phase 1b adds Halton jitter via the projection upload and camera-only motion vectors reconstructed from depth.
+- `Mode` changes need a restart (render targets are created at startup).
 
 ## d3d12-switch (`MGS4_D3D12.asi`)
 

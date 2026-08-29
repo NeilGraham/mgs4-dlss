@@ -96,3 +96,15 @@ driver's NGX runtime loads; `EvaluateFeature_C` is not exported by driver 616.56
   decoding a raw CPU pointer indexes ReShade's heap table out of bounds and crashes the game.
 - renodx-dlss5 hooks `_nvngx.dll` when `nvngx_dlss.dll` loads (inside the first CreateFeature) and needs to observe a
   CreateFeature to capture its "DLSS contract"; re-creating the feature once after ~1 s solves it.
+
+## Upscaling modes (2026-08-28, evening)
+
+- The game's render targets follow the in-game resolution (observed 3840x2160 and, after the user changed it, 3024x1701
+  with a 3024x1890 swapchain and a composite viewport of (0,95 3024x1701)). Every texture at that size (12 of them:
+  RGBA8 targets, R16G16B16A16F, R32F, two R24G8 depths) can be shrunk at creation without breaking the frame; viewports
+  and scissors of draws into shrunk targets must be scaled (bgfx sets them per view, after OMSetRenderTargets).
+- `NGX_DLSS_GET_OPTIMAL_SETTINGS` must be called with the *capability* parameters (`GetCapabilityParameters`), not an
+  `AllocateParameters` block - otherwise it fails with `NVSDK_NGX_Result_FAIL_OutOfDate` (0xBAD0000C).
+- Rewriting the composite draw's SRV descriptor in place (`CreateShaderResourceView` at the slot's original CPU handle)
+  is enough to make it sample the full-size DLSS output; bgfx rewrites the slot next frame anyway.
+- Frame generation: DLSS-G/MFG is Streamline-only and needs real motion vectors; deferred until Phase 1b.
