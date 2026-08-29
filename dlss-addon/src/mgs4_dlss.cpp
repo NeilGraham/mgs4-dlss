@@ -23,6 +23,7 @@
 #include <nvsdk_ngx_helpers.h>
 #include "mv_cs.h"   // g_mv_cs[]: compiled src/mv_cs.hlsl (camera-only motion vectors from depth)
 #include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualisation of the motion vectors)
+#include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include <cstdio>
 #include <cstdarg>
@@ -208,6 +209,13 @@ static resource g_ui = { 0 }; static resource_view g_uiRtv = { 0 };
 static resource_usage g_uiState = resource_usage::render_target;
 static uint32_t g_uiDrawsThisFrame = 0, g_uiDrawsLast = 0, g_uiPostSkippedThisFrame = 0, g_uiPostSkippedLast = 0;
 static bool g_uiClearedThisFrame = false;
+// pre-HUD capture of the final texture (taken right before the first HUD draw) and the HUD-less image built from the
+// DLAA output + that capture under the UI layer (DLSS-G derives the UI from backbuffer - HUD-less when its own UI
+// recomposition is unavailable, e.g. with the NVIDIA app's frame-generation preset override)
+static resource g_preHud = { 0 }, g_hudless = { 0 };
+static resource_usage g_preHudState = resource_usage::copy_dest, g_hudlessState = resource_usage::copy_dest;
+static bool g_preHudCaptured = false;
+static uint32_t g_hudlessFrames = 0;
 static resource g_mask = { 0 };
 static resource_usage g_maskState = resource_usage::unordered_access;
 static uint64_t g_lastDepth = 0;             // depth buffer DLSS used last frame (only draws with it bound are replayed)
@@ -328,6 +336,7 @@ static void select_frame_vp()
 static ID3D12RootSignature* g_mvRootSig = nullptr;
 static ID3D12PipelineState* g_mvPso = nullptr;
 static ID3D12PipelineState* g_visPso = nullptr;
+static ID3D12PipelineState* g_hudlessPso = nullptr;
 static ID3D12DescriptorHeap* g_mvHeap = nullptr;    // shader visible: 4 slots x (SRV depth, UAV mv) + 4 slots x (SRV mv, UAV out)
 static ID3D12Resource* g_mvCb = nullptr; static uint8_t* g_mvCbPtr = nullptr;   // 8 x 256 B upload ring
 static ID3D12Resource* g_dummyUav = nullptr;   // 8x8 R8 texture bound where a shader declares a UAV it never writes
@@ -403,6 +412,9 @@ static bool mv_init()
     pso.CS = { g_mv_vis, sizeof(g_mv_vis) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_visPso));
     if (FAILED(hr)) { logmsg("MV: visualisation PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    pso.CS = { g_hudless_cs, sizeof(g_hudless_cs) };
+    hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_hudlessPso));
+    if (FAILED(hr)) { logmsg("MV: HUD-less PSO failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 64, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // 16 slots x [srv0, srv1, uav0, uav1]
     hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_mvHeap));
     if (FAILED(hr)) { logmsg("MV: CreateDescriptorHeap failed 0x%08lX", (unsigned long)hr); return false; }
@@ -491,6 +503,35 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
 }
 
 // Debug: paint the motion-vector field into g_out (must be in unordered_access state).
+// HUD-less colour: g_hudless (a copy of the DLAA output, in UAV state) gets the pre-HUD capture wherever the UI layer has content.
+static void hudless_dispatch(command_list* cmd, uint32_t w, uint32_t h, DXGI_FORMAT fmt)
+{
+    if (!g_mvReady || !g_hudlessPso) return;
+    const uint32_t slot = 12 + (g_mvSlot % 4);
+    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 4 * inc;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(slot) * 4 * inc;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = fmt; srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_preHud.handle), &srv, cpu);
+    D3D12_CPU_DESCRIPTOR_HANDLE h1 = cpu; h1.ptr += inc;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_ui.handle), &srv, h1);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = fmt; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
+    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_hudless.handle), nullptr, &uav, h2);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDummy = {}; uavDummy.Format = DXGI_FORMAT_R8_UNORM; uavDummy.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE h3 = cpu; h3.ptr += 3 * inc;
+    g_d3d->CreateUnorderedAccessView(g_dummyUav, nullptr, &uavDummy, h3);
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_mvRootSig);
+    native->SetPipelineState(g_hudlessPso);
+    native->SetComputeRootConstantBufferView(0, g_mvCb->GetGPUVirtualAddress());   // unused by this shader
+    native->SetComputeRootDescriptorTable(1, gpu);
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuUav = gpu; gpuUav.ptr += 2 * inc;
+    native->SetComputeRootDescriptorTable(2, gpuUav);
+    native->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
+}
 static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH)
 {
     if (!g_mvReady || !g_visPso) return;
@@ -649,6 +690,8 @@ static void release_dlss_resources(device* dev)
     if (g_mask.handle) { dev->destroy_resource(g_mask); g_mask = { 0 }; }
     if (g_uiRtv.handle) { dev->destroy_resource_view(g_uiRtv); g_uiRtv = { 0 }; }
     if (g_ui.handle) { dev->destroy_resource(g_ui); g_ui = { 0 }; }
+    if (g_preHud.handle) { dev->destroy_resource(g_preHud); g_preHud = { 0 }; }
+    if (g_hudless.handle) { dev->destroy_resource(g_hudless); g_hudless = { 0 }; }
 }
 
 static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t outW, uint32_t outH, format fmt)
@@ -707,6 +750,10 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
         if (!dev->create_resource_view(g_ui, resource_usage::render_target, resource_view_desc(fmt), &g_uiRtv)) { logmsg("UI layer RTV failed"); dev->destroy_resource(g_ui); g_ui = { 0 }; }
         else { const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); }
     } else logmsg("UI layer texture failed");
+    if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource), nullptr, resource_usage::copy_dest, &g_preHud)) { dev->set_resource_name(g_preHud, "MGS4DLSS pre-HUD capture"); g_preHudState = resource_usage::copy_dest; }
+    else logmsg("pre-HUD capture texture failed");
+    if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::copy_dest, &g_hudless)) { dev->set_resource_name(g_hudless, "MGS4DLSS HUD-less colour"); g_hudlessState = resource_usage::copy_dest; }
+    else logmsg("HUD-less texture failed");
 
     resource_view rtv = { 0 };
     if (dev->create_resource_view(g_mv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &rtv)) {
@@ -804,6 +851,22 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
     if (g_cfgDebugMode == 5) {
         vis_dispatch(cmd, cd.texture.width, cd.texture.height, outW, outH);   // show the MV field instead of the DLSS result
+    } else if (g_cfgDebugMode == 7 && g_hudless.handle && g_preHudCaptured && !upscale) {
+        // show the HUD-less colour DLSS-G would get: build it here (same steps as the tagging path), then copy it over the output
+        r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
+        if (!NVSDK_NGX_FAILED(r)) {
+            cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_source);
+            if (g_hudlessState != resource_usage::copy_dest) { cmd->barrier(g_hudless, g_hudlessState, resource_usage::copy_dest); g_hudlessState = resource_usage::copy_dest; }
+            cmd->copy_resource(g_out, g_hudless);
+            cmd->barrier(g_out, resource_usage::copy_source, resource_usage::copy_dest);
+            cmd->barrier(g_hudless, resource_usage::copy_dest, resource_usage::unordered_access); g_hudlessState = resource_usage::unordered_access;
+            if (g_preHudState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_preHud, g_preHudState, resource_usage::shader_resource_non_pixel); g_preHudState = resource_usage::shader_resource_non_pixel; }
+            if (g_uiState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_non_pixel); g_uiState = resource_usage::shader_resource_non_pixel; }
+            hudless_dispatch(cmd, cd.texture.width, cd.texture.height, static_cast<DXGI_FORMAT>(cd.texture.format));
+            cmd->barrier(g_hudless, resource_usage::unordered_access, resource_usage::copy_source); g_hudlessState = resource_usage::copy_source;
+            cmd->copy_resource(g_hudless, g_out);
+            cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
+        }
     } else if (g_cfgDebugMode == 6 && g_ui.handle && !upscale) {
         // show the replayed UI layer instead of the DLSS result (what DLSS-G gets as UI colour + alpha)
         cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_dest);
@@ -827,10 +890,22 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         else if (!g_cfgPrePost && !upscale && g_cfgDebugMode != 5 && g_ui.handle && g_uiDrawsThisFrame > 0) {
             // composite mode: the image DLSS-G sees has the HUD baked in; hand it the replayed HUD layer as UI colour+alpha
             // so it re-composites the HUD on generated frames instead of warping it with the scene
-            if (g_uiState != resource_usage::shader_resource_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_pixel); g_uiState = resource_usage::shader_resource_pixel; }
+            if (g_uiState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_non_pixel); g_uiState = resource_usage::shader_resource_non_pixel; }
             fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-            static bool once = false; if (!once) { once = true; logmsg("FG: UI layer tagged (%u HUD draws replayed this frame, %u post passes skipped)", g_uiDrawsThisFrame, g_uiPostSkippedThisFrame); }
+            if (g_preHudCaptured && g_hudless.handle && g_hudlessPso) {
+                // true HUD-less: DLAA output with the pre-HUD capture under the UI layer
+                cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_source);
+                if (g_hudlessState != resource_usage::copy_dest) { cmd->barrier(g_hudless, g_hudlessState, resource_usage::copy_dest); g_hudlessState = resource_usage::copy_dest; }
+                cmd->copy_resource(g_out, g_hudless);
+                cmd->barrier(g_out, resource_usage::copy_source, resource_usage::unordered_access);
+                cmd->barrier(g_hudless, resource_usage::copy_dest, resource_usage::unordered_access); g_hudlessState = resource_usage::unordered_access;
+                if (g_preHudState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_preHud, g_preHudState, resource_usage::shader_resource_non_pixel); g_preHudState = resource_usage::shader_resource_non_pixel; }
+                hudless_dispatch(cmd, cd.texture.width, cd.texture.height, static_cast<DXGI_FORMAT>(cd.texture.format));
+                fi.hudless = reinterpret_cast<ID3D12Resource*>(g_hudless.handle);
+                g_hudlessFrames++;
+            }
+            fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            static bool once = false; if (!once) { once = true; logmsg("FG: UI layer tagged (%u HUD draws replayed this frame, %u post passes skipped); HUD-less %s", g_uiDrawsThisFrame, g_uiPostSkippedThisFrame, g_preHudCaptured ? "built from the pre-HUD capture" : "= DLAA output (no pre-HUD capture)"); }
         }
         fi.renderW = cd.texture.width; fi.renderH = cd.texture.height; fi.bbW = g_bbW; fi.bbH = g_bbH;
         fi.vpX = (int32_t)g_gameVp[0]; fi.vpY = (int32_t)g_gameVp[1]; fi.vpW = (uint32_t)g_gameVp[2]; fi.vpH = (uint32_t)g_gameVp[3];
@@ -1146,7 +1221,16 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     else {
                         t_reentrant = true;
                         if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
-                        if (!g_uiClearedThisFrame) { const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); g_uiClearedThisFrame = true; }
+                        if (!g_uiClearedThisFrame) {
+                            const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); g_uiClearedThisFrame = true;
+                            if (g_preHud.handle) {   // the final texture right before its first HUD draw = post-processed scene without HUD
+                                if (g_preHudState != resource_usage::copy_dest) { cmd->barrier(g_preHud, g_preHudState, resource_usage::copy_dest); g_preHudState = resource_usage::copy_dest; }
+                                cmd->barrier(s.rt, resource_usage::render_target, resource_usage::copy_source);
+                                cmd->copy_resource(s.rt, g_preHud);
+                                cmd->barrier(s.rt, resource_usage::copy_source, resource_usage::render_target);
+                                g_preHudCaptured = true;
+                            }
+                        }
                         cmd->bind_render_targets_and_depth_stencil(1, &g_uiRtv, resource_view{ 0 });
                         if (da.indexed) cmd->draw_indexed(da.count, da.instances, da.first, da.vertex_offset, da.first_instance);
                         else cmd->draw(da.count, da.instances, da.first, da.first_instance);
@@ -1311,7 +1395,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false;
+    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_preHudCaptured = false;
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
     g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
     { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }
@@ -1425,9 +1509,9 @@ static void draw_overlay(effect_runtime*)
     int preset = g_cfgPreset == 10 ? 0 : 1; const char* presets[] = { "J", "K (transformer, default)" };
     if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
     if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
-    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants", "Visualise motion vectors", "Visualise UI layer (frame generation)" };
-    int d = g_cfgDebugMode >= 0 && g_cfgDebugMode <= 6 ? g_cfgDebugMode : 0;
-    if (ImGui::Combo("Debug", &d, dbg, 7)) { write_ini_int("DebugMode", d); reload_config(); }
+    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants", "Visualise motion vectors", "Visualise UI layer (frame generation)", "Visualise HUD-less colour (frame generation)" };
+    int d = g_cfgDebugMode >= 0 && g_cfgDebugMode <= 7 ? g_cfgDebugMode : 0;
+    if (ImGui::Combo("Debug", &d, dbg, 8)) { write_ini_int("DebugMode", d); reload_config(); }
     ImGui::Separator();
     ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialised yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
@@ -1471,7 +1555,7 @@ static void draw_overlay(effect_runtime*)
         else {
             ImGui::Text("%s | status 0x%X | max %ux | dynamic MFG %s | vsync %s | VRAM %.0f MB", st.slVersion, st.statusFlags, st.maxFrames + 1, st.dynamicSupported ? "yes" : "no", st.vsyncSupported ? "ok" : "off required", st.vramBytes / 1048576.0);
             ImGui::Text("Presented %u frames | HUD-less colour: %s", st.framesPresented, g_cfgPrePost ? "yes (pre-post)" : "composite: DLAA output + replayed UI layer");
-            if (!g_cfgPrePost) ImGui::Text("UI layer: %u HUD draws replayed last frame, %u post passes skipped", g_uiDrawsLast, g_uiPostSkippedLast);
+            if (!g_cfgPrePost) ImGui::Text("UI layer: %u HUD draws replayed last frame, %u post passes skipped; HUD-less frames built %u", g_uiDrawsLast, g_uiPostSkippedLast, g_hudlessFrames);
             if (st.lastError[0]) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", st.lastError);
         }
     }
