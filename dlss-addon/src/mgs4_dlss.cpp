@@ -25,6 +25,7 @@
 #include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualisation of the motion vectors)
 #include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
+#include "objmv.h"   // per-object motion vectors via stream output (objmv.cpp)
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
@@ -87,6 +88,9 @@ struct cl_state {
     ID3D12RootSignature* root_sig = nullptr;
     ID3D12PipelineState* pso = nullptr;
     uint32_t bb_draws = 0;
+    resource vb0 = { 0 }; uint64_t vb0_off = 0;   // first vertex buffer / index buffer (draw identity across frames)
+    resource ib = { 0 }; uint64_t ib_off = 0;
+    uint32_t topology = 0;                        // D3D primitive topology as set by the game
 };
 static std::unordered_map<command_list*, cl_state> g_cl;
 static std::mutex g_clMutex;
@@ -219,6 +223,13 @@ static uint32_t g_hudlessFrames = 0;
 static resource g_mask = { 0 };
 static resource_usage g_maskState = resource_usage::unordered_access;
 static uint64_t g_lastDepth = 0;             // depth buffer DLSS used last frame (only draws with it bound are replayed)
+static int g_cfgObjectMV = 0;                // per-object motion vectors (stream-out of the game's vertex shaders); experimental, off by default
+static viewport g_sceneVp = {};              // viewport of the last dynamic scene draw (the port can render into a sub-viewport of its targets)
+static std::unordered_map<uint64_t, uint32_t> g_drawOccurrence;   // this frame: geometry key -> times drawn so far (pass / instance index)
+static bool g_sceneVpValid = false;
+static std::unordered_map<uint64_t, resource_view> g_dsvForDs;   // depth texture -> the DSV the game binds it with
+static resource_view g_mvRtv = { 0 };
+static uint32_t g_objMvFrames = 0;
 static uint32_t g_dynDrawsThisFrame = 0, g_dynDrawsLastFrame = 0;
 static bool g_dynClearedThisFrame = false;
 static uint32_t g_prevBusiestDraws = 0;      // draws into the busiest scene RT last frame
@@ -683,6 +694,7 @@ static void setup_scaling()
 static void release_dlss_resources(device* dev)
 {
     if (g_dlss) { NVSDK_NGX_D3D12_ReleaseFeature(g_dlss); g_dlss = nullptr; }
+    if (g_mvRtv.handle) { dev->destroy_resource_view(g_mvRtv); g_mvRtv = { 0 }; }
     if (g_mv.handle) { dev->destroy_resource(g_mv); g_mv = { 0 }; }
     if (g_out.handle) { dev->destroy_resource(g_out); g_out = { 0 }; }
     if (g_dynDsv.handle) { dev->destroy_resource_view(g_dynDsv); g_dynDsv = { 0 }; }
@@ -755,11 +767,9 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::copy_dest, &g_hudless)) { dev->set_resource_name(g_hudless, "MGS4DLSS HUD-less colour"); g_hudlessState = resource_usage::copy_dest; }
     else logmsg("HUD-less texture failed");
 
-    resource_view rtv = { 0 };
-    if (dev->create_resource_view(g_mv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &rtv)) {
+    if (dev->create_resource_view(g_mv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &g_mvRtv)) {
         const float zero[4] = { 0, 0, 0, 0 };
-        cmd->clear_render_target_view(rtv, zero);
-        dev->destroy_resource_view(rtv);
+        cmd->clear_render_target_view(g_mvRtv, zero);
     }
     cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
     g_dlssW = w; g_dlssH = h; g_dlssOutW = outW; g_dlssOutH = outH; g_dlssFmt = fmt;
@@ -786,6 +796,15 @@ static void restore_state(device* dev, command_list* cmd, const cl_state& s)
         if (s.table_set[i]) native->SetGraphicsRootDescriptorTable(i, D3D12_GPU_DESCRIPTOR_HANDLE{ s.tables[i].handle });
         if (s.cbv_set[i])   native->SetGraphicsRootConstantBufferView(i, s.cbv[i]);
     }
+    if (s.rtv_count || s.dsv.handle) {
+        D3D12_CPU_DESCRIPTOR_HANDLE h[8] = {}; for (uint32_t i = 0; i < s.rtv_count; ++i) h[i].ptr = (SIZE_T)s.rtvs[i].handle;
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvh = { (SIZE_T)s.dsv.handle };
+        native->OMSetRenderTargets(s.rtv_count, s.rtv_count ? h : nullptr, FALSE, s.dsv.handle ? &dsvh : nullptr);
+    }
+    const float k = (s.rt_scaled && g_internalW) ? float(g_renderW) / float(g_internalW) : 1.0f, ky = (s.rt_scaled && g_internalH) ? float(g_renderH) / float(g_internalH) : 1.0f;
+    if (s.vp_valid) { D3D12_VIEWPORT v = { s.vp.x * k, s.vp.y * ky, s.vp.width * k, s.vp.height * ky, s.vp.min_depth, s.vp.max_depth }; native->RSSetViewports(1, &v); }
+    if (s.sc_valid) { D3D12_RECT r = { (LONG)(s.sc.left * k), (LONG)(s.sc.top * ky), (LONG)(s.sc.right * k), (LONG)(s.sc.bottom * ky) }; native->RSSetScissorRects(1, &r); }
+    if (s.topology) native->IASetPrimitiveTopology(static_cast<D3D12_PRIMITIVE_TOPOLOGY>(s.topology));
 }
 
 static resource pick_depth(device* dev, resource color)
@@ -835,6 +854,20 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, cd.texture.width, cd.texture.height);
 
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    // Per-object motion: rasterise the stream-out captures over the camera vectors (depth-tested against the scene depth).
+    if (g_cfgObjectMV && objmv::has_captures() && g_mvRtv.handle) {
+        auto itv = g_dsvForDs.find(depth.handle);
+        if (itv != g_dsvForDs.end() && itv->second.handle) {
+            cmd->barrier(depth, resource_usage::shader_resource_non_pixel, resource_usage::depth_stencil_write);
+            cmd->barrier(g_mv, g_mvState, resource_usage::render_target); g_mvState = resource_usage::render_target;
+            const float k = (g_scaling && g_internalW) ? float(g_renderW) / float(g_internalW) : 1.0f, ky = (g_scaling && g_internalH) ? float(g_renderH) / float(g_internalH) : 1.0f;
+            D3D12_VIEWPORT svp = g_sceneVpValid ? D3D12_VIEWPORT{ g_sceneVp.x * k, g_sceneVp.y * ky, g_sceneVp.width * k, g_sceneVp.height * ky, g_sceneVp.min_depth, g_sceneVp.max_depth } : D3D12_VIEWPORT{ 0, 0, float(cd.texture.width), float(cd.texture.height), 0, 1 };
+            objmv::velocity(native, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)g_mvRtv.handle }, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)itv->second.handle }, cd.texture.width, cd.texture.height, svp);
+            cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
+            cmd->barrier(depth, resource_usage::depth_stencil_write, resource_usage::shader_resource_non_pixel);
+            g_objMvFrames++;
+        }
+    }
     NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
     ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(color.handle);
     ep.Feature.pInOutput = reinterpret_cast<ID3D12Resource*>(g_out.handle);
@@ -996,6 +1029,7 @@ static void on_init_pipeline(device*, pipeline_layout, uint32_t count, const pip
 }
 static void on_destroy_pipeline(device*, pipeline p)
 {
+    objmv::forget_pso(reinterpret_cast<ID3D12PipelineState*>(p.handle));
     std::lock_guard<std::mutex> lock(g_psoMutex);
     g_psoDepth.erase(p.handle);
 }
@@ -1005,6 +1039,7 @@ static void on_destroy_resource(device*, resource res)
         std::lock_guard<std::mutex> lock(g_scaledMutex);
         g_scaledTex.erase(res.handle);
         g_liveTex.erase(res.handle);
+        g_dsvForDs.erase(res.handle);
     }
     // forget every cross-frame reference to it (level transitions destroy and recreate the render targets)
     if (g_prevBusiestRt == res.handle) g_prevBusiestRt = 0;
@@ -1120,6 +1155,21 @@ static void on_push_descriptors(command_list* cmd, shader_stage stages, pipeline
     s.cbv[param] = buf->GetGPUVirtualAddress() + br->offset; s.cbv_set[param] = true; s.table_set[param] = false;
     s.cbv_res[param] = br->buffer; s.cbv_off[param] = br->offset;
 }
+static void on_bind_vertex_buffers(command_list* cmd, uint32_t first, uint32_t count, const resource* buffers, const uint64_t* offsets, const uint32_t*)
+{
+    if (first != 0 || count == 0) return;
+    std::lock_guard<std::mutex> lock(g_clMutex);
+    cl_state& s = g_cl[cmd]; s.vb0 = buffers[0]; s.vb0_off = offsets ? offsets[0] : 0;
+}
+static void on_bind_index_buffer(command_list* cmd, resource buffer, uint64_t offset, uint32_t)
+{
+    std::lock_guard<std::mutex> lock(g_clMutex);
+    cl_state& s = g_cl[cmd]; s.ib = buffer; s.ib_off = offset;
+}
+static void on_bind_pipeline_states(command_list* cmd, uint32_t count, const dynamic_state* states, const uint32_t* values)
+{
+    for (uint32_t i = 0; i < count; ++i) if (states[i] == dynamic_state::primitive_topology) { std::lock_guard<std::mutex> lock(g_clMutex); g_cl[cmd].topology = values[i]; }
+}
 static void on_bind_pipeline(command_list* cmd, pipeline_stage stages, pipeline p)
 {
     if ((stages & pipeline_stage::all_graphics) == 0 && stages != pipeline_stage::all) return;
@@ -1174,13 +1224,36 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             g_drawsPerRt[s.rt.handle]++;
             if (s.ds.handle) {
                 g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
+                if (s.dsv.handle) g_dsvForDs[s.ds.handle] = s.dsv;
                 if (dumping()) analyse_scene_draw(s);
+                const bool skinned = pso_get(s.pso).skinned;
+                // Per-object motion (step 1): record this draw's constants before the jitter patch, keyed by draw identity.
+                int mvSlot = -1; bool havePrev = false;
+                if (g_cfgObjectMV && objmv::ready() && !g_injectedThisFrame && s.cbv_set[2] && s.cbv_res[2].handle && da.count > 6 && (skinned || g_cfgDynMaskProps)) {
+                    // Identity across frames: the geometry (buffers, index range) plus the n-th time it is drawn this frame
+                    // (pass / instance). Not the PSO: bgfx hands the same draw a different pipeline object every frame.
+                    uint64_t key = 1469598103934665603ull;
+                    const uint64_t parts[8] = { s.vb0.handle, s.vb0_off, s.ib.handle, s.ib_off, da.first, da.count, (uint64_t)(int64_t)da.vertex_offset, da.instances };
+                    for (uint64_t v : parts) { key ^= v; key *= 1099511628211ull; }
+                    const uint32_t occurrence = g_drawOccurrence[key]++;
+                    key ^= occurrence; key *= 1099511628211ull;
+                    mvSlot = objmv::record(key, reinterpret_cast<ID3D12Resource*>(s.cbv_res[2].handle), s.cbv_off[2], g_frame, &havePrev);
+                    static int diag = 0;
+                    if (diag < 8 && (g_frame % 300) == 0 && skinned) { diag++; logmsg("objmv record f%u: pso=%p vb0=%p+%llu ib=%p+%llu first=%u count=%u vo=%d inst=%u cb=%p+%llu -> slot %d prev=%d%s", g_frame, (void*)s.pso, (void*)s.vb0.handle, (unsigned long long)s.vb0_off, (void*)s.ib.handle, (unsigned long long)s.ib_off, da.first, da.count, da.vertex_offset, da.instances, (void*)s.cbv_res[2].handle, (unsigned long long)s.cbv_off[2], mvSlot, (int)havePrev, skinned ? " skinned" : ""); }
+                }
                 int cls = -1;
                 if (g_cfgEnabled && g_cfgDebugMode != 2) cls = jitter_scene_draw(s);
-                const bool skinned = pso_get(s.pso).skinned;
                 if (skinned) g_skinnedDrawsThisFrame++;
                 // Phase 2: replay dynamic draws (skinned meshes; optionally props with their own transform) into the private depth buffer -> mask.
                 const bool dynamic = skinned || (g_cfgDynMaskProps && cls >= 1);
+                // Per-object motion (step 2): stream out current + previous clip positions of the dynamic draw.
+                if (mvSlot >= 0 && havePrev && dynamic && s.ds.handle == g_lastDepth) {
+                    objmv::RootArgs ra = {}; ra.rootSig = s.root_sig; ra.pso = s.pso; ra.cbParam = 2;
+                    for (int i = 0; i < 5; ++i) { ra.tables[i].ptr = s.tables[i].handle; ra.tableSet[i] = s.table_set[i]; ra.cbv[i] = s.cbv[i]; ra.cbvSet[i] = s.cbv_set[i]; }
+                    objmv::DrawArgs oda = { da.indexed, da.count, da.instances, da.first, da.vertex_offset, da.first_instance };
+                    if (s.vp_valid) { g_sceneVp = s.vp; g_sceneVpValid = true; }
+                    if (objmv::capture(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native()), mvSlot, ra, oda)) restore_state(dev, cmd, s);
+                }
                 if (g_cfgDynMask && dynamic && g_dynDepth.handle && g_dynDsv.handle && s.ds.handle == g_lastDepth && da.count > 6 && !g_injectedThisFrame) {
                     t_reentrant = true;
                     if (g_dynState != resource_usage::depth_stencil_write) { cmd->barrier(g_dynDepth, g_dynState, resource_usage::depth_stencil_write); g_dynState = resource_usage::depth_stencil_write; }
@@ -1368,6 +1441,7 @@ static void reload_config()
             logmsg("frame generation: %s, target fps %.0f, Reflex %d", g_cfgFgMode == 0 ? "off" : (g_cfgFgMode == 4 ? "dynamic" : (g_cfgFgMode == 1 ? "2x" : (g_cfgFgMode == 2 ? "3x" : "4x"))), g_cfgFgTargetFps, g_cfgReflex);
         }
     }
+    g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 0, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
@@ -1396,6 +1470,7 @@ static void frame_rollover()
     g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_preHudCaptured = false;
+    objmv::new_frame(g_frame); g_drawOccurrence.clear();
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
     g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
     { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }
@@ -1405,11 +1480,13 @@ static void frame_rollover()
     g_drawsPerRt.clear(); g_drawsPerDs.clear();
     // jitter bookkeeping for the next frame
     static uint32_t lastLogged = 0;
-    if (g_frame > 1300 && (g_frame - lastLogged) >= 1200) {
+    if (g_frame > 600 && (g_frame - lastLogged) >= 600) {
         lastLogged = g_frame; g_missLogBudget = 3;
         logmsg("jitter (this frame): calls %u, no-cbv %u, dup-region %u, map-fail %u, patched %u, no-matrix %u; VP found=%d (votes %zu); MV dispatches %u, resets %u, cam delta now rot %.3f pos %.1f, max in window rot %.3f pos %.1f, VP changed in %u frames; insertion pre-post %u / composite %u",
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
+        logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
+        { const objmv::Stats& os = objmv::stats(); logmsg("   object motion: ready %d, last frame recorded %u / streamed out %u / no history %u / skipped %u; SO PSOs %u (%u failed), root sigs seen %u, PSOs seen %u, slots %u, velocity passes %u, depth match %d", (int)os.ready, os.recordedLast, os.capturedLast, os.noPrevLast, os.skippedLast, os.soPsos, os.soPsoFailures, os.rootSigsSeen, os.psosSeen, os.slotsUsed, os.velocityFrames, (int)(g_dsvForDs.count(g_lastDepth) != 0)); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
         g_camDeltaRotMax = g_camDeltaPosMax = 0; g_vpChanges = 0;
@@ -1442,6 +1519,7 @@ static void on_init_device(device* dev)
     logmsg("device created: api=%u (d3d12=%u)", (unsigned)dev->get_api(), (unsigned)device_api::d3d12);
     if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (install MGS4_D3D12.asi)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
+    objmv::init(g_d3d, logmsg);   // hooks root signature / PSO creation: must precede the game's pipelines
     // Streamline (frame generation) is only loaded when FrameGen is enabled at startup: it takes over the swapchain,
     // so everything else (ReShade, the DLAA path, NGX add-ons) must be known to work with it before it is on by default.
     if (g_cfgFgMode != 0) { fg::init(g_d3d, g_gameDirW, logmsg); fg::set_frame_callback(frame_rollover); }   // before the game creates its swapchain
@@ -1464,6 +1542,7 @@ static void on_destroy_device(device* dev)
     if (g_ngxParams) { NVSDK_NGX_D3D12_DestroyParameters(g_ngxParams); g_ngxParams = nullptr; }
     if (g_ngxReady) { NVSDK_NGX_D3D12_Shutdown1(g_d3d); g_ngxReady = false; }
     fg::shutdown();
+    objmv::shutdown();
 }
 
 static void load_config()
@@ -1518,6 +1597,8 @@ static void draw_overlay(effect_runtime*)
     else ImGui::Text("Feature: none yet");
     ImGui::Text("Evaluations: %u  (%.0f/s)", g_evalCount, g_evalRate);
     ImGui::Text("Internal res %ux%u, render %ux%u%s", g_internalW, g_internalH, g_scaling ? g_renderW : g_internalW, g_scaling ? g_renderH : g_internalH, g_scaling ? " (textures shrunk)" : "");
+    if (g_sceneVpValid && g_dlssW && ((uint32_t)(g_sceneVp.width + 0.5f) < g_dlssW * (g_scaling ? g_renderW : g_internalW) / g_internalW || (uint32_t)(g_sceneVp.height + 0.5f) < g_dlssH * (g_scaling ? g_renderH : g_internalH) / g_internalH))
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "The game renders the scene into a %.0fx%.0f viewport inside its %ux%u targets (its resolution option is below native). DLSS/motion vectors assume the full target - set the game's resolution to native.", g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
     bool jit = g_cfgJitter != 0;
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
     bool mvs = g_cfgMotionVectors != 0;
@@ -1532,6 +1613,14 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Also mask props with their own transform", &dp2)) { g_cfgDynMaskProps = dp2 ? 1 : 0; write_ini_int("DynamicMaskProps", g_cfgDynMaskProps); }
     bool dz = g_cfgDynZeroMV != 0;
     if (ImGui::Checkbox("Zero motion on masked objects (third-person camera turns)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
+    bool om = g_cfgObjectMV != 0;
+    if (ImGui::Checkbox("Per-object motion vectors (stream-out of the game's vertex shaders)", &om)) { g_cfgObjectMV = om ? 1 : 0; write_ini_int("ObjectMV", g_cfgObjectMV); }
+    {
+        const objmv::Stats& os = objmv::stats();
+        if (!os.ready) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Object motion: not available (%s)", os.lastError[0] ? os.lastError : "init failed");
+        else ImGui::Text("Object motion: %u draws recorded, %u streamed out, %u without history, %u skipped last frame | SO PSOs %u (%u failed) | velocity passes %u", os.recordedLast, os.capturedLast, os.noPrevLast, os.skippedLast, os.soPsos, os.soPsoFailures, os.velocityFrames);
+        if (os.lastError[0] && os.ready) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", os.lastError);
+    }
     ImGui::Text("Dynamic draws replayed last frame: %u (skinned %u)", g_dynDrawsLastFrame, g_skinnedDrawsLast);
     ImGui::Separator();
     {
@@ -1595,6 +1684,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         reshade::register_event<reshade::addon_event::bind_descriptor_tables>(on_bind_descriptor_tables);
         reshade::register_event<reshade::addon_event::push_descriptors>(on_push_descriptors);
         reshade::register_event<reshade::addon_event::bind_pipeline>(on_bind_pipeline);
+        reshade::register_event<reshade::addon_event::bind_vertex_buffers>(on_bind_vertex_buffers);
+        reshade::register_event<reshade::addon_event::bind_index_buffer>(on_bind_index_buffer);
+        reshade::register_event<reshade::addon_event::bind_pipeline_states>(on_bind_pipeline_states);
         reshade::register_event<reshade::addon_event::draw>(on_draw);
         reshade::register_event<reshade::addon_event::draw_indexed>(on_draw_indexed);
         reshade::register_event<reshade::addon_event::copy_resource>(on_copy_resource);

@@ -12,7 +12,7 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 | Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
 | In-overlay controls (ReShade Add-ons tab) | **Done** |
 | Frame generation (Streamline DLSS-G: 2x/3x/4x, dynamic target fps, Reflex; live switching) | **Done** — `dlss-addon/src/fg.cpp` |
-| Phase 2 — per-object motion vectors | planned |
+| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Implemented, experimental** (`ObjectMV=1`; off by default until validated at a fixed render resolution) |
 | Phase 3 — real upscaling (internal res < output res) | maybe |
 
 See [docs/renderer-notes.md](docs/renderer-notes.md) for what we know about the port and the full plan.
@@ -111,6 +111,17 @@ geometry shaders, `c[1..4]` for others. It is recognisable without knowing the s
 State of tuning: ~60–75% of scene draws expose a recognisable matrix; the rest (HUD/orthographic draws, one shader family
 with a different constant layout) render unjittered, so overlay elements can look slightly softer with jitter on.
 Character animation still has no motion vectors (Phase 2). Use the overlay toggles to compare.
+
+### Phase 2: per-object motion vectors (`ObjectMV`, experimental)
+
+Characters and props get real motion vectors without touching a single shader: for every dynamic draw (skinned meshes; props with `DynamicMaskProps`) the add-on records the draw's vertex-shader constants (before the jitter patch) keyed by geometry + occurrence, and — when the same draw was seen last frame — runs the game's own vertex shader twice with **stream output** capturing `SV_Position` (this frame's constants, then last frame's), on a clone of bgfx's root signature with the stream-output flag and a stream-out variant of the draw's PSO (VS + input layout, no rasterisation). At the DLSS insertion an indirect draw rasterises the current positions with a small VS/PS pair and writes `previous − current` in pixels over the camera vectors, depth-tested (reversed-Z, greater-equal, small bias) against the scene depth so only visible object surfaces are replaced. Notes:
+- bgfx creates its pipelines through `ID3D12Device2::CreatePipelineState` (the subobject stream) and hands the *same draw a different pipeline object every frame*, so the draw key deliberately excludes the PSO.
+- The velocity pass uses the viewport the scene was rendered with (see dynamic resolution below).
+- Overlay: "Object motion: N draws recorded, N streamed out, N without history, ..."; the MV visualiser (Debug mode 5) shows object motion as colour differing from the camera field.
+
+### Dynamic resolution in the port
+
+On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2208x1240, 1536x862, ... inside 3024x1701) — dynamic resolution scaling driven by GPU load, which DLSS/NR/FG add to. The add-on currently assumes the full target (the overlay warns when the scene viewport is smaller), so with DRS active DLAA runs on a partly-filled texture and the image gets soft. Set the game's resolution/dynamic-resolution option to a fixed native value if it offers one; proper DRS support (DLSS render sub-rect + the add-on's own composite) is the next step.
 
 ### Known limitations
 
