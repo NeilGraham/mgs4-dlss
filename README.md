@@ -1,5 +1,7 @@
 # mgs4-dlss
 
+**v1.0 (2026-08-29)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic) and correct handling of the port's dynamic resolution. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
+
 Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
 
 ## Status
@@ -9,12 +11,12 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 | Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — the game has a native renderer option (Options -> Graphics, `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`); `d3d12-switch/` remains as a fallback |
 | Phase 0 — map the frame (scene target, depth, composite draw) | **Done** — see docs |
 | Phase 1a — NGX DLSS (DLAA) created + evaluated every frame, NGX add-ons can hook it | **Done** — `dlss-addon/` (v1: zero jitter / zero motion vectors) |
-| Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
+| Phase 1b — camera jitter + camera-only motion vectors | **Done** — see below |
 | In-overlay controls (ReShade Add-ons tab) | **Done** |
 | Frame generation (Streamline DLSS-G: 2x/3x/4x, dynamic target fps, Reflex; live switching) | **Done** — `dlss-addon/src/fg.cpp` |
 | Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Done, on by default** (`ObjectMV=1`) — one stream-out draw per object, ~0.1 ms GPU / ~0.2 ms CPU per frame at 4K, no frame-rate cost |
-| Dynamic resolution handling (DLSS on the scene sub-rect) | **Done** — `DRS=1` |
-| Phase 3 — real upscaling (internal res < output res) | maybe |
+| Dynamic resolution handling (the port upscales its scene sub-rect before the composite; depth/vectors brought to the full grid) | **Done** — `DRS=1` |
+| Phase 3 — real upscaling (internal res < output res) | **Done** — `Mode=Quality/Balanced/Performance/UltraPerformance` (with jitter and object vectors these are real DLSS modes) |
 
 See [docs/renderer-notes.md](docs/renderer-notes.md) for what we know about the port and the full plan.
 
@@ -32,7 +34,18 @@ Because the NGX calls go through the standard `_nvngx.dll` exports, NGX-hooking 
 
 Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 evaluations/s (≈80 with DLSS 5 NR active), HUD/UI intact, and `DebugMode=1` paints the displayed image magenta (proves the insertion path).
 
-### Build / install
+### Install (v1.0 release)
+
+1. In the game: **Options -> Graphics -> API = DirectX 12** (`api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`), FXAA off, frame limiter 60 (`fpsLimiter=60`), vsync off.
+2. ReShade 6.8 **with add-on support** installed for `MGS4\mgs4.exe` (it becomes `MGS4\dxgi.dll`).
+3. Copy `mgs4_dlss.addon64` and `mgs4_dlss.ini` from the release into `MGS4\` (next to `mgs4.exe`). `nvngx_dlss.dll` comes from the NVIDIA app's DLSS override or the [DLSS SDK](https://github.com/NVIDIA/DLSS) (`lib/Windows_x86_64/rel/`).
+4. Optional, DLSS 5 Neural Rendering: put `renodx-dlss5.addon64` next to the add-on; it is auto-detected and the add-on then runs DLAA on the final image so NR works at full strength.
+5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — e.g. 120 Hz with `FrameGen=4` + `FGTargetFps=120`, which is what the shipped ini uses; on a 60 Hz output set `FrameGen=0`.
+6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
+
+The shipped ini is the configuration v1.0 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, dynamic frame generation to 120 fps.
+
+### Build / install (from source)
 
 Requirements: MSVC Build Tools (the `build.bat` calls `vcvars64.bat` from VS 18 BuildTools — adjust the path if yours differs), ReShade 6.8 installed as `MGS4\dxgi.dll`, the D3D12 switch above, and `nvngx_dlss.dll` in `MGS4\` (copy `third_party/DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll` or let the NVIDIA app override supply it).
 
@@ -41,7 +54,7 @@ dlss-addon\build.bat                       :: -> build\mgs4_dlss.addon64
 copy build\mgs4_dlss.addon64 "<game>\MGS4\"
 ```
 
-`MGS4\mgs4_dlss.ini`:
+`MGS4\mgs4_dlss.ini` (the release configuration):
 
 ```ini
 [DLSS]
@@ -51,12 +64,22 @@ InternalRes=3840x2160    ; size of the game's render targets = your in-game reso
 Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10 = J
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
-RecreateAfter=0              ; 0 = never re-create (recommended, see above); N = re-create once after N evaluations
+RecreateAfter=0          ; 0 = never re-create the feature (NGX-hooking add-ons are detected and handled automatically)
 DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
 JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
 JitterSignY=-1
-MotionVectors=1          ; live: camera-only motion vectors from depth (compute pass)
+MotionVectors=1          ; live: camera motion vectors from depth (compute pass)
+DynamicZeroMV=0          ; character mask options (superseded by ObjectMV, kept for reference)
+DynamicMaskProps=0
+DynamicMask=0
+PrePost=auto             ; DLAA insertion: auto = on the final image when a DLSS post-processing add-on (DLSS 5 NR) is loaded, else before post/HUD
+FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
+FGTargetFps=120
+Reflex=1
+ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
+SceneLog=1
+DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
@@ -71,7 +94,7 @@ Log: `MGS4\logs\mgs4_dlss.log`.
 
 Because the game's render-target size follows the in-game resolution, `InternalRes` must match it; the add-on writes the detected value to the ini whenever it differs (change resolution in-game -> restart once). Verified in Performance mode (1512x850 -> 3024x1701): correct composition, HUD and pillarboxing; other modes use the same path but were not individually tested.
 
-**Expect it to look soft.** Without sub-pixel jitter DLSS has no extra information to reconstruct detail from, so the upscaling modes currently behave like a good temporal upscaler with no supersampling. They are useful for testing NR/DLSS at lower cost, not for image quality yet - DLAA is the quality mode until jitter lands. On an RTX 5090 the game is not GPU-bound anyway.
+With the camera jitter and the per-object motion vectors in place, the upscaling modes are real DLSS super-resolution; DLAA remains the reference for image quality. `Mode=Quality` is the first thing to try when the GPU cannot hold the game's native resolution (the port lowers its own dynamic resolution under load, see below).
 
 ### Frame generation (DLSS-G / Multi-Frame Generation via Streamline)
 
@@ -178,6 +201,8 @@ The sub-rect is detected per frame from the viewport most depth-tested draws int
 
 - Alpha-tested surfaces (hair cards) get object vectors over their transparent texels too (the velocity pass has no alpha test); not visible in practice.
 - `Mode` changes need a restart (render targets are created at startup).
+- GPU load: DLAA + NR + frame generation at 4K120 can push the port's own dynamic resolution down to 50 %; the add-on renders correctly at any scale, but sharpness follows the game's choice — `Mode=Quality`, a fixed `FrameGen=1` or a lighter streaming encode keep it at native.
+- Frame generation on a 60 Hz output only adds real/generated alternation; use it with a 120 Hz (or faster) display or virtual display.
 - `steam_appid.txt` (2492670) is placed next to `mgs4.exe` so the exe can be launched directly for testing; harmless for Steam launches.
 
 ## Native Direct3D 12 option (preferred)
