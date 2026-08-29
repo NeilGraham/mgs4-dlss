@@ -1,9 +1,25 @@
 # Stage ids for `mgs4.exe --stage <id>`
 
-Extracted from the stage table in `mgs4.exe` (75 base ids). A base id boots the stage; `<id>_D<n>` entries are its
-cutscenes ("demos") and `<id>_<n>` its gameplay sections — they can be passed to `--stage` as well. Names are not
-stored in the executable; the descriptions below are from the game's structure and from what the test runs showed
-(marked "seen"); unmarked ones are educated guesses — update them as you verify.
+The stage table in `mgs4.exe` holds **400 entries**, and the naming already classifies them (no play-through needed):
+
+| kind | count | pattern | meaning |
+|---|---|---|---|
+| cutscene | 82 | `<stage>_D<n>` | "demo" = a cutscene of that stage |
+| gameplay | 250 | `<stage>_<n>` | a gameplay section |
+| stage entry | 68 | `<stage>` | boots the stage at its start |
+
+Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command).
+
+**Prerecorded vs in-game.** Prerecorded cutscenes are Bink 2 videos in `common/BK2/BK2` and `ww/BK2/BK2`; their headers
+give exact frame counts and frame rates, so their lengths are known without running the game: **18 videos, 55 m 32 s
+total, all 3840x2160** (one 3840x1080) — see **`tools/videos.csv`**. The three long ones are `d3272_pdm` (12:51),
+`d5130_pdm` (12:33) and `d6070_mv` (10:12); `L1..L5_CM_*` are the 30 s Beauty-and-the-Beast pieces. Everything else in
+the 82 `_D` entries is rendered in-game by the engine, i.e. it goes through DLSS/FG exactly like gameplay.
+Demo ids appear in asset names as `d####` (45 distinct); the ones with a matching `.bk2` are the prerecorded ones.
+
+**Durations of the in-game cutscenes are not stored anywhere readable** — no header, no table in the executable. They
+can only be measured by playing them (see `tools/test_stages.ps1`, which can time a stage from the first 3D frame) or
+by decoding the demo scripts inside `stage/stage_data_compressed.*.pak` (VPAK, compressed — not attempted).
 
 | Act | Ids | Notes |
 |---|---|---|
