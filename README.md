@@ -152,11 +152,23 @@ never matches) and DLSS is inserted at the first draw that samples it, or at the
 comes first. Draws issued after the insertion (transparents, particles, HUD) are left unjittered. Upscaling modes keep
 the composite insertion (they need the SRV redirect).
 
+### DLSS 5 NR strength vs. pre-HUD insertion
+
+`renodx-dlss5` runs its NR pass on whatever DLSS evaluates. With the pre-HUD insertion (default in DLAA) that is the raw
+scene, and the game's DOF, colour grading and vignette are applied afterwards, which flattens most of the NR effect.
+Untick **"DLAA before post-process/HUD"** in the panel (`PrePost=0`) to evaluate at the composite instead: NR then sees
+the final image at full strength, at the cost of the vignette/HUD reprojection artifacts.
+
 ### Direct stage boot
 
 `mgs4.exe --stage <name>` skips the launcher and menus: `s00title_1` (OTC intro), `s00a00l` (cemetery opening),
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
+
+`tools\launch_stage.ps1` automates a test setup: boots a stage, waits, and sends real key presses (SendInput, so the
+game's raw-input path sees them) to skip/advance scenes, e.g.
+`powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 55 -Keys "E,3,E"`
+(`-NoRestart` sends the keys to the running game).
 
 ### Robustness
 
