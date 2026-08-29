@@ -5,7 +5,8 @@ cbuffer CB : register(b0)
     float2 inSize;    // motion vector texture size
     float2 outSize;   // output texture size
     float  scale;     // colour units per pixel of motion
-    float3 pad;
+    float  blend;     // > 0: blend the field over the existing output instead of replacing it
+    float2 pad;
 };
 Texture2D<float2>   mvTex   : register(t0);
 Texture2D<float>    maskTex : register(t1);
@@ -19,5 +20,6 @@ void main(uint3 id : SV_DispatchThreadID)
     uint2 src = uint2((uint)(id.x * inSize.x / outSize.x), (uint)(id.y * inSize.y / outSize.y));
     float2 mv = mvTex.Load(int3(src, 0));
     float m = maskTex.Load(int3(src, 0));
-    outTex[id.xy] = float4(saturate(0.5 + mv.x * scale), saturate(0.5 + mv.y * scale), m > 0.5 ? 1.0 : saturate(length(mv) * scale * 0.5), 1.0);
+    float4 vis = float4(saturate(0.5 + mv.x * scale), saturate(0.5 + mv.y * scale), m > 0.5 ? 1.0 : saturate(length(mv) * scale * 0.5), 1.0);
+    outTex[id.xy] = blend > 0.0 ? lerp(outTex[id.xy], vis, blend) : vis;
 }

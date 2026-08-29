@@ -52,7 +52,7 @@ Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=0              ; 0 = never re-create (recommended, see above); N = re-create once after N evaluations
-DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants
+DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
 JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
 JitterSignY=-1
@@ -150,14 +150,29 @@ Notes:
   motion as colour differing from the camera field — it can be flipped on for a few seconds during a recording.
 - With real object vectors the character mask (`DynamicMask`) is no longer needed and is off by default.
 
-### Dynamic resolution in the port (`DRS`, off by default)
+### Dynamic resolution in the port (`DRS`, on by default)
 
-On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets (observed 2624x1474, 2208x1240, 1536x862 inside 3024x1701; the composite stretches it to the screen) — dynamic resolution scaling driven by GPU load (loading stretches, heavy cutscene shots, anything the add-on adds). Left alone this breaks any temporal technique: the picture zooms in texture space on every step. The add-on handles it: the scene viewport is detected per frame (the most common viewport among the scene's depth-tested draws — a few full-size depth-tested quads exist too), the DLSS feature is created in a scalable mode (DLAA becomes a Quality-mode feature: same model and preset, but NGX accepts render sub-rects down to ~50 %), each frame is evaluated on the sub-rect (`InRenderSubrectDimensions`), jitter/motion vectors/FG inputs use viewport units, and the full-size DLSS output is resampled (4-tap bilinear) back into the sub-rect so the game's composite and post chain stay untouched. The overlay shows the current viewport and whether the sub-rect path is active. **This is off by default** (`DRS=0`):
-the viewport detection can pick up a pass that is not the main scene, and then DLSS - and anything layered on its
-output, such as DLSS 5 NR - only processes a shrinking rectangle in the top-left corner of the frame. Detection is now
-restricted to draws into the frame's own geometry target with a viewport covering at least half of it, and a new
-sub-rect is adopted only after the same reading has held for 20 frames; enable `DRS=1` only if the port is actually
-seen scaling resolution. Next quality step: sample the full-size output directly in the composite (true super-resolution from the sub-rect) — needs the composite's scale constant or a replacement blit.
+On the native D3D12 path the port renders the 3D scene into a **variable sub-viewport** of its full-size targets
+(observed anywhere from 100 % down to 50 %: 3840x2160 -> 3712x2088 -> ... -> 1920x1080, changing every second or so
+when the GPU is loaded — e.g. with frame generation at 4K120). **Its post chain upscales that sub-rect to the full-size
+final image before the composite; the composite samples the whole texture.** So at the add-on's insertion point the
+colour is always full-size, while the scene depth (and anything derived from it) is on the sub-rect grid. Verified
+with the vector overlay (`DebugMode=9`): with the earlier assumption that the composite stretches the sub-rect, the
+overlay covered only the top-left (k x k) part of the screen.
+
+`DRS=1` therefore puts depth and vectors on the full grid: the scene depth is stretched (nearest) into a full-size R32
+copy for DLSS and frame generation, the camera vectors are computed per full-grid pixel from the sub-res depth, the
+object vectors are rasterised with the full viewport (their clip positions are viewport-independent) and depth-tested
+manually against the stretched depth, the jitter is expressed in full-grid pixels, and DLSS / NR / DLSS-G all see a
+full-size contract. Getting this wrong showed up as: a DLSS-G ghost of moving characters displaced ~(1-k) toward the
+top-left, asymmetric ghosting in DLSS itself, and (in the old sub-rect mode) DLSS 5 NR covering only the top-left
+rectangle while the game was scaled.
+
+`DRS=2` keeps the legacy behaviour (DLSS evaluated on the sub-rect, output resampled back into it) for reference; it is
+wrong for this port's composite and breaks NR's coverage.
+
+The sub-rect is detected per frame from the viewport most depth-tested draws into the frame's geometry target use
+(at least half the target); the 20-frame hysteresis copy is only a fallback before the first scene draw of a frame.
 
 ### Known limitations
 

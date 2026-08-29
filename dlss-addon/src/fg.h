@@ -35,7 +35,10 @@ namespace fg {
         ID3D12Resource* mv;    uint32_t mvState;         // R16G16_FLOAT, pixels
         ID3D12Resource* hudless; DXGI_FORMAT hudlessFormat; uint32_t hudlessState;   // optional
         ID3D12Resource* ui; DXGI_FORMAT uiFormat; uint32_t uiState;                  // optional UI colour + alpha layer (same size as hudless)
-        uint32_t renderW, renderH;
+        uint32_t renderW, renderH;                        // valid region of depth / vectors (dynamic resolution sub-rect)
+        uint32_t texW, texH;                              // real size of the depth / vector textures (0 = renderW/H)
+        uint32_t hudlessW, hudlessH;                      // real size of the HUD-less / UI textures (0 = renderW/H)
+        bool hudlessSubrect;                              // HUD-less content occupies the renderW x renderH sub-rect of its texture
         uint32_t bbW, bbH;                                // backbuffer size
         int32_t vpX, vpY; uint32_t vpW, vpH;              // game image rectangle inside the backbuffer (subrect), 0 size = full
     };

@@ -12,7 +12,8 @@ cbuffer CB : register(b0)
     float  nearZ;                // z_clip constant (row 2, w component)
     float  reset;                // 1 = write zero motion (camera cut / no history)
     float  dynZeroMV;            // 1 = zero motion on dynamic pixels
-    float3 pad;
+    float2 depthScale;           // dynamic resolution: the scene depth occupies the top-left (scale x size) of its texture
+    float  pad;
 };
 Texture2D<float>    depthTex : register(t0);
 Texture2D<float>    dynDepth : register(t1);
@@ -23,8 +24,9 @@ RWTexture2D<float>  maskTex  : register(u1);
 void main(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)size.x || id.y >= (uint)size.y) return;
-    float d = depthTex.Load(int3(id.xy, 0));
-    float dd = dynDepth.Load(int3(id.xy, 0));
+    int2 sp = int2(floor((float2(id.xy) + 0.5) * depthScale));   // full-grid pixel -> sub-res depth sample
+    float d = depthTex.Load(int3(sp, 0));
+    float dd = dynDepth.Load(int3(sp, 0));
     // dynamic if the replayed draws wrote depth here and it is (about) the visible surface
     bool dyn = dd > 1e-7 && dd >= d * 0.995;
     maskTex[id.xy] = dyn ? 1.0 : 0.0;

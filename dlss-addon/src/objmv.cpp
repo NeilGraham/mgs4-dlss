@@ -281,7 +281,7 @@ static bool g_velRan = false;
 
 struct Slot { uint32_t lastFrame; uint32_t off[2], bound[2], ctr[2]; uint64_t velKey[2]; bool jit[2]; };
 static std::unordered_map<uint64_t, Slot> g_slots;
-struct VelEntry { uint64_t psoKey; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; };
+struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; };
 static std::vector<VelEntry> g_vel;
 
 static bool create_buffer(ID3D12Resource** out, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags, const wchar_t* name)
@@ -318,11 +318,11 @@ static bool create_pass_resources()
 
     // velocity pass: root CBV (b0, per frame) + 8 root constants (b1, per draw) + SRV table (t0..t3)
     {
-        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 5, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
         D3D12_ROOT_PARAMETER params[3] = {};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = { 1, 0, 8 }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[2].DescriptorTable = { 1, &srvRange }; params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[2].DescriptorTable = { 1, &srvRange }; params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         D3D12_ROOT_SIGNATURE_DESC rs = { 3, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
         ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
         HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
@@ -331,12 +331,12 @@ static bool create_pass_resources()
         if (FAILED(hr)) return false;
     }
     {
-        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 8, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 10, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
         HRESULT hr = g_dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_heap));
         if (FAILED(hr)) { LOG("objmv: descriptor heap failed 0x%08lX", (unsigned long)hr); return false; }
         const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         for (int p = 0; p < 2; ++p) {
-            D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(p) * 4 * inc;
+            D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(p) * 5 * inc;
             for (int i = 0; i < 2; ++i) {   // [0] cur positions, [1] prev positions
                 D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_UNKNOWN; srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                 srv.Buffer.FirstElement = 0; srv.Buffer.NumElements = (UINT)(kSoBytes / 16); srv.Buffer.StructureByteStride = 16;
@@ -359,13 +359,13 @@ static bool create_pass_resources()
 
 // Velocity pipeline matching the game pipeline's rasteriser settings (cull mode, winding, depth bias), so the pass
 // covers exactly the surfaces the game rendered, plus a small bias towards the camera so equal depths pass.
-static ID3D12PipelineState* vel_pso(const PsoRec* rec, DXGI_FORMAT dsvFmt, uint64_t* keyOut)
+static ID3D12PipelineState* vel_pso(const PsoRec* rec, DXGI_FORMAT dsvFmt, bool manualDepth, uint64_t* keyOut)
 {
     D3D12_RASTERIZER_DESC r = {};
     r.FillMode = D3D12_FILL_MODE_SOLID; r.CullMode = D3D12_CULL_MODE_BACK; r.DepthClipEnable = TRUE;
     if (rec) { r.CullMode = rec->raster.CullMode; r.FrontCounterClockwise = rec->raster.FrontCounterClockwise; r.DepthBias = rec->raster.DepthBias; r.SlopeScaledDepthBias = rec->raster.SlopeScaledDepthBias; r.DepthBiasClamp = rec->raster.DepthBiasClamp; r.DepthClipEnable = rec->raster.DepthClipEnable; }
     r.DepthBias += 16;   // reversed-Z: towards the camera
-    uint64_t key = fnv(&r, sizeof(r)); key = fnv(&dsvFmt, sizeof(dsvFmt), key);
+    uint64_t key = fnv(&r, sizeof(r)); key = fnv(&dsvFmt, sizeof(dsvFmt), key); key = fnv(&manualDepth, sizeof(manualDepth), key);
     *keyOut = key;
     for (const VelPso& v : g_velPsos) if (v.key == key) return v.pso;
     if (g_velPsos.size() >= 16) return g_velPsos.empty() ? nullptr : g_velPsos[0].pso;
@@ -375,9 +375,9 @@ static ID3D12PipelineState* vel_pso(const PsoRec* rec, DXGI_FORMAT dsvFmt, uint6
     d.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     d.SampleMask = UINT_MAX;
     d.RasterizerState = r;
-    d.DepthStencilState.DepthEnable = TRUE; d.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; d.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+    d.DepthStencilState.DepthEnable = manualDepth ? FALSE : TRUE; d.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; d.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
     d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    d.NumRenderTargets = 1; d.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT; d.DSVFormat = dsvFmt;
+    d.NumRenderTargets = 1; d.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT; d.DSVFormat = manualDepth ? DXGI_FORMAT_UNKNOWN : dsvFmt;
     d.SampleDesc = { 1, 0 };
     ID3D12PipelineState* out = nullptr;
     t_inside = true; HRESULT hr = g_dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&out)); t_inside = false;
@@ -520,8 +520,8 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
 
     Slot& s = g_slots[key];
     const bool havePrev = s.lastFrame == g_curFrame - 1 && s.bound[p ^ 1] == bound;
-    uint64_t velKey = 0; vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, &velKey);   // creates the variant lazily
-    if (havePrev) { g_vel.push_back({ velKey, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u) }); g_st.withPrev++; }
+    uint64_t velKey = 0, velKeyM = 0; vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, false, &velKey); vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, true, &velKeyM);   // creates the variants lazily
+    if (havePrev) { g_vel.push_back({ velKey, velKeyM, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u) }); g_st.withPrev++; }
     s.lastFrame = g_curFrame; s.off[p] = off; s.bound[p] = bound; s.ctr[p] = idx; s.jit[p] = jittered; s.velKey[p] = velKey;
 
     if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 4 + 2 * idx);
@@ -540,7 +540,7 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
 }
 
 void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& sceneVp,
-              const float jitterCur[2], const float jitterPrev[2])
+              const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth)
 {
     if (!g_st.ready || !g_frameStarted) return;
     const double t0 = cpu_now_ms();
@@ -550,25 +550,33 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
     for (int i = 0; i < 2; ++i) { transition(cl, g_soBuf[i], &g_soState[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE); transition(cl, g_ctr[i], &g_ctrState[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE); }
     if (!g_vel.empty()) {
         const uint32_t cbSlot = g_velCbSlot++ % 4;
-        float cb[8] = { sceneVp.Width > 0 ? sceneVp.Width : float(w), sceneVp.Height > 0 ? sceneVp.Height : float(h), jitterCur[0], jitterCur[1], jitterPrev[0], jitterPrev[1], 0, 0 };
+        const float cw = sceneVp.Width > 0 ? sceneVp.Width : float(w), ch = sceneVp.Height > 0 ? sceneVp.Height : float(h);
+        float cb[8] = { cw, ch, jitterCur[0], jitterCur[1], jitterPrev[0], jitterPrev[1], prevSize && prevSize[0] > 0 ? prevSize[0] : cw, prevSize && prevSize[1] > 0 ? prevSize[1] : ch };
         memcpy(g_velCbPtr + cbSlot * 256, cb, sizeof(cb));
         const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         ID3D12DescriptorHeap* heaps[1] = { g_heap };
         cl->SetDescriptorHeaps(1, heaps);
         cl->SetGraphicsRootSignature(g_velRs);
         cl->SetGraphicsRootConstantBufferView(0, g_velCb->GetGPUVirtualAddress() + cbSlot * 256);
-        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_heap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(p) * 4 * inc;
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_heap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(p) * 5 * inc;
+        if (manualDepth) {   // [4] full-grid depth for the manual test
+            D3D12_CPU_DESCRIPTOR_HANDLE dcpu = g_heap->GetCPUDescriptorHandleForHeapStart(); dcpu.ptr += (SIZE_T(p) * 5 + 4) * inc;
+            D3D12_SHADER_RESOURCE_VIEW_DESC dsrv = {}; dsrv.Format = DXGI_FORMAT_R32_FLOAT; dsrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; dsrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dsrv.Texture2D.MipLevels = 1;
+            g_dev->CreateShaderResourceView(manualDepth, &dsrv, dcpu);
+        }
         cl->SetGraphicsRootDescriptorTable(2, gpu);
-        cl->OMSetRenderTargets(1, &mvRtv, FALSE, &sceneDsv);
+        if (manualDepth) cl->OMSetRenderTargets(1, &mvRtv, FALSE, nullptr); else cl->OMSetRenderTargets(1, &mvRtv, FALSE, &sceneDsv);
         D3D12_VIEWPORT vp = sceneVp.Width > 0 ? sceneVp : D3D12_VIEWPORT{ 0, 0, float(w), float(h), 0, 1 }; cl->RSSetViewports(1, &vp);
         D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h }; cl->RSSetScissorRects(1, &sc);
         cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        std::sort(g_vel.begin(), g_vel.end(), [](const VelEntry& a, const VelEntry& b) { return a.psoKey < b.psoKey; });
+        const bool manual = manualDepth != nullptr;
+        std::sort(g_vel.begin(), g_vel.end(), [manual](const VelEntry& a, const VelEntry& b) { return (manual ? a.psoKeyManual : a.psoKey) < (manual ? b.psoKeyManual : b.psoKey); });
         uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr;
         for (const VelEntry& e : g_vel) {
-            if (e.psoKey != boundKey) { boundKey = e.psoKey; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == e.psoKey) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
+            const uint64_t want = manual ? e.psoKeyManual : e.psoKey;
+            if (want != boundKey) { boundKey = want; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == want) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
             if (!cur) continue;
-            const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags, 0, 0, 0 };
+            const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags | (manual ? 4u : 0u), 0, 0, 0 };
             cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
             cl->DrawInstanced(e.bound, 1, 0, 0);
         }

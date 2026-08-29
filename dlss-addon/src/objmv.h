@@ -51,9 +51,11 @@ namespace objmv {
     // also captured last frame into mvRtv (R16G16_FLOAT, pixels, prev - cur), depth-tested (reversed-Z, greater-equal)
     // against sceneDsv. The caller puts the MV texture in RENDER_TARGET and the depth in DEPTH_WRITE state first and
     // restores all state after. vp = the viewport the game rendered the scene with. jitterCur/jitterPrev = the NDC
-    // offsets the add-on added to the clip matrices this frame and last frame (removed from the captured positions).
+    // offsets the add-on added to the clip matrices this frame and last frame (removed from the captured positions);
+    // prevSize = last frame's scene viewport size (dynamic resolution) so previous positions are taken in that scale.
+    // manualDepth: a full-size R32 depth (pixel-shader readable) to depth-test against instead of sceneDsv (which may be 0 then).
     void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& vp,
-                  const float jitterCur[2], const float jitterPrev[2]);
+                  const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth);
     bool has_captures();
 
     // GPU timing of the scene: call at the first scene draw of the frame and after the DLSS evaluation (the latter also
