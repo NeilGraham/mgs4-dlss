@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <mutex>
 #include "MinHook.h"
+#include <intrin.h>
 // Streamline SDK headers (types only; every function is fetched from sl.interposer.dll at runtime)
 #include <sl.h>
 #include <sl_consts.h>
@@ -75,17 +76,26 @@ typedef HRESULT (STDMETHODCALLTYPE* PFN_Present)(IDXGISwapChain*, UINT, UINT);
 typedef HRESULT (STDMETHODCALLTYPE* PFN_Present1)(IDXGISwapChain1*, UINT, UINT, const DXGI_PRESENT_PARAMETERS*);
 typedef HRESULT (STDMETHODCALLTYPE* PFN_GetBuffer)(IDXGISwapChain*, UINT, REFIID, void**);
 typedef HRESULT (STDMETHODCALLTYPE* PFN_ResizeBuffers)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
+typedef HRESULT (STDMETHODCALLTYPE* PFN_ResizeBuffers1)(IDXGISwapChain3*, UINT, UINT, UINT, DXGI_FORMAT, UINT, const UINT*, IUnknown* const*);
+static PFN_ResizeBuffers1 o_ResizeBuffers1 = nullptr;
 static PFN_GetBuffer o_GetBuffer = nullptr;
 static PFN_ResizeBuffers o_ResizeBuffers = nullptr;
 static std::unordered_set<uint64_t> g_appBackbuffers;   // buffers the proxy swapchain hands to the game
 static std::mutex g_bbMutex;
 static void (*g_frameCb)() = nullptr;
-static ID3D12Device* g_slDevice = nullptr;               // device handed to Streamline (the one the game's queue reports)
+static ID3D12Device* g_slDevice = nullptr;               // device handed to Streamline (native)
+static ID3D12Device* g_reshadeDevice = nullptr;          // ReShade's proxy of the native device (what the game's queue reports)
+static HMODULE g_reshadeModule = nullptr;                // module owning ReShade's DXGI hooks
+typedef HRESULT (STDMETHODCALLTYPE* PFN_CreateCommandQueue)(ID3D12Device*, const D3D12_COMMAND_QUEUE_DESC*, REFIID, void**);
+static PFN_CreateCommandQueue o_CreateCommandQueue = nullptr;
+typedef HRESULT (STDMETHODCALLTYPE* PFN_CreateCommandQueue1)(ID3D12Device9*, const D3D12_COMMAND_QUEUE_DESC*, REFIID, REFIID, void**);
+static PFN_CreateCommandQueue1 o_CreateCommandQueue1 = nullptr;
 static PFN_CreateSwapChain o_CreateSwapChain = nullptr;
 static PFN_CreateSwapChainForHwnd o_CreateSwapChainForHwnd = nullptr;
 static PFN_Present o_Present = nullptr;
 static PFN_Present1 o_Present1 = nullptr;
-static thread_local bool t_inside = false;
+static thread_local bool t_inside = false;         // inside our re-entrant swapchain / present call
+static thread_local bool t_inQueue = false;        // inside our routed CreateCommandQueue call
 static thread_local int t_slDepth = 0;            // >0 while inside one of our Streamline calls
 static DWORD g_renderThread = 0;                  // thread that presents (bgfx render thread)
 struct SlCall { SlCall() { ++t_slDepth; } ~SlCall() { --t_slDepth; } };
@@ -120,7 +130,11 @@ static bool ensure_device(IUnknown* pDevice)
     ID3D12CommandQueue* q = nullptr;
     if (FAILED(pDevice->QueryInterface(IID_PPV_ARGS(&q))) || !q) return false;
     if (!g_slDevice) {
-        ID3D12Device* d = nullptr; q->GetDevice(IID_PPV_ARGS(&d));
+        // Streamline gets the native device: NGX is process-wide and the DLSS SR feature this add-on creates on the
+        // game's native command lists crashed in D3D12Core when NGX had been initialised (by Streamline's common
+        // plugin) with ReShade's proxy device instead. The queue's own device (ReShade's proxy) is only logged.
+        ID3D12Device* d = g_device; if (d) d->AddRef();
+        { ID3D12Device* qd = nullptr; q->GetDevice(IID_PPV_ARGS(&qd)); LOG("FG: queue reports device %p (native %p)", (void*)qd, (void*)g_device); if (qd && qd != g_device) g_reshadeDevice = qd; else if (qd) qd->Release(); }
         if (d) {
             sl::Result r = p_slSetD3DDevice(d);
             if (r != sl::Result::eOk) { LOG("FG: slSetD3DDevice failed %d", (int)r); d->Release(); q->Release(); return false; }
@@ -186,6 +200,19 @@ static HRESULT STDMETHODCALLTYPE hk_ResizeBuffers(IDXGISwapChain* sc, UINT count
     return o_ResizeBuffers(sc, count, w, h, fmt, flags);
 }
 
+// bgfx resizes with ResizeBuffers1 (a present queue per buffer). Every layer below (Streamline's proxy, the DLSS-G
+// plugin, ReShade) has to unwrap those queue proxies separately and the first resize crashed inside that chain, so
+// the call is turned into a plain ResizeBuffers on the proxy: on a single-adapter device the queue given at creation
+// is used, which is what the game passes anyway.
+static HRESULT STDMETHODCALLTYPE hk_ResizeBuffers1(IDXGISwapChain3* sc, UINT count, UINT w, UINT h, DXGI_FORMAT fmt, UINT flags, const UINT* nodeMask, IUnknown* const* queues)
+{
+    if ((IDXGISwapChain*)sc != g_proxySwapchain || t_inside) return o_ResizeBuffers1(sc, count, w, h, fmt, flags, nodeMask, queues);
+    LOG("FG: ResizeBuffers1 %ux%u x%u -> ResizeBuffers", w, h, count);
+    HRESULT hr = sc->ResizeBuffers(count, w, h, fmt, flags);
+    LOG("FG: ResizeBuffers -> 0x%08lX", (unsigned long)hr);
+    return hr;
+}
+
 static void hook_present(IDXGISwapChain* proxy)
 {
     if (o_Present) return;
@@ -198,6 +225,12 @@ static void hook_present(IDXGISwapChain* proxy)
         void** vt1 = *reinterpret_cast<void***>(sc1);
         if (MH_CreateHook(vt1[22], (void*)hk_Present1, (void**)&o_Present1) == MH_OK) MH_EnableHook(vt1[22]);
         sc1->Release();
+    }
+    IDXGISwapChain3* sc3 = nullptr;
+    if (SUCCEEDED(proxy->QueryInterface(IID_PPV_ARGS(&sc3))) && sc3) {
+        void** vt3 = *reinterpret_cast<void***>(sc3);
+        if (MH_CreateHook(vt3[39], (void*)hk_ResizeBuffers1, (void**)&o_ResizeBuffers1) == MH_OK) MH_EnableHook(vt3[39]); else LOG("FG: hook ResizeBuffers1 failed");
+        sc3->Release();
     }
     LOG("FG: Present hooks installed on the Streamline proxy swapchain");
 }
@@ -225,6 +258,41 @@ static HRESULT STDMETHODCALLTYPE hk_CreateSwapChainForHwnd(IDXGIFactory2* self, 
     return hr;
 }
 
+// DLSS-G creates the real swapchain on a present queue of its own. ReShade only wraps a swapchain whose queue is one
+// of its proxies, so queue creations that do not come from ReShade itself (Streamline / DLSS-G calling the native
+// device) are routed through ReShade's device proxy; ReShade's own CreateCommandQueue (which calls the native device
+// underneath) passes straight through.
+static const wchar_t* caller_name(HMODULE caller, wchar_t* buf)
+{
+    buf[0] = L'?'; buf[1] = 0;
+    if (caller) { GetModuleFileNameW(caller, buf, MAX_PATH); if (const wchar_t* p = wcsrchr(buf, L'\\')) return p + 1; }
+    return buf;
+}
+static HRESULT STDMETHODCALLTYPE hk_CreateCommandQueue(ID3D12Device* self, const D3D12_COMMAND_QUEUE_DESC* desc, REFIID riid, void** out)
+{
+    HMODULE caller = nullptr; wchar_t mod[MAX_PATH];
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(_ReturnAddress()), &caller);
+    const bool route = !t_inQueue && g_reshadeDevice && self == g_device && caller != g_reshadeModule;
+    HRESULT hr;
+    if (route) { t_inQueue = true; hr = g_reshadeDevice->CreateCommandQueue(desc, riid, out); t_inQueue = false; }
+    else hr = o_CreateCommandQueue(self, desc, riid, out);
+    if (!t_inQueue) LOG("FG: CreateCommandQueue (type %d, priority %d) from %ls -> %s 0x%08lX (%p)", desc ? (int)desc->Type : -1, desc ? (int)desc->Priority : 0, caller_name(caller, mod), route ? "routed through ReShade's device," : "native,", (unsigned long)hr, out ? *out : nullptr);
+    return hr;
+}
+static HRESULT STDMETHODCALLTYPE hk_CreateCommandQueue1(ID3D12Device9* self, const D3D12_COMMAND_QUEUE_DESC* desc, REFIID creator, REFIID riid, void** out)
+{
+    HMODULE caller = nullptr; wchar_t mod[MAX_PATH];
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(_ReturnAddress()), &caller);
+    ID3D12Device9* rs9 = nullptr;
+    const bool route = !t_inQueue && g_reshadeDevice && (ID3D12Device*)self == g_device && caller != g_reshadeModule && SUCCEEDED(g_reshadeDevice->QueryInterface(IID_PPV_ARGS(&rs9))) && rs9;
+    HRESULT hr;
+    if (route) { t_inQueue = true; hr = rs9->CreateCommandQueue1(desc, creator, riid, out); t_inQueue = false; }
+    else hr = o_CreateCommandQueue1(self, desc, creator, riid, out);
+    if (rs9) rs9->Release();
+    if (!t_inQueue) LOG("FG: CreateCommandQueue1 (type %d, priority %d) from %ls -> %s 0x%08lX (%p)", desc ? (int)desc->Type : -1, desc ? (int)desc->Priority : 0, caller_name(caller, mod), route ? "routed through ReShade's device," : "native,", (unsigned long)hr, out ? *out : nullptr);
+    return hr;
+}
+
 static bool install_factory_hooks()
 {
     typedef HRESULT (WINAPI* PFN_CreateDXGIFactory1)(REFIID, void**);
@@ -239,7 +307,20 @@ static bool install_factory_hooks()
     if (MH_CreateHook(vt[10], (void*)hk_CreateSwapChain, (void**)&o_CreateSwapChain) != MH_OK || MH_EnableHook(vt[10]) != MH_OK) { ok = false; LOG("FG: hook CreateSwapChain failed"); }
     if (MH_CreateHook(vt[15], (void*)hk_CreateSwapChainForHwnd, (void**)&o_CreateSwapChainForHwnd) != MH_OK || MH_EnableHook(vt[15]) != MH_OK) { ok = false; LOG("FG: hook CreateSwapChainForHwnd failed"); }
     f->Release();
-    if (ok) LOG("FG: IDXGIFactory::CreateSwapChain/ForHwnd hooked (outermost, in front of ReShade)");
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(vt[10]), &g_reshadeModule);
+    if (ok) LOG("FG: IDXGIFactory::CreateSwapChain/ForHwnd hooked (outermost, in front of ReShade; ReShade module %p)", (void*)g_reshadeModule);
+    if (g_device) {
+        void** dvt = *reinterpret_cast<void***>(g_device);
+        if (MH_CreateHook(dvt[8], (void*)hk_CreateCommandQueue, (void**)&o_CreateCommandQueue) == MH_OK && MH_EnableHook(dvt[8]) == MH_OK) LOG("FG: ID3D12Device::CreateCommandQueue hooked");
+        else LOG("FG: hook CreateCommandQueue failed");
+        ID3D12Device9* d9 = nullptr;
+        if (SUCCEEDED(g_device->QueryInterface(IID_PPV_ARGS(&d9))) && d9) {
+            void** vt9 = *reinterpret_cast<void***>(d9);
+            if (MH_CreateHook(vt9[75], (void*)hk_CreateCommandQueue1, (void**)&o_CreateCommandQueue1) == MH_OK && MH_EnableHook(vt9[75]) == MH_OK) LOG("FG: ID3D12Device9::CreateCommandQueue1 hooked");
+            else LOG("FG: hook CreateCommandQueue1 failed");
+            d9->Release();
+        }
+    }
     return ok;
 }
 
@@ -296,6 +377,7 @@ void init(ID3D12Device* device, const wchar_t* gameDirW, LogFn log)
 }
 
 void set_frame_callback(void (*fn)()) { g_frameCb = fn; }
+ID3D12Device* sl_device() { return g_slDevice; }
 bool inside_streamline()
 {
     if (t_slDepth > 0) return true;

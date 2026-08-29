@@ -590,12 +590,17 @@ static bool ngx_init(device* dev)
     const wchar_t* paths[] = { pathBuf };
     NVSDK_NGX_FeatureCommonInfo info = {};
     info.PathListInfo.Path = paths; info.PathListInfo.Length = 1;
-    info.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_OFF;
+    info.LoggingInfo.MinimumLoggingLevel = NVSDK_NGX_LOGGING_LEVEL_ON;
+    info.LoggingInfo.LoggingCallback = [](const char* msg, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature f) { if (msg) { char b[600]; strncpy_s(b, msg, _TRUNCATE); size_t n = strlen(b); while (n && (b[n - 1] == 10 || b[n - 1] == 13)) b[--n] = 0; logmsg("[NGX %d] %s", (int)f, b); } };
 
     wchar_t appData[MAX_PATH]; swprintf_s(appData, L"%s\\logs", g_gameDirW);
+    // NGX is process-wide. When Streamline is active its common plugin has already initialised NGX with the device
+    // the game's queue reports (ReShade's proxy); initialising again with the native device gives NGX two device
+    // objects for one adapter and the DLSS DLL crashed in D3D12Core at CreateFeature. Use the same object.
+    ID3D12Device* ngxDev = fg::sl_device() ? fg::sl_device() : g_d3d;
     NVSDK_NGX_Result r = NVSDK_NGX_D3D12_Init_with_ProjectID("7a2f8c3e-5d41-4b9a-9e0c-3f6d2b1a8c47", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "0.1",
-                                                            appData, g_d3d, &info, NVSDK_NGX_Version_API);
-    logmsg("NGX D3D12 Init_with_ProjectID -> %s", ngx_str(r));
+                                                            appData, ngxDev, &info, NVSDK_NGX_Version_API);
+    logmsg("NGX D3D12 Init_with_ProjectID (device %p%s) -> %s", (void*)ngxDev, ngxDev == g_d3d ? "" : ", Streamline's", ngx_str(r));
     if (NVSDK_NGX_FAILED(r)) return false;
 
     NVSDK_NGX_Parameter* caps = nullptr;
@@ -653,6 +658,7 @@ static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t o
     cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     NVSDK_NGX_Handle* handle = nullptr;
+    logmsg("NGX CreateFeature DLSS: cmd %p (%s), nvngx_dlss.dll %s, _nvngx %p, DLSS5 add-on %s", (void*)native, fg::inside_streamline() ? "inside SL?" : "game", GetModuleHandleA("nvngx_dlss.dll") ? "loaded" : "not loaded", (void*)GetModuleHandleA("_nvngx.dll"), GetModuleHandleA("renodx-dlss5.addon64") ? "loaded" : "absent");
     NVSDK_NGX_Result r = NGX_D3D12_CREATE_DLSS_EXT(native, 1, 1, &handle, g_ngxParams, &cp);
     logmsg("NGX CreateFeature DLSS (%s %ux%u -> %ux%u, fmt=%u, preset=%d) -> %s", g_cfgModeName, w, h, outW, outH, (unsigned)fmt, g_cfgPreset, ngx_str(r));
     if (NVSDK_NGX_FAILED(r)) return false;
@@ -1296,8 +1302,10 @@ static void on_init_device(device* dev)
     logmsg("device created: api=%u (d3d12=%u)", (unsigned)dev->get_api(), (unsigned)device_api::d3d12);
     if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (install MGS4_D3D12.asi)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
-    fg::init(g_d3d, g_gameDirW, logmsg);   // before the game creates its swapchain
-    fg::set_frame_callback(frame_rollover);
+    // Streamline (frame generation) is only loaded when FrameGen is enabled at startup: it takes over the swapchain,
+    // so everything else (ReShade, the DLAA path, NGX add-ons) must be known to work with it before it is on by default.
+    if (g_cfgFgMode != 0) { fg::init(g_d3d, g_gameDirW, logmsg); fg::set_frame_callback(frame_rollover); }   // before the game creates its swapchain
+    else logmsg("frame generation off at startup: Streamline not loaded (set FrameGen in the ini / overlay and restart to use it)");
     if (g_cfgEnabled && g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA) {
         if (!g_internalW) logmsg("Mode=%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgModeName);
         else if (ngx_init(dev)) setup_scaling();
@@ -1391,6 +1399,7 @@ static void draw_overlay(effect_runtime*)
         const char* fgNames[] = { "Off", "2x", "3x", "4x", "Dynamic (target frame rate)" };
         int fm = g_cfgFgMode;
         if (ImGui::Combo("Frame generation", &fm, fgNames, 5)) { write_ini_int("FrameGen", fm); reload_config(); }
+        if (g_cfgFgMode != 0 && !st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Restart the game to load Streamline (frame generation was off at startup)");
         if (g_cfgFgMode == 4) {
             float t = g_cfgFgTargetFps;
             if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }

@@ -65,4 +65,6 @@ namespace fg {
     // one of our Streamline calls, or on a thread other than the game's render thread). The add-on must not treat
     // those as game work (texture shrinking, copy-to-backbuffer insertion).
     bool inside_streamline();
+    // The device object Streamline was given (the one the game's queue reports; ReShade's proxy), or nullptr.
+    ID3D12Device* sl_device();
 }
