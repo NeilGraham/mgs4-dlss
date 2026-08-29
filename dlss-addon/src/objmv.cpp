@@ -6,12 +6,13 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <mutex>
 #include "MinHook.h"
 #include "velocity_vs.h"   // g_velocity_vs
 #include "velocity_ps.h"   // g_velocity_ps
-#include "soargs_cs.h"     // g_soargs_cs
 
 namespace objmv {
 
@@ -23,8 +24,7 @@ static ID3D12Device* g_dev = nullptr;
 static std::mutex g_mutex;
 
 // ---- recorded root signatures / pipelines --------------------------------------------------------------------------
-struct RootSigRec { std::vector<uint8_t> blob; ID3D12RootSignature* soVariant = nullptr; bool failed = false; };
-static std::unordered_map<ID3D12RootSignature*, RootSigRec> g_rootSigs;
+static std::unordered_set<ID3D12RootSignature*> g_soRootSigs;   // the game's root signatures that got ALLOW_STREAM_OUTPUT at creation
 
 struct PsoRec {
     std::vector<uint8_t> vs;
@@ -148,16 +148,38 @@ static HRESULT STDMETHODCALLTYPE hk_CreatePipelineState(ID3D12Device2* self, con
     return hr;
 }
 
+// The game's root signatures get ALLOW_STREAM_OUTPUT added at creation, so a stream-out pipeline can be bound under the
+// game's own root signature with the game's root arguments still in place (a root signature switch invalidates them all).
 static HRESULT STDMETHODCALLTYPE hk_CreateRootSignature(ID3D12Device* self, UINT nodeMask, const void* blob, SIZE_T len, REFIID riid, void** out)
 {
-    HRESULT hr = o_CreateRootSignature(self, nodeMask, blob, len, riid, out);
-    if (SUCCEEDED(hr) && !t_inside && out && *out && blob && len && riid == __uuidof(ID3D12RootSignature)) {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        RootSigRec& r = g_rootSigs[reinterpret_cast<ID3D12RootSignature*>(*out)];
-        r.blob.assign(static_cast<const uint8_t*>(blob), static_cast<const uint8_t*>(blob) + len);
-        r.soVariant = nullptr; r.failed = false;
-        g_st.rootSigsSeen++;
+    if (!t_inside && blob && len && out && riid == __uuidof(ID3D12RootSignature)) {
+        ID3D12VersionedRootSignatureDeserializer* de = nullptr;
+        if (SUCCEEDED(D3D12CreateVersionedRootSignatureDeserializer(blob, len, IID_PPV_ARGS(&de))) && de) {
+            const D3D12_VERSIONED_ROOT_SIGNATURE_DESC* src = de->GetUnconvertedRootSignatureDesc();
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC copy = *src;
+            switch (copy.Version) {
+            case D3D_ROOT_SIGNATURE_VERSION_1_0: copy.Desc_1_0.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
+            case D3D_ROOT_SIGNATURE_VERSION_1_1: copy.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
+            default: copy.Desc_1_2.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
+            }
+            ID3DBlob* nb = nullptr; ID3DBlob* err = nullptr;
+            HRESULT hs = D3D12SerializeVersionedRootSignature(&copy, &nb, &err);
+            de->Release();
+            if (SUCCEEDED(hs) && nb) {
+                HRESULT hr = o_CreateRootSignature(self, nodeMask, nb->GetBufferPointer(), nb->GetBufferSize(), riid, out);
+                nb->Release(); if (err) err->Release();
+                if (SUCCEEDED(hr) && *out) {
+                    std::lock_guard<std::mutex> lock(g_mutex);
+                    g_soRootSigs.insert(reinterpret_cast<ID3D12RootSignature*>(*out));
+                    g_st.rootSigsSeen++; g_st.rootSigsSoEnabled++;
+                    return hr;
+                }
+                // fall through: create it as the game asked
+            } else { if (err) err->Release(); static int n = 0; if (n++ < 3) LOG("objmv: could not add the stream-out flag to a root signature (0x%08lX)", (unsigned long)hs); }
+        }
     }
+    HRESULT hr = o_CreateRootSignature(self, nodeMask, blob, len, riid, out);
+    if (SUCCEEDED(hr) && !t_inside && riid == __uuidof(ID3D12RootSignature)) { std::lock_guard<std::mutex> lock(g_mutex); g_st.rootSigsSeen++; }
     return hr;
 }
 
@@ -178,55 +200,29 @@ void forget_pso(ID3D12PipelineState* pso)
     g_psos.erase(it);   // shared stream-out variants stay cached (the same VS comes back with the next pipeline object)
 }
 
-// root signature clone with the stream-output flag
-static ID3D12RootSignature* so_root_signature(ID3D12RootSignature* rs)
-{
-    auto it = g_rootSigs.find(rs);
-    if (it == g_rootSigs.end()) { static int n = 0; if (n++ < 3) LOG("objmv: root signature %p was created before the hook - no stream-out variant", (void*)rs); return nullptr; }
-    RootSigRec& r = it->second;
-    if (r.soVariant || r.failed) return r.soVariant;
-    r.failed = true;
-    ID3D12VersionedRootSignatureDeserializer* de = nullptr;
-    HRESULT hr = D3D12CreateVersionedRootSignatureDeserializer(r.blob.data(), r.blob.size(), IID_PPV_ARGS(&de));
-    if (FAILED(hr) || !de) { LOG("objmv: root signature deserialize failed 0x%08lX", (unsigned long)hr); return nullptr; }
-    const D3D12_VERSIONED_ROOT_SIGNATURE_DESC* src = de->GetUnconvertedRootSignatureDesc();
-    D3D12_VERSIONED_ROOT_SIGNATURE_DESC copy = *src;
-    switch (copy.Version) {
-    case D3D_ROOT_SIGNATURE_VERSION_1_0: copy.Desc_1_0.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
-    case D3D_ROOT_SIGNATURE_VERSION_1_1: copy.Desc_1_1.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
-    default: copy.Desc_1_2.Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT; break;
-    }
-    ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
-    hr = D3D12SerializeVersionedRootSignature(&copy, &blob, &err);
-    de->Release();
-    if (FAILED(hr) || !blob) { LOG("objmv: root signature re-serialize failed 0x%08lX %s", (unsigned long)hr, err ? (const char*)err->GetBufferPointer() : ""); if (err) err->Release(); return nullptr; }
-    ID3D12RootSignature* out = nullptr;
-    t_inside = true;
-    hr = g_dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&out));
-    t_inside = false;
-    blob->Release();
-    if (FAILED(hr) || !out) { LOG("objmv: stream-out root signature creation failed 0x%08lX", (unsigned long)hr); return nullptr; }
-    r.soVariant = out; r.failed = false;
-    LOG("objmv: stream-out root signature created for %p (version %d)", (void*)rs, (int)copy.Version);
-    return out;
-}
-
-static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso)
+// Stream-out variant of a game pipeline: the same vertex shader and input layout, no rasterisation, bound under the
+// game's (stream-out enabled) root signature. Shared by VS + layout + root signature, since bgfx hands the same draw a
+// new pipeline object all the time.
+static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso, const PsoRec** recOut)
 {
     auto it = g_psos.find(pso);
     if (it == g_psos.end()) { g_st.skipped++; return nullptr; }
     PsoRec& p = it->second;
+    *recOut = &p;
     if (p.soPso || p.failed) return p.soPso;
     SoShared& sh = g_soShared[p.shareKey];
     if (sh.pso) { p.soPso = sh.pso; sh.users++; return sh.pso; }
     if (sh.failed) { p.failed = true; return nullptr; }
     p.failed = true; sh.failed = true;
-    ID3D12RootSignature* rs = so_root_signature(p.rootSig);
-    if (!rs) { g_st.soPsoFailures++; return nullptr; }
+    if (!p.rootSig || !g_soRootSigs.count(p.rootSig)) {
+        g_st.soPsoFailures++;
+        if (g_st.soPsoFailures <= 3) LOG("objmv: pipeline %p uses root signature %p without the stream-out flag (created before the hook?) - not captured", (void*)pso, (void*)p.rootSig);
+        return nullptr;
+    }
     static const D3D12_SO_DECLARATION_ENTRY decl[1] = { { 0, "SV_Position", 0, 0, 4, 0 } };
     static const UINT strides[1] = { 16 };
     D3D12_GRAPHICS_PIPELINE_STATE_DESC d = {};
-    d.pRootSignature = rs;
+    d.pRootSignature = p.rootSig;
     d.VS = { p.vs.data(), p.vs.size() };
     d.StreamOutput = { decl, 1, strides, 1, D3D12_SO_NO_RASTERIZED_STREAM };
     d.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
@@ -257,25 +253,36 @@ static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso)
 }
 
 // ---- pass resources ---------------------------------------------------------------------------------------------------
-static const uint32_t kSlots = 2048, kSlotBytes = 8192;        // recorded constants: 2 x kSlots x kSlotBytes
+static const uint32_t kMaxCaptures = 2048;                     // per frame
+static const uint32_t kCtrStride = 16;                         // bytes between the per-draw buffer-filled-size counters
 static const uint64_t kSoBytes = 48ull << 20;                  // per stream-out buffer (3M vertices)
-static ID3D12Resource* g_cbUpload = nullptr; static uint8_t* g_cbPtr = nullptr;
-static ID3D12Resource* g_soBuf[2] = {}; static ID3D12Resource* g_counters = nullptr; static ID3D12Resource* g_zero = nullptr;
-static ID3D12Resource* g_args = nullptr;
-static ID3D12RootSignature* g_velRs = nullptr; static ID3D12PipelineState* g_velPso = nullptr;
-static ID3D12RootSignature* g_argsRs = nullptr; static ID3D12PipelineState* g_argsPso = nullptr;
-static ID3D12CommandSignature* g_cmdSig = nullptr;
-static ID3D12DescriptorHeap* g_heap = nullptr;                 // shader visible: [0] SRV cur, [1] SRV prev
+static const uint32_t kQueries = 4 + 2 * kMaxCaptures;         // 0 frame begin, 1 frame end, 2/3 velocity, then one pair per capture
+static const uint32_t kRings = 4;
+static ID3D12Resource* g_soBuf[2] = {};  static D3D12_RESOURCE_STATES g_soState[2] = { D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_STATE_STREAM_OUT };
+static ID3D12Resource* g_ctr[2] = {};    static D3D12_RESOURCE_STATES g_ctrState[2] = { D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_STATE_STREAM_OUT };
+static ID3D12Resource* g_zero = nullptr;
+static ID3D12RootSignature* g_velRs = nullptr;
+struct VelPso { uint64_t key; ID3D12PipelineState* pso; };
+static std::vector<VelPso> g_velPsos;                          // variants: the game's cull mode / winding / depth bias, DSV format
+static ID3D12DescriptorHeap* g_heap = nullptr;                 // shader visible: parity p at p*4: SRV cur pos, prev pos, cur counters, prev counters
 static ID3D12Resource* g_velCb = nullptr; static uint8_t* g_velCbPtr = nullptr;   // 4 x 256 B ring
 static uint32_t g_velCbSlot = 0;
-static D3D12_RESOURCE_STATES g_soState = D3D12_RESOURCE_STATE_STREAM_OUT, g_ctrState = D3D12_RESOURCE_STATE_STREAM_OUT;
-static bool g_frameStarted = false;   // counters reset + captures pending this frame
-static uint32_t g_curFrame = 0;
+static ID3D12QueryHeap* g_queries = nullptr; static ID3D12Resource* g_readback = nullptr;
+static uint64_t g_tsHz = 0;
+static bool g_frameStarted = false;   // captures pending this frame
+static bool g_frameBegun = false;     // frame-begin timestamp written
+static uint32_t g_curFrame = 0, g_captures = 0;
 static uint64_t g_soBytesThisFrame = 0;
+struct RingInfo { uint32_t captures = 0; bool resolved = false, vel = false; };
+static RingInfo g_rings[kRings];
+static double g_accSo = 0, g_accVel = 0, g_accFrame = 0, g_accCpu = 0; static uint32_t g_accN = 0; static ULONGLONG g_accT0 = 0;
+static double g_cpuThisFrame = 0; static LARGE_INTEGER g_qpf = {};
+static bool g_velRan = false;
 
-struct Slot { uint32_t idx; uint32_t lastFrame; uint32_t size[2]; };
+struct Slot { uint32_t lastFrame; uint32_t off[2], bound[2], ctr[2]; uint64_t velKey[2]; bool jit[2]; };
 static std::unordered_map<uint64_t, Slot> g_slots;
-static uint32_t g_nextSlot = 0;
+struct VelEntry { uint64_t psoKey; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; };
+static std::vector<VelEntry> g_vel;
 
 static bool create_buffer(ID3D12Resource** out, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags, const wchar_t* name)
 {
@@ -287,79 +294,96 @@ static bool create_buffer(ID3D12Resource** out, uint64_t size, D3D12_HEAP_TYPE h
     return true;
 }
 
+static void transition(ID3D12GraphicsCommandList* cl, ID3D12Resource* r, D3D12_RESOURCE_STATES* state, D3D12_RESOURCE_STATES to)
+{
+    if (*state == to) return;
+    D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition = { r, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *state, to };
+    cl->ResourceBarrier(1, &b);
+    *state = to;
+}
+
 static bool create_pass_resources()
 {
-    if (!create_buffer(&g_cbUpload, 2ull * kSlots * kSlotBytes, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv constants")) return false;
-    D3D12_RANGE none = { 0, 0 }; g_cbUpload->Map(0, &none, reinterpret_cast<void**>(&g_cbPtr));
-    if (!g_cbPtr) return false;
-    for (int i = 0; i < 2; ++i) if (!create_buffer(&g_soBuf[i], kSoBytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_FLAG_NONE, i ? L"MGS4DLSS objmv prev positions" : L"MGS4DLSS objmv cur positions")) return false;
-    if (!create_buffer(&g_counters, 256, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv SO counters")) return false;
-    if (!create_buffer(&g_zero, 256, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv zero")) return false;
-    { void* p = nullptr; g_zero->Map(0, &none, &p); if (p) memset(p, 0, 256); g_zero->Unmap(0, nullptr); }
-    if (!create_buffer(&g_args, 64, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, L"MGS4DLSS objmv draw args")) return false;
+    QueryPerformanceFrequency(&g_qpf);
+    for (int i = 0; i < 2; ++i) {
+        if (!create_buffer(&g_soBuf[i], kSoBytes, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_FLAG_NONE, i ? L"MGS4DLSS objmv positions B" : L"MGS4DLSS objmv positions A")) return false;
+        if (!create_buffer(&g_ctr[i], kMaxCaptures * kCtrStride, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_FLAG_NONE, i ? L"MGS4DLSS objmv counters B" : L"MGS4DLSS objmv counters A")) return false;
+    }
+    if (!create_buffer(&g_zero, kMaxCaptures * kCtrStride, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv zero")) return false;
+    D3D12_RANGE none = { 0, 0 };
+    { void* p = nullptr; g_zero->Map(0, &none, &p); if (p) memset(p, 0, kMaxCaptures * kCtrStride); g_zero->Unmap(0, nullptr); }
     if (!create_buffer(&g_velCb, 4 * 256, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv velocity cb")) return false;
     g_velCb->Map(0, &none, reinterpret_cast<void**>(&g_velCbPtr));
+    if (!g_velCbPtr) return false;
 
-    // velocity pass: root CBV + SRV table (t0, t1)
+    // velocity pass: root CBV (b0, per frame) + 8 root constants (b1, per draw) + SRV table (t0..t3)
     {
-        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
-        D3D12_ROOT_PARAMETER params[2] = {};
+        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 4, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+        D3D12_ROOT_PARAMETER params[3] = {};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[1].DescriptorTable = { 1, &srvRange }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-        D3D12_ROOT_SIGNATURE_DESC rs = { 2, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+        params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = { 1, 0, 8 }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[2].DescriptorTable = { 1, &srvRange }; params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        D3D12_ROOT_SIGNATURE_DESC rs = { 3, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
         ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
         HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
         if (FAILED(hr)) { LOG("objmv: velocity root signature failed 0x%08lX %s", (unsigned long)hr, err ? (const char*)err->GetBufferPointer() : ""); return false; }
         t_inside = true; hr = g_dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&g_velRs)); t_inside = false; blob->Release();
         if (FAILED(hr)) return false;
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC d = {};
-        d.pRootSignature = g_velRs;
-        d.VS = { g_velocity_vs, sizeof(g_velocity_vs) }; d.PS = { g_velocity_ps, sizeof(g_velocity_ps) };
-        d.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-        d.SampleMask = UINT_MAX;
-        d.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; d.RasterizerState.CullMode = D3D12_CULL_MODE_NONE; d.RasterizerState.DepthClipEnable = TRUE;
-        d.RasterizerState.DepthBias = 2048; d.RasterizerState.SlopeScaledDepthBias = 1.0f; d.RasterizerState.DepthBiasClamp = 0.0f;   // reversed-Z: bias towards the camera so equal surfaces pass
-        d.DepthStencilState.DepthEnable = TRUE; d.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; d.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-        d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        d.NumRenderTargets = 1; d.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT; d.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-        d.SampleDesc = { 1, 0 };
-        t_inside = true; hr = g_dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&g_velPso)); t_inside = false;
-        if (FAILED(hr)) { LOG("objmv: velocity PSO failed 0x%08lX", (unsigned long)hr); return false; }
-    }
-    // args compute: root SRV (counters) + root UAV (args)
-    {
-        D3D12_ROOT_PARAMETER params[2] = {};
-        params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV; params[1].Descriptor = { 0, 0 }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        D3D12_ROOT_SIGNATURE_DESC rs = { 2, params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE };
-        ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
-        HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
-        if (FAILED(hr)) { LOG("objmv: args root signature failed 0x%08lX", (unsigned long)hr); return false; }
-        t_inside = true; hr = g_dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&g_argsRs)); t_inside = false; blob->Release();
-        if (FAILED(hr)) return false;
-        D3D12_COMPUTE_PIPELINE_STATE_DESC cd = {}; cd.pRootSignature = g_argsRs; cd.CS = { g_soargs_cs, sizeof(g_soargs_cs) };
-        hr = g_dev->CreateComputePipelineState(&cd, IID_PPV_ARGS(&g_argsPso));
-        if (FAILED(hr)) { LOG("objmv: args PSO failed 0x%08lX", (unsigned long)hr); return false; }
     }
     {
-        D3D12_INDIRECT_ARGUMENT_DESC arg = {}; arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
-        D3D12_COMMAND_SIGNATURE_DESC cs = { sizeof(D3D12_DRAW_ARGUMENTS), 1, &arg, 0 };
-        HRESULT hr = g_dev->CreateCommandSignature(&cs, nullptr, IID_PPV_ARGS(&g_cmdSig));
-        if (FAILED(hr)) { LOG("objmv: command signature failed 0x%08lX", (unsigned long)hr); return false; }
-    }
-    {
-        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 8, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
         HRESULT hr = g_dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_heap));
         if (FAILED(hr)) { LOG("objmv: descriptor heap failed 0x%08lX", (unsigned long)hr); return false; }
         const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-        D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart();
-        for (int i = 0; i < 2; ++i) {
-            D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_UNKNOWN; srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-            srv.Buffer.FirstElement = 0; srv.Buffer.NumElements = (UINT)(kSoBytes / 16); srv.Buffer.StructureByteStride = 16;
-            g_dev->CreateShaderResourceView(g_soBuf[i], &srv, cpu); cpu.ptr += inc;
+        for (int p = 0; p < 2; ++p) {
+            D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(p) * 4 * inc;
+            for (int i = 0; i < 2; ++i) {   // [0] cur positions, [1] prev positions
+                D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_UNKNOWN; srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srv.Buffer.FirstElement = 0; srv.Buffer.NumElements = (UINT)(kSoBytes / 16); srv.Buffer.StructureByteStride = 16;
+                g_dev->CreateShaderResourceView(g_soBuf[p ^ i], &srv, cpu); cpu.ptr += inc;
+            }
+            for (int i = 0; i < 2; ++i) {   // [2] cur counters, [3] prev counters (raw)
+                D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_R32_TYPELESS; srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srv.Buffer.FirstElement = 0; srv.Buffer.NumElements = kMaxCaptures * kCtrStride / 4; srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+                g_dev->CreateShaderResourceView(g_ctr[p ^ i], &srv, cpu); cpu.ptr += inc;
+            }
         }
     }
+    {
+        D3D12_QUERY_HEAP_DESC qd = { D3D12_QUERY_HEAP_TYPE_TIMESTAMP, kQueries, 0 };
+        if (FAILED(g_dev->CreateQueryHeap(&qd, IID_PPV_ARGS(&g_queries)))) { LOG("objmv: timestamp query heap failed - no GPU timing"); g_queries = nullptr; }
+        else if (!create_buffer(&g_readback, uint64_t(kRings) * kQueries * 8, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_FLAG_NONE, L"MGS4DLSS objmv timestamps")) { g_queries->Release(); g_queries = nullptr; }
+    }
     return true;
+}
+
+// Velocity pipeline matching the game pipeline's rasteriser settings (cull mode, winding, depth bias), so the pass
+// covers exactly the surfaces the game rendered, plus a small bias towards the camera so equal depths pass.
+static ID3D12PipelineState* vel_pso(const PsoRec* rec, DXGI_FORMAT dsvFmt, uint64_t* keyOut)
+{
+    D3D12_RASTERIZER_DESC r = {};
+    r.FillMode = D3D12_FILL_MODE_SOLID; r.CullMode = D3D12_CULL_MODE_BACK; r.DepthClipEnable = TRUE;
+    if (rec) { r.CullMode = rec->raster.CullMode; r.FrontCounterClockwise = rec->raster.FrontCounterClockwise; r.DepthBias = rec->raster.DepthBias; r.SlopeScaledDepthBias = rec->raster.SlopeScaledDepthBias; r.DepthBiasClamp = rec->raster.DepthBiasClamp; r.DepthClipEnable = rec->raster.DepthClipEnable; }
+    r.DepthBias += 16;   // reversed-Z: towards the camera
+    uint64_t key = fnv(&r, sizeof(r)); key = fnv(&dsvFmt, sizeof(dsvFmt), key);
+    *keyOut = key;
+    for (const VelPso& v : g_velPsos) if (v.key == key) return v.pso;
+    if (g_velPsos.size() >= 16) return g_velPsos.empty() ? nullptr : g_velPsos[0].pso;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC d = {};
+    d.pRootSignature = g_velRs;
+    d.VS = { g_velocity_vs, sizeof(g_velocity_vs) }; d.PS = { g_velocity_ps, sizeof(g_velocity_ps) };
+    d.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    d.SampleMask = UINT_MAX;
+    d.RasterizerState = r;
+    d.DepthStencilState.DepthEnable = TRUE; d.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO; d.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+    d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    d.NumRenderTargets = 1; d.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT; d.DSVFormat = dsvFmt;
+    d.SampleDesc = { 1, 0 };
+    ID3D12PipelineState* out = nullptr;
+    t_inside = true; HRESULT hr = g_dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&out)); t_inside = false;
+    if (FAILED(hr)) { LOG("objmv: velocity PSO failed 0x%08lX (cull %d, dsv fmt %d)", (unsigned long)hr, (int)r.CullMode, (int)dsvFmt); snprintf(g_st.lastError, sizeof(g_st.lastError), "velocity PSO creation failed 0x%08lX", (unsigned long)hr); return nullptr; }
+    g_velPsos.push_back({ key, out }); g_st.velPsos++;
+    return out;
 }
 
 void init(ID3D12Device* device, LogFn log)
@@ -376,7 +400,7 @@ void init(ID3D12Device* device, LogFn log)
         if (MH_CreateHook(vt2[47], (void*)hk_CreatePipelineState, (void**)&o_CreatePipelineState) != MH_OK || MH_EnableHook(vt2[47]) != MH_OK) { ok = false; LOG("objmv: hook CreatePipelineState failed"); }
         d2->Release();
     } else LOG("objmv: ID3D12Device2 not available - stream-form pipelines will not be seen");
-    if (ok && create_pass_resources()) { g_st.ready = true; LOG("objmv: ready (device hooks installed, stream-out buffers %llu MB x2, %u constant slots)", (unsigned long long)(kSoBytes >> 20), kSlots); }
+    if (ok && create_pass_resources()) { g_st.ready = true; LOG("objmv: ready (v2: one stream-out draw per object, ping-pong buffers %llu MB x2, %u captures/frame, GPU timing %s)", (unsigned long long)(kSoBytes >> 20), kMaxCaptures, g_queries ? "on" : "off"); }
     else LOG("objmv: not available");
 }
 
@@ -386,152 +410,172 @@ void shutdown()
     g_psos.clear();
     for (auto& kv : g_soShared) if (kv.second.pso) kv.second.pso->Release();
     g_soShared.clear();
-    for (auto& kv : g_rootSigs) if (kv.second.soVariant) kv.second.soVariant->Release();
-    g_rootSigs.clear();
-    ID3D12DeviceChild* objs[] = { g_cbUpload, g_soBuf[0], g_soBuf[1], g_counters, g_zero, g_args, g_velRs, g_velPso, g_argsRs, g_argsPso, g_cmdSig, g_heap, g_velCb };
+    g_soRootSigs.clear();
+    for (VelPso& v : g_velPsos) if (v.pso) v.pso->Release();
+    g_velPsos.clear();
+    ID3D12DeviceChild* objs[] = { g_soBuf[0], g_soBuf[1], g_ctr[0], g_ctr[1], g_zero, g_velRs, g_heap, g_velCb, g_queries, g_readback };
     for (ID3D12DeviceChild* o : objs) if (o) o->Release();
-    g_cbUpload = nullptr; g_soBuf[0] = g_soBuf[1] = nullptr; g_counters = nullptr; g_zero = nullptr; g_args = nullptr; g_velRs = nullptr; g_velPso = nullptr; g_argsRs = nullptr; g_argsPso = nullptr; g_cmdSig = nullptr; g_heap = nullptr; g_velCb = nullptr;
-    g_cbPtr = nullptr; g_velCbPtr = nullptr;
+    g_soBuf[0] = g_soBuf[1] = nullptr; g_ctr[0] = g_ctr[1] = nullptr; g_zero = nullptr; g_velRs = nullptr; g_heap = nullptr; g_velCb = nullptr; g_queries = nullptr; g_readback = nullptr;
+    g_velCbPtr = nullptr;
 }
 
 bool ready() { return g_st.ready; }
 const Stats& stats() { return g_st; }
 bool has_captures() { return g_frameStarted; }
+void set_timestamp_frequency(uint64_t hz) { g_tsHz = hz; }
+
+static double cpu_now_ms() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return g_qpf.QuadPart ? t.QuadPart * 1000.0 / double(g_qpf.QuadPart) : 0.0; }
+
+static void read_timing(uint32_t frame)
+{
+    if (!g_queries || !g_tsHz) return;
+    const uint32_t ring = (frame + kRings - 2) % kRings;   // written two frames ago
+    RingInfo& ri = g_rings[ring];
+    if (!ri.resolved) return;
+    ri.resolved = false;
+    const uint64_t base = uint64_t(ring) * kQueries * 8;
+    const uint32_t n = 4 + 2 * ri.captures;
+    D3D12_RANGE rr = { (SIZE_T)base, (SIZE_T)(base + uint64_t(n) * 8) };
+    uint8_t* mapped = nullptr;
+    if (FAILED(g_readback->Map(0, &rr, reinterpret_cast<void**>(&mapped))) || !mapped) return;
+    const uint64_t* ts = reinterpret_cast<const uint64_t*>(mapped + base);
+    const double toMs = 1000.0 / double(g_tsHz);
+    auto span = [&](uint32_t a, uint32_t b) { return (ts[b] > ts[a]) ? double(ts[b] - ts[a]) * toMs : 0.0; };
+    const double fr = span(0, 1), vel = ri.vel ? span(2, 3) : 0.0;
+    double so = 0.0; for (uint32_t i = 0; i < ri.captures; ++i) so += span(4 + 2 * i, 5 + 2 * i);
+    D3D12_RANGE none = { 0, 0 }; g_readback->Unmap(0, &none);
+    if (fr > 0 && fr < 200.0) { g_accFrame += fr; g_accSo += so; g_accVel += vel; g_accN++; }
+}
 
 void new_frame(uint32_t frame)
 {
-    g_st.recordedLast = g_st.recorded; g_st.capturedLast = g_st.captured; g_st.noPrevLast = g_st.noPrev; g_st.skippedLast = g_st.skipped;
-    g_st.recorded = g_st.captured = g_st.noPrev = g_st.skipped = 0;
-    g_curFrame = frame; g_soBytesThisFrame = 0;
+    g_st.capturedLast = g_st.captured; g_st.withPrevLast = g_st.withPrev; g_st.skippedLast = g_st.skipped; g_st.overflowLast = g_st.overflow;
+    g_st.captured = g_st.withPrev = g_st.skipped = g_st.overflow = 0;
+    g_accCpu += g_cpuThisFrame; g_cpuThisFrame = 0;
+    read_timing(frame);
+    const ULONGLONG t = GetTickCount64();
+    if (t - g_accT0 >= 1000) {
+        if (g_accN) { g_st.frameGpuMs = float(g_accFrame / g_accN); g_st.soGpuMs = float(g_accSo / g_accN); g_st.velGpuMs = float(g_accVel / g_accN); g_st.cpuMs = float(g_accCpu / g_accN); }
+        g_accFrame = g_accSo = g_accVel = g_accCpu = 0; g_accN = 0; g_accT0 = t;
+    }
+    g_curFrame = frame; g_soBytesThisFrame = 0; g_captures = 0; g_frameStarted = false; g_frameBegun = false; g_velRan = false;
+    g_vel.clear();
     g_st.slotsUsed = (uint32_t)g_slots.size();
-    if (g_slots.size() > kSlots - 64) {   // drop entries not seen recently
+    if (g_slots.size() > 4096) {   // drop entries not seen recently
         for (auto it = g_slots.begin(); it != g_slots.end();) { if (frame - it->second.lastFrame > 120) it = g_slots.erase(it); else ++it; }
-        if (g_slots.size() > kSlots - 64) { g_slots.clear(); g_nextSlot = 0; }
+        if (g_slots.size() > 4096) g_slots.clear();
     }
 }
 
-int record(uint64_t key, ID3D12Resource* cbRes, uint64_t cbOff, uint32_t frame, bool* havePrev)
+void mark_frame_begin(ID3D12GraphicsCommandList* cl)
 {
-    *havePrev = false;
-    if (!g_st.ready || !cbRes) return -1;
-    Slot* s;
-    auto it = g_slots.find(key);
-    if (it == g_slots.end()) {
-        if (g_nextSlot >= kSlots) { g_st.skipped++; return -1; }
-        s = &g_slots[key]; s->idx = g_nextSlot++; s->lastFrame = 0; s->size[0] = s->size[1] = 0;
-    } else s = &it->second;
-    const D3D12_RESOURCE_DESC d = cbRes->GetDesc();
-    if (cbOff >= d.Width) return -1;
-    const uint32_t size = (uint32_t)((d.Width - cbOff) < kSlotBytes ? (d.Width - cbOff) : kSlotBytes);
-    void* p = nullptr; D3D12_RANGE rr = { (SIZE_T)cbOff, (SIZE_T)(cbOff + size) };
-    if (FAILED(cbRes->Map(0, &rr, &p)) || !p) { g_st.skipped++; return -1; }
-    const uint32_t half = frame & 1;
-    memcpy(g_cbPtr + (size_t(s->idx) * 2 + half) * kSlotBytes, static_cast<const char*>(p) + cbOff, size);
-    D3D12_RANGE wr = { 0, 0 }; cbRes->Unmap(0, &wr);
-    *havePrev = s->lastFrame == frame - 1 && s->size[half ^ 1] > 0;
-    s->lastFrame = frame; s->size[half] = size;
-    g_st.recorded++;
-    if (!*havePrev) g_st.noPrev++;
-    return (int)s->idx;
+    if (!g_queries || g_frameBegun) return;
+    g_frameBegun = true;
+    cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 0);
 }
 
-static void reset_counters(ID3D12GraphicsCommandList* cl)
+void mark_frame_end(ID3D12GraphicsCommandList* cl)
 {
-    D3D12_RESOURCE_BARRIER b[3] = {};
-    int n = 0;
-    auto add = [&](ID3D12Resource* r, D3D12_RESOURCE_STATES from, D3D12_RESOURCE_STATES to) { if (from == to) return; b[n].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[n].Transition = { r, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, from, to }; n++; };
-    add(g_counters, g_ctrState, D3D12_RESOURCE_STATE_COPY_DEST);
-    add(g_soBuf[0], g_soState, D3D12_RESOURCE_STATE_STREAM_OUT); add(g_soBuf[1], g_soState, D3D12_RESOURCE_STATE_STREAM_OUT);
-    if (n) cl->ResourceBarrier(n, b);
-    cl->CopyBufferRegion(g_counters, 0, g_zero, 0, 256);
-    D3D12_RESOURCE_BARRIER c = {}; c.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; c.Transition = { g_counters, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_STREAM_OUT };
-    cl->ResourceBarrier(1, &c);
-    g_ctrState = D3D12_RESOURCE_STATE_STREAM_OUT; g_soState = D3D12_RESOURCE_STATE_STREAM_OUT;
+    if (!g_queries || !g_frameBegun) return;
+    cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 1);
+    const uint32_t ring = g_curFrame % kRings;
+    RingInfo& ri = g_rings[ring];
+    ri.captures = g_captures; ri.vel = g_velRan;
+    cl->ResolveQueryData(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 0, 4 + 2 * g_captures, g_readback, uint64_t(ring) * kQueries * 8);
+    ri.resolved = true;
+    g_frameBegun = false;
 }
 
-bool capture(ID3D12GraphicsCommandList* cl, int slot, const RootArgs& ra, const DrawArgs& da)
+static void begin_captures(ID3D12GraphicsCommandList* cl)
 {
-    if (!g_st.ready || slot < 0 || !ra.pso || !ra.rootSig || ra.cbParam < 0 || !ra.cbvSet[ra.cbParam]) return false;
-    ID3D12PipelineState* so;
-    { std::lock_guard<std::mutex> lock(g_mutex); so = so_pso(ra.pso); }
-    if (!so) return false;
-    const uint64_t bytes = uint64_t(da.count) * da.instances * 16;   // upper bound (strips emit fewer)
+    const uint32_t p = g_curFrame & 1;
+    transition(cl, g_ctr[p], &g_ctrState[p], D3D12_RESOURCE_STATE_COPY_DEST);
+    cl->CopyBufferRegion(g_ctr[p], 0, g_zero, 0, kMaxCaptures * kCtrStride);
+    transition(cl, g_ctr[p], &g_ctrState[p], D3D12_RESOURCE_STATE_STREAM_OUT);
+    transition(cl, g_soBuf[p], &g_soState[p], D3D12_RESOURCE_STATE_STREAM_OUT);
+}
+
+bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered)
+{
+    if (!g_st.ready || !gamePso) return false;
+    const double t0 = cpu_now_ms();
+    uint32_t verts = 0;
+    if (topology == D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST) verts = da.count - da.count % 3;
+    else if (topology == D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP) verts = da.count >= 3 ? (da.count - 2) * 3 : 0;
+    else { g_st.skipped++; return false; }
+    const uint64_t bound64 = uint64_t(verts) * (da.instances ? da.instances : 1);
+    if (bound64 == 0 || bound64 > 0xFFFFFFFFull) { g_st.skipped++; return false; }
+    const uint32_t bound = (uint32_t)bound64;
+    ID3D12PipelineState* so; const PsoRec* rec = nullptr;
+    { std::lock_guard<std::mutex> lock(g_mutex); so = so_pso(gamePso, &rec); }
+    if (!so || !rec) return false;
+    const uint64_t bytes = uint64_t(bound) * 16;
     if (g_soBytesThisFrame + bytes > kSoBytes) { g_st.overflow++; return false; }
-    if (!g_frameStarted) { reset_counters(cl); g_frameStarted = true; }
+    if (g_captures >= kMaxCaptures) { g_st.skipped++; return false; }
+    if (!g_frameStarted) { begin_captures(cl); g_frameStarted = true; }
+    const uint32_t p = g_curFrame & 1;
+    const uint32_t idx = g_captures++;
+    const uint32_t off = (uint32_t)(g_soBytesThisFrame / 16);
     g_soBytesThisFrame += bytes;
 
-    const uint32_t half = g_curFrame & 1;
-    const D3D12_GPU_VIRTUAL_ADDRESS base = g_cbUpload->GetGPUVirtualAddress();
-    const D3D12_GPU_VIRTUAL_ADDRESS curVA = base + (uint64_t(slot) * 2 + half) * kSlotBytes;
-    const D3D12_GPU_VIRTUAL_ADDRESS prevVA = base + (uint64_t(slot) * 2 + (half ^ 1)) * kSlotBytes;
-    ID3D12RootSignature* rs; { std::lock_guard<std::mutex> lock(g_mutex); rs = g_psos[ra.pso].rootSig ? so_root_signature(g_psos[ra.pso].rootSig) : nullptr; }
-    if (!rs) return false;
-    cl->SetGraphicsRootSignature(rs);
+    Slot& s = g_slots[key];
+    const bool havePrev = s.lastFrame == g_curFrame - 1 && s.bound[p ^ 1] == bound;
+    uint64_t velKey = 0; vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, &velKey);   // creates the variant lazily
+    if (havePrev) { g_vel.push_back({ velKey, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u) }); g_st.withPrev++; }
+    s.lastFrame = g_curFrame; s.off[p] = off; s.bound[p] = bound; s.ctr[p] = idx; s.jit[p] = jittered; s.velKey[p] = velKey;
+
+    if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 4 + 2 * idx);
     cl->SetPipelineState(so);
-    for (int i = 0; i < 5; ++i) {
-        if (ra.tableSet[i]) cl->SetGraphicsRootDescriptorTable(i, ra.tables[i]);
-        if (ra.cbvSet[i]) cl->SetGraphicsRootConstantBufferView(i, i == ra.cbParam ? curVA : ra.cbv[i]);
-    }
-    D3D12_STREAM_OUTPUT_BUFFER_VIEW v = { g_soBuf[0]->GetGPUVirtualAddress(), kSoBytes, g_counters->GetGPUVirtualAddress() + 0 };
-    cl->SOSetTargets(0, 1, &v);
-    if (da.indexed) cl->DrawIndexedInstanced(da.count, da.instances, da.first, da.vertexOffset, da.firstInstance);
-    else cl->DrawInstanced(da.count, da.instances, da.first, da.firstInstance);
-    cl->SetGraphicsRootConstantBufferView(ra.cbParam, prevVA);
-    v = { g_soBuf[1]->GetGPUVirtualAddress(), kSoBytes, g_counters->GetGPUVirtualAddress() + 64 };
+    D3D12_STREAM_OUTPUT_BUFFER_VIEW v = { g_soBuf[p]->GetGPUVirtualAddress() + uint64_t(off) * 16, bytes, g_ctr[p]->GetGPUVirtualAddress() + uint64_t(idx) * kCtrStride };
     cl->SOSetTargets(0, 1, &v);
     if (da.indexed) cl->DrawIndexedInstanced(da.count, da.instances, da.first, da.vertexOffset, da.firstInstance);
     else cl->DrawInstanced(da.count, da.instances, da.first, da.firstInstance);
     D3D12_STREAM_OUTPUT_BUFFER_VIEW none = { 0, 0, 0 };
     cl->SOSetTargets(0, 1, &none);
+    cl->SetPipelineState(gamePso);
+    if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 5 + 2 * idx);
     g_st.captured++;
+    g_cpuThisFrame += cpu_now_ms() - t0;
     return true;
 }
 
-void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& sceneVp)
+void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& sceneVp,
+              const float jitterCur[2], const float jitterPrev[2])
 {
     if (!g_st.ready || !g_frameStarted) return;
-    g_frameStarted = false;
-    {
-        D3D12_RESOURCE_BARRIER b[4] = {};
-        b[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[0].Transition = { g_soBuf[0], D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
-        b[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[1].Transition = { g_soBuf[1], D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
-        b[2].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[2].Transition = { g_counters, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_STREAM_OUT, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE };
-        b[3].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[3].Transition = { g_args, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS };
-        cl->ResourceBarrier(4, b);
-        g_soState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE; g_ctrState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    const double t0 = cpu_now_ms();
+    g_frameStarted = false; g_velRan = true;
+    const uint32_t p = g_curFrame & 1;
+    if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 2);
+    for (int i = 0; i < 2; ++i) { transition(cl, g_soBuf[i], &g_soState[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE); transition(cl, g_ctr[i], &g_ctrState[i], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE); }
+    if (!g_vel.empty()) {
+        const uint32_t cbSlot = g_velCbSlot++ % 4;
+        float cb[8] = { sceneVp.Width > 0 ? sceneVp.Width : float(w), sceneVp.Height > 0 ? sceneVp.Height : float(h), jitterCur[0], jitterCur[1], jitterPrev[0], jitterPrev[1], 0, 0 };
+        memcpy(g_velCbPtr + cbSlot * 256, cb, sizeof(cb));
+        const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        ID3D12DescriptorHeap* heaps[1] = { g_heap };
+        cl->SetDescriptorHeaps(1, heaps);
+        cl->SetGraphicsRootSignature(g_velRs);
+        cl->SetGraphicsRootConstantBufferView(0, g_velCb->GetGPUVirtualAddress() + cbSlot * 256);
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_heap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(p) * 4 * inc;
+        cl->SetGraphicsRootDescriptorTable(2, gpu);
+        cl->OMSetRenderTargets(1, &mvRtv, FALSE, &sceneDsv);
+        D3D12_VIEWPORT vp = sceneVp.Width > 0 ? sceneVp : D3D12_VIEWPORT{ 0, 0, float(w), float(h), 0, 1 }; cl->RSSetViewports(1, &vp);
+        D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h }; cl->RSSetScissorRects(1, &sc);
+        cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        std::sort(g_vel.begin(), g_vel.end(), [](const VelEntry& a, const VelEntry& b) { return a.psoKey < b.psoKey; });
+        uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr;
+        for (const VelEntry& e : g_vel) {
+            if (e.psoKey != boundKey) { boundKey = e.psoKey; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == e.psoKey) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
+            if (!cur) continue;
+            const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags, 0, 0, 0 };
+            cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
+            cl->DrawInstanced(e.bound, 1, 0, 0);
+        }
     }
-    cl->SetComputeRootSignature(g_argsRs);
-    cl->SetPipelineState(g_argsPso);
-    cl->SetComputeRootShaderResourceView(0, g_counters->GetGPUVirtualAddress());
-    cl->SetComputeRootUnorderedAccessView(1, g_args->GetGPUVirtualAddress());
-    cl->Dispatch(1, 1, 1);
-    {
-        D3D12_RESOURCE_BARRIER b = {}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b.Transition = { g_args, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT };
-        cl->ResourceBarrier(1, &b);
-    }
-    const uint32_t cbSlot = g_velCbSlot++ % 4;
-    float cb[4] = { sceneVp.Width > 0 ? sceneVp.Width : float(w), sceneVp.Height > 0 ? sceneVp.Height : float(h), 0, 0 };   // pixel scale of the scene viewport
-    memcpy(g_velCbPtr + cbSlot * 256, cb, sizeof(cb));
-    ID3D12DescriptorHeap* heaps[1] = { g_heap };
-    cl->SetDescriptorHeaps(1, heaps);
-    cl->SetGraphicsRootSignature(g_velRs);
-    cl->SetPipelineState(g_velPso);
-    cl->SetGraphicsRootConstantBufferView(0, g_velCb->GetGPUVirtualAddress() + cbSlot * 256);
-    cl->SetGraphicsRootDescriptorTable(1, g_heap->GetGPUDescriptorHandleForHeapStart());
-    cl->OMSetRenderTargets(1, &mvRtv, FALSE, &sceneDsv);
-    D3D12_VIEWPORT vp = sceneVp.Width > 0 ? sceneVp : D3D12_VIEWPORT{ 0, 0, float(w), float(h), 0, 1 }; cl->RSSetViewports(1, &vp);
-    D3D12_RECT sc = { 0, 0, (LONG)w, (LONG)h }; cl->RSSetScissorRects(1, &sc);
-    cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    cl->ExecuteIndirect(g_cmdSig, 1, g_args, 0, nullptr, 0);
-    {
-        D3D12_RESOURCE_BARRIER b[3] = {};
-        b[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[0].Transition = { g_soBuf[0], D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_STREAM_OUT };
-        b[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[1].Transition = { g_soBuf[1], D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_STREAM_OUT };
-        b[2].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; b[2].Transition = { g_counters, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_STREAM_OUT };
-        cl->ResourceBarrier(3, b);
-        g_soState = D3D12_RESOURCE_STATE_STREAM_OUT; g_ctrState = D3D12_RESOURCE_STATE_STREAM_OUT;
-    }
+    if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 3);
     g_st.velocityFrames++;
+    g_cpuThisFrame += cpu_now_ms() - t0;
 }
 
 } // namespace objmv

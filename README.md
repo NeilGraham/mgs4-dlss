@@ -12,7 +12,7 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 | Phase 1b — camera jitter + camera-only motion vectors | **Implemented** (needs visual tuning) — see below |
 | In-overlay controls (ReShade Add-ons tab) | **Done** |
 | Frame generation (Streamline DLSS-G: 2x/3x/4x, dynamic target fps, Reflex; live switching) | **Done** — `dlss-addon/src/fg.cpp` |
-| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Implemented, experimental** (`ObjectMV=1`; off by default: correct output, but currently halves the frame rate — needs the single-pass/ping-pong design) |
+| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Done, on by default** (`ObjectMV=1`) — one stream-out draw per object, ~0.1 ms GPU / ~0.2 ms CPU per frame at 4K, no frame-rate cost |
 | Dynamic resolution handling (DLSS on the scene sub-rect) | **Done** — `DRS=1` |
 | Phase 3 — real upscaling (internal res < output res) | maybe |
 
@@ -111,14 +111,44 @@ geometry shaders, `c[1..4]` for others. It is recognisable without knowing the s
 
 State of tuning: ~60–75% of scene draws expose a recognisable matrix; the rest (HUD/orthographic draws, one shader family
 with a different constant layout) render unjittered, so overlay elements can look slightly softer with jitter on.
-Character animation still has no motion vectors (Phase 2). Use the overlay toggles to compare.
+Character animation gets its own motion vectors from Phase 2 below. Use the overlay toggles to compare.
 
-### Phase 2: per-object motion vectors (`ObjectMV`, experimental)
+### Phase 2: per-object motion vectors (`ObjectMV`, on by default)
 
-Characters and props get real motion vectors without touching a single shader: for every dynamic draw (skinned meshes; props with `DynamicMaskProps`) the add-on records the draw's vertex-shader constants (before the jitter patch) keyed by geometry + occurrence, and — when the same draw was seen last frame — runs the game's own vertex shader twice with **stream output** capturing `SV_Position` (this frame's constants, then last frame's), on a clone of bgfx's root signature with the stream-output flag and a stream-out variant of the draw's PSO (VS + input layout, no rasterisation). At the DLSS insertion an indirect draw rasterises the current positions with a small VS/PS pair and writes `previous − current` in pixels over the camera vectors, depth-tested (reversed-Z, greater-equal, small bias) against the scene depth so only visible object surfaces are replaced. Notes:
-- bgfx creates its pipelines through `ID3D12Device2::CreatePipelineState` (the subobject stream) and hands the *same draw a different pipeline object every frame*, so the draw key deliberately excludes the PSO.
+Characters and props get real motion vectors without touching a single shader. For every dynamic draw (skinned
+meshes — PSOs whose input layout has `BLENDWEIGHT`/`BLENDINDICES`; props with their own model matrix when
+`DynamicMaskProps=1`) the add-on issues **one** extra draw with a stream-out variant of the game's pipeline (same vertex
+shader and input layout, no rasterisation) that writes the clip-space position of every emitted vertex into this frame's
+buffer. The buffers ping-pong: the capture becomes next frame's "previous positions" for the same draw (same geometry,
+same n-th occurrence in the frame). At the injection point one draw per object rasterises the current positions and
+writes `previous - current` in pixels into the motion-vector texture, depth-tested (greater-equal, reversed-Z, cull mode
+and winding copied from the game pipeline) against the scene depth, so only visible object surfaces replace the
+camera-only vectors. The captured positions carry the add-on's sub-pixel jitter; the velocity shader removes it.
+
+What made the first version slow, and what this one does instead:
+
+- v1 streamed out twice per draw (current + recorded previous constants) under a cloned root signature; a root signature
+  switch invalidates every root argument, so each draw also paid a full state restore, and the CPU copied 8 KB of
+  constants per draw. 60 fps -> 33 fps.
+- v2 adds `ALLOW_STREAM_OUTPUT` to the game's own root signatures when they are created (`CreateRootSignature` is hooked
+  and the blob re-serialised), so the stream-out pipeline binds under the game's root signature with the game's root
+  arguments, IA buffers and topology untouched: per draw it is a PSO swap, `SOSetTargets`, the draw, and the swap back.
+  Per-draw ranges and buffer-filled-size counters (16 B apart) make the captures independent; the velocity pass is
+  plain draws with root constants and a vertex shader that collapses the vertices past the counter.
+- Measured on the Act 1 garage cutscene (85-290 captured draws per frame, 4K DLAA + NR + FG): stream-out 0.02-0.15 ms
+  GPU, velocity 0.02-0.04 ms GPU, 0.1-0.4 ms CPU per frame, locked 60 fps.
+
+Notes:
+
+- bgfx creates its pipelines through `ID3D12Device2::CreatePipelineState` (the subobject stream) and hands the *same draw
+  a different pipeline object every frame*, so the draw key deliberately excludes the PSO; stream-out pipelines are
+  shared by vertex-shader hash (about 20 per scene).
 - The velocity pass uses the viewport the scene was rendered with (see dynamic resolution below).
-- Overlay: "Object motion: N draws recorded, N streamed out, N without history, ..."; the MV visualiser (Debug mode 5) shows object motion as colour differing from the camera field.
+- GPU timing: the add-on records timestamps around the scene (first scene draw -> after DLSS), the stream-out draws and
+  the velocity pass; the 10-second stats line and the overlay show `GPU ms: scene / stream-out / velocity; CPU ms`.
+- Overlay: "Object motion: N captured (N with history, ...)". The MV visualiser (`DebugMode=5`, live) shows object
+  motion as colour differing from the camera field — it can be flipped on for a few seconds during a recording.
+- With real object vectors the character mask (`DynamicMask`) is no longer needed and is off by default.
 
 ### Dynamic resolution in the port (`DRS`, off by default)
 
@@ -131,7 +161,7 @@ seen scaling resolution. Next quality step: sample the full-size output directly
 
 ### Known limitations
 
-- Per-object motion (characters) has no motion vectors yet; expect ghosting on fast character movement.
+- Alpha-tested surfaces (hair cards) get object vectors over their transparent texels too (the velocity pass has no alpha test); not visible in practice.
 - `Mode` changes need a restart (render targets are created at startup).
 - `steam_appid.txt` (2492670) is placed next to `mgs4.exe` so the exe can be launched directly for testing; harmless for Steam launches.
 
@@ -176,10 +206,10 @@ Skinned meshes (PSOs whose input layout has `BLENDWEIGHT`/`BLENDINDICES`, report
 are replayed once into a private depth buffer (same PSO, same jittered constants, no colour target). The motion-vector
 pass turns that depth into DLSS's **bias-current-colour mask**, so DLSS leans on the current frame for character
 pixels instead of reprojected history that camera-only vectors cannot describe. Result: no halo/ghosting around
-characters, at the cost of a little temporal accumulation on them. Options (panel / ini): `DynamicMask` (default on),
+characters, at the cost of a little temporal accumulation on them. Options (panel / ini): `DynamicMask` (default off),
 `DynamicMaskProps` (also mask props with their own model matrix — off; static props are correct with camera vectors),
 `DynamicZeroMV` (zero motion on masked pixels — off; useful for third-person camera turns where the player stays
-centred). The MV visualiser (`DebugMode=5`) shows the mask in blue. True per-object velocity remains future work.
+centred). The MV visualiser (`DebugMode=5`) shows the mask in blue. Superseded by the per-object motion vectors above; kept as an option (`DynamicMask=1`).
 
 ### DLAA insertion point (pre-HUD)
 
