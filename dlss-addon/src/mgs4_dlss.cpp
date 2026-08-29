@@ -96,7 +96,9 @@ static std::string desc_str(device* dev, resource r);
 static uint32_t g_renderW = 0, g_renderH = 0;       // DLSS render resolution (== internal in DLAA mode)
 static bool g_scaling = false;                      // render != internal
 static std::unordered_set<uint64_t> g_scaledTex;    // resources created at the shrunk size
+static std::unordered_set<uint64_t> g_liveTex;      // every live 2D texture the game created (handles are reused after destruction!)
 static std::mutex g_scaledMutex;
+static bool is_live(uint64_t h) { if (!h) return false; std::lock_guard<std::mutex> lock(g_scaledMutex); return g_liveTex.count(h) != 0; }
 static thread_local bool t_reentrant = false;       // guards our own viewport/scissor re-issues
 
 static bool is_scaled(resource r)
@@ -128,14 +130,16 @@ static bool table_to_cpu(device* dev, descriptor_table t, uint32_t binding, uint
     if (diag) snprintf(diag, diagLen, "heap=%p type=%u n=%u off=%u cpu=%llx", (void*)h, (unsigned)hd.Type, (unsigned)hd.NumDescriptors, off, (unsigned long long)*cpu);
     return true;
 }
+static bool is_live(uint64_t h);
 static resource lookup_view(device* dev, uint64_t cpu)
 {
     {
         std::lock_guard<std::mutex> lock(g_cvMutex);
         auto it = g_copiedViews.find(cpu);
-        if (it != g_copiedViews.end()) return resource{ it->second };
+        if (it != g_copiedViews.end()) { if (is_live(it->second)) return resource{ it->second }; g_copiedViews.erase(it); }   // stale (texture destroyed, e.g. level load)
     }
-    return dev->get_resource_from_view(resource_view{ cpu });
+    resource r = dev->get_resource_from_view(resource_view{ cpu });
+    return is_live(r.handle) ? r : resource{ 0 };
 }
 static resource resolve_descriptor(device* dev, descriptor_table table, uint32_t index, char* diag = nullptr, size_t diagLen = 0)
 {
@@ -197,7 +201,22 @@ static uint32_t g_dynDrawsThisFrame = 0, g_dynDrawsLastFrame = 0;
 static bool g_dynClearedThisFrame = false;
 static uint32_t g_prevBusiestDraws = 0;      // draws into the busiest scene RT last frame
 static uint64_t g_prevBusiestRt = 0;
+static uint64_t g_prevBusiestRt2 = 0;        // the frame before (geometry targets are double-buffered)
 static uint32_t g_prePostInjections = 0, g_compositeInjections = 0;
+// DLAA pre-HUD insertion: the final texture (what the composite samples) receives 3D draws (depth-tested PSOs) and then
+// the post/HUD 2D draws (depth disabled). DLSS runs at the first 2D draw after the bulk of the 3D draws.
+struct pso_info { bool depth = true; bool skinned = false; };
+static std::unordered_map<uint64_t, pso_info> g_psoDepth;   // pipeline -> depth test enabled / uses skinning attributes
+static std::mutex g_psoMutex;
+static uint64_t g_finalRt[2] = { 0, 0 };                 // textures sampled by the composite in the last two frames
+static uint32_t g_depthDrawsIntoFinal = 0, g_depthDrawsIntoFinalLast = 0;
+static std::unordered_map<uint64_t, uint32_t> g_depthDrawsPerRt;   // this frame: RT -> draws with a depth buffer bound (3D draws)
+static uint64_t g_geoRt = 0; static uint32_t g_geoDrawsLast = 0;   // last frame's 3D target (most depth-bound draws) and its count
+static uint64_t g_curGeoRt = 0;                                     // this frame's 3D target (detected in-frame: geometry targets are multi-buffered)
+static int g_cfgDynMaskProps = 0;                                   // also mask props with their own model matrix (default: skinned meshes only)
+static pso_info pso_get(ID3D12PipelineState* p) { std::lock_guard<std::mutex> lock(g_psoMutex); auto it = g_psoDepth.find((uint64_t)p); return it != g_psoDepth.end() ? it->second : pso_info{}; }
+static bool pso_depth_enabled(ID3D12PipelineState* p) { return pso_get(p).depth; }
+static uint32_t g_skinnedDrawsThisFrame = 0, g_skinnedDrawsLast = 0;
 static float g_cfgJitterSignX = 1.0f, g_cfgJitterSignY = -1.0f;   // NDC y is up, DLSS jitter is reported in pixel space (y down)
 static float g_jitterX = 0.0f, g_jitterY = 0.0f;   // pixels, this frame
 static uint32_t g_jitterIndex = 0;
@@ -255,7 +274,7 @@ static int jitter_scene_draw(const cl_state& s)
             for (int i = 0; i < 16; ++i) { hsh ^= u[i]; hsh *= 1099511628211ull; }
             vp_vote& v = g_vpVotes[hsh]; if (v.count++ == 0) memcpy(v.m, m, 64);
         }
-        if (g_cfgJitter) {
+        if (g_cfgJitter && !g_injectedThisFrame) {   // draws after DLSS ran (transparents, particles, HUD) stay unjittered
             const uint32_t w = g_scaling ? g_renderW : g_internalW, h = g_scaling ? g_renderH : g_internalH;
             const float ox = g_cfgJitterSignX * 2.0f * g_jitterX / float(w), oy = g_cfgJitterSignY * 2.0f * g_jitterY / float(h);
             float row0[4], row1[4];
@@ -297,6 +316,7 @@ static ID3D12PipelineState* g_mvPso = nullptr;
 static ID3D12PipelineState* g_visPso = nullptr;
 static ID3D12DescriptorHeap* g_mvHeap = nullptr;    // shader visible: 4 slots x (SRV depth, UAV mv) + 4 slots x (SRV mv, UAV out)
 static ID3D12Resource* g_mvCb = nullptr; static uint8_t* g_mvCbPtr = nullptr;   // 8 x 256 B upload ring
+static ID3D12Resource* g_dummyUav = nullptr;   // 8x8 R8 texture bound where a shader declares a UAV it never writes
 static uint32_t g_mvSlot = 0;
 static bool g_mvReady = false, g_mvInitTried = false;
 static resource_usage g_mvState = resource_usage::shader_resource_non_pixel;
@@ -377,6 +397,10 @@ static bool mv_init()
     hr = g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_mvCb));
     if (FAILED(hr)) { logmsg("MV: constant buffer creation failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_RANGE none = { 0, 0 }; g_mvCb->Map(0, &none, reinterpret_cast<void**>(&g_mvCbPtr));
+    D3D12_HEAP_PROPERTIES hpDef = { D3D12_HEAP_TYPE_DEFAULT, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
+    D3D12_RESOURCE_DESC td = {}; td.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D; td.Width = 8; td.Height = 8; td.DepthOrArraySize = 1; td.MipLevels = 1; td.Format = DXGI_FORMAT_R8_UNORM; td.SampleDesc = { 1, 0 }; td.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    hr = g_d3d->CreateCommittedResource(&hpDef, D3D12_HEAP_FLAG_NONE, &td, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&g_dummyUav));
+    if (FAILED(hr)) { logmsg("MV: dummy UAV texture failed 0x%08lX", (unsigned long)hr); return false; }
     g_mvReady = g_mvCbPtr != nullptr;
     logmsg("MV: compute pass ready (%s)", g_mvReady ? "ok" : "map failed");
     return g_mvReady;
@@ -471,10 +495,10 @@ static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R8G8B8A8_UNORM; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
     g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_out.handle), nullptr, &uav, h2);
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavMask = {}; uavMask.Format = DXGI_FORMAT_R8_UNORM; uavMask.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDummy = {}; uavDummy.Format = DXGI_FORMAT_R8_UNORM; uavDummy.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_CPU_DESCRIPTOR_HANDLE h3 = cpu; h3.ptr += 3 * inc;
-    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mask.handle), nullptr, &uavMask, h3);
-    cmd->barrier(g_mask, g_maskState, resource_usage::unordered_access); g_maskState = resource_usage::unordered_access;   // bound as both SRV and (unused) UAV: keep it in UAV state
+    g_d3d->CreateUnorderedAccessView(g_dummyUav, nullptr, &uavDummy, h3);
+    if (g_maskState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_mask, g_maskState, resource_usage::shader_resource_non_pixel); g_maskState = resource_usage::shader_resource_non_pixel; }
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
     native->SetDescriptorHeaps(1, heaps);
@@ -692,10 +716,10 @@ static void restore_state(device* dev, command_list* cmd, const cl_state& s)
 static resource pick_depth(device* dev, resource color)
 {
     auto itDs = g_dsForRt.find(color.handle);
-    resource depth = itDs != g_dsForRt.end() ? resource{ itDs->second } : resource{ 0 };
+    resource depth = (itDs != g_dsForRt.end() && is_live(itDs->second)) ? resource{ itDs->second } : resource{ 0 };
     if (!depth.handle) {
         uint32_t best = 0;
-        for (auto& kv : g_drawsPerDs) if (kv.second > best) { best = kv.second; depth = resource{ kv.first }; }
+        for (auto& kv : g_drawsPerDs) if (kv.second > best && is_live(kv.first)) { best = kv.second; depth = resource{ kv.first }; }
     }
     return depth;
 }
@@ -706,6 +730,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
 {
     device* dev = cmd->get_device();
     if (!ngx_init(dev)) return;
+    if (!is_live(color.handle)) { static int n = 0; if (n++ < 3) logmsg("skipped: color %p is not a live texture", (void*)color.handle); return; }
     resource_desc cd = dev->get_resource_desc(color);
     resource depth = pick_depth(dev, color);
     if (!depth.handle) { static bool once = false; if (!once) { once = true; logmsg("no depth buffer found for color %p", (void*)color.handle); } return; }
@@ -811,6 +836,7 @@ static bool on_create_resource(device* dev, resource_desc& desc, subresource_dat
 }
 static void on_init_resource(device* dev, const resource_desc& desc, const subresource_data*, resource_usage, resource res)
 {
+    if (desc.type == resource_type::texture_2d) { std::lock_guard<std::mutex> lock(g_scaledMutex); g_liveTex.insert(res.handle); }
     if (desc.type == resource_type::texture_2d && g_frame > 200 && desc.texture.width >= 640 && desc.texture.height >= 360 &&
         (desc.usage & (resource_usage::render_target | resource_usage::depth_stencil)) != 0) {
         static int n = 0; if (n++ < 20) logmsg("f%u: game created a render target/depth texture at runtime: %ux%u fmt=%u", g_frame, desc.texture.width, desc.texture.height, (unsigned)desc.texture.format);
@@ -822,10 +848,49 @@ static void on_init_resource(device* dev, const resource_desc& desc, const subre
         static int n = 0; if (n++ < 12) logmsg("shrunk texture %p to %ux%u (fmt=%u usage=0x%X)", (void*)res.handle, desc.texture.width, desc.texture.height, (unsigned)desc.texture.format, (unsigned)desc.usage);
     }
 }
+static void on_init_pipeline(device*, pipeline_layout, uint32_t count, const pipeline_subobject* subs, pipeline p)
+{
+    pso_info info;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (subs[i].type == pipeline_subobject_type::depth_stencil_state && subs[i].data) info.depth = static_cast<const depth_stencil_desc*>(subs[i].data)->depth_enable;
+        if (subs[i].type == pipeline_subobject_type::input_layout && subs[i].data) {
+            const input_element* el = static_cast<const input_element*>(subs[i].data);
+            for (uint32_t k = 0; k < subs[i].count; ++k)
+                if (el[k].semantic && (_stricmp(el[k].semantic, "BLENDWEIGHT") == 0 || _stricmp(el[k].semantic, "BLENDINDICES") == 0 || _stricmp(el[k].semantic, "WEIGHTS") == 0)) info.skinned = true;
+        }
+    }
+    std::lock_guard<std::mutex> lock(g_psoMutex);
+    g_psoDepth[p.handle] = info;
+}
+static void on_destroy_pipeline(device*, pipeline p)
+{
+    std::lock_guard<std::mutex> lock(g_psoMutex);
+    g_psoDepth.erase(p.handle);
+}
 static void on_destroy_resource(device*, resource res)
 {
-    std::lock_guard<std::mutex> lock(g_scaledMutex);
-    g_scaledTex.erase(res.handle);
+    {
+        std::lock_guard<std::mutex> lock(g_scaledMutex);
+        g_scaledTex.erase(res.handle);
+        g_liveTex.erase(res.handle);
+    }
+    // forget every cross-frame reference to it (level transitions destroy and recreate the render targets)
+    if (g_prevBusiestRt == res.handle) g_prevBusiestRt = 0;
+    if (g_prevBusiestRt2 == res.handle) g_prevBusiestRt2 = 0;
+    if (g_finalRt[0] == res.handle) g_finalRt[0] = 0;
+    if (g_finalRt[1] == res.handle) g_finalRt[1] = 0;
+    if (g_geoRt == res.handle) g_geoRt = 0;
+    if (g_curGeoRt == res.handle) g_curGeoRt = 0;
+    g_depthDrawsPerRt.erase(res.handle);
+    if (g_lastDepth == res.handle) g_lastDepth = 0;
+    g_drawsPerRt.erase(res.handle); g_drawsPerDs.erase(res.handle);
+    for (auto it = g_dsForRt.begin(); it != g_dsForRt.end();) { if (it->first == res.handle || it->second == res.handle) it = g_dsForRt.erase(it); else ++it; }
+    {
+        std::lock_guard<std::mutex> lock(g_cvMutex);
+        for (auto it = g_copiedViews.begin(); it != g_copiedViews.end();) { if (it->second == res.handle) it = g_copiedViews.erase(it); else ++it; }
+    }
+    std::lock_guard<std::mutex> lock(g_clMutex);
+    for (auto& kv : g_cl) { if (kv.second.rt.handle == res.handle) { kv.second.rt = { 0 }; kv.second.rt_w = kv.second.rt_h = 0; } if (kv.second.ds.handle == res.handle) kv.second.ds = { 0 }; }
 }
 static void on_init_resource_view(device* dev, resource res, resource_usage usage, const resource_view_desc&, resource_view view)
 {
@@ -934,6 +999,7 @@ static bool tracing() { return g_frame < g_traceUntil; }
 static std::string desc_str(device* dev, resource r)
 {
     if (!r.handle) return "none";
+    if (!is_live(r.handle)) { char b[48]; snprintf(b, sizeof(b), "%p (destroyed)", (void*)r.handle); return b; }
     resource_desc d = dev->get_resource_desc(r);
     char b[96]; snprintf(b, sizeof(b), "%p %ux%u f%u", (void*)r.handle, d.texture.width, d.texture.height, (unsigned)d.texture.format);
     return b;
@@ -941,7 +1007,7 @@ static std::string desc_str(device* dev, resource r)
 static bool is_backbuffer(resource r) { return g_backbuffers.count(r.handle) != 0; }
 static bool scene_sized(device* dev, resource r, resource_desc* out)
 {
-    if (!r.handle || is_backbuffer(r)) return false;
+    if (!r.handle || is_backbuffer(r) || !is_live(r.handle)) return false;
     resource_desc d = dev->get_resource_desc(r);
     if (out) *out = d;
     return d.type == resource_type::texture_2d && d.texture.width >= 640 && d.texture.width <= g_bbW && d.texture.height >= 360 && d.texture.height <= g_bbH;
@@ -979,8 +1045,11 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 if (dumping()) analyse_scene_draw(s);
                 int cls = -1;
                 if (g_cfgEnabled && g_cfgDebugMode != 2) cls = jitter_scene_draw(s);
-                // Phase 2: replay dynamic draws (own transform / no camera VP) into the private depth buffer -> mask.
-                if (g_cfgDynMask && cls >= 1 && g_dynDepth.handle && g_dynDsv.handle && s.ds.handle == g_lastDepth && da.count > 6 && !g_injectedThisFrame) {
+                const bool skinned = pso_get(s.pso).skinned;
+                if (skinned) g_skinnedDrawsThisFrame++;
+                // Phase 2: replay dynamic draws (skinned meshes; optionally props with their own transform) into the private depth buffer -> mask.
+                const bool dynamic = skinned || (g_cfgDynMaskProps && cls >= 1);
+                if (g_cfgDynMask && dynamic && g_dynDepth.handle && g_dynDsv.handle && s.ds.handle == g_lastDepth && da.count > 6 && !g_injectedThisFrame) {
                     t_reentrant = true;
                     if (g_dynState != resource_usage::depth_stencil_write) { cmd->barrier(g_dynDepth, g_dynState, resource_usage::depth_stencil_write); g_dynState = resource_usage::depth_stencil_write; }
                     cmd->bind_render_targets_and_depth_stencil(0, nullptr, g_dynDsv);
@@ -991,17 +1060,47 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     g_dynDrawsThisFrame++;
                 }
             }
-            // DLAA pre-post insertion: the first draw that samples the (finished) geometry target is the start of the
-            // post-process chain - run DLSS on the geometry target there, before vignette/scanlines/HUD are applied.
-            if (g_cfgPrePost && !g_scaling && !g_injectedThisFrame && g_cfgEnabled && g_prevBusiestRt && s.rt.handle != g_prevBusiestRt && s.table_set[1]) {
-                auto it = g_drawsPerRt.find(g_prevBusiestRt);
-                const uint32_t done = it != g_drawsPerRt.end() ? it->second : 0;
-                if (done >= 20 && done * 10 >= g_prevBusiestDraws * 8) {
-                    resource src = resolve_descriptor(dev, s.tables[1], 0);
-                    if (src.handle == g_prevBusiestRt) {
+            // DLAA pre-HUD insertion. The 3D target = the RT that received the most depth-tested draws last frame. Once
+            // most of this frame's depth-tested draws are in, DLSS runs on it at whichever comes first:
+            //  (a) the first 2D (depth-disabled) draw into it - scenes that draw geometry straight into the final texture,
+            //  (b) the first draw that samples it - scenes with a separate geometry target read by the post chain.
+            const bool depthOn = pso_depth_enabled(s.pso);
+            if (s.ds.handle) {
+                const uint32_t n = ++g_depthDrawsPerRt[s.rt.handle];
+                if (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) g_depthDrawsIntoFinal++;
+                // in-frame detection of the 3D target: the first depth-bound RT that reaches 40% of last frame's peak
+                if (!g_curGeoRt && n >= 20 && n * 10 >= g_geoDrawsLast * 4) g_curGeoRt = s.rt.handle;
+            }
+            g_geoRt = g_curGeoRt;
+            if (tracing()) {   // where does the 3D target go? log RT switches and every draw referencing it
+                static uint64_t lastRt = 0; static uint32_t drawsSince = 0;
+                std::string refs;
+                for (int p = 0; p < 5; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_geoRt) refs += " root" + std::to_string(p) + "[" + std::to_string(i) + "]"; }
+                if (s.rt.handle != lastRt) {
+                    logmsg("f%u RT switch -> %s ds=%p (%u draws into previous) [3D target %p: %u depth draws so far]", g_frame, desc_str(dev, s.rt).c_str(), (void*)s.ds.handle, drawsSince, (void*)g_geoRt, (unsigned)g_depthDrawsPerRt[g_geoRt]);
+                    lastRt = s.rt.handle; drawsSince = 0;
+                }
+                drawsSince++;
+                if (!refs.empty()) logmsg("f%u    draw into %p (depth %d, pso %p) samples the 3D target via%s", g_frame, (void*)s.rt.handle, (int)depthOn, (void*)s.pso, refs.c_str());
+            }
+            if (g_cfgPrePost && !g_scaling && !g_injectedThisFrame && g_cfgEnabled && g_geoRt && is_live(g_geoRt)) {
+                auto itd = g_depthDrawsPerRt.find(g_geoRt);
+                const uint32_t done = itd != g_depthDrawsPerRt.end() ? itd->second : 0;
+                if (done >= 20 && done * 10 >= g_geoDrawsLast * 8) {
+                    if (s.rt.handle == g_geoRt && !depthOn) {
                         g_injectedThisFrame = true; g_prePostInjections++;
-                        static bool once = false; if (!once) { once = true; logmsg("pre-post insertion: geometry RT %p (%u draws) sampled by a draw into %s", (void*)src.handle, done, desc_str(dev, s.rt).c_str()); }
-                        run_dlss(cmd, &s, src, resource_usage::shader_resource_pixel, 0);
+                        static bool once = false; if (!once) { once = true; logmsg("pre-HUD insertion (a): 3D target %s after %u depth-tested draws, at a 2D draw into it", desc_str(dev, s.rt).c_str(), done); }
+                        t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(0, nullptr, resource_view{ 0 }); t_reentrant = false;
+                        run_dlss(cmd, &s, s.rt, resource_usage::render_target, 0);
+                        t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(s.rtv_count, s.rtvs, s.dsv); t_reentrant = false;
+                    } else if (s.rt.handle != g_geoRt && s.table_set[1]) {
+                        int idx = -1;
+                        for (int i = 0; i < 8 && idx < 0; ++i) { resource r = resolve_descriptor(dev, s.tables[1], i); if (r.handle == g_geoRt) idx = i; }
+                        if (idx >= 0) {
+                            g_injectedThisFrame = true; g_prePostInjections++;
+                            static bool once = false; if (!once) { once = true; logmsg("pre-HUD insertion (b): 3D target %p (%u depth-tested draws) sampled (slot %d) by a draw into %s", (void*)g_geoRt, done, idx, desc_str(dev, s.rt).c_str()); }
+                            run_dlss(cmd, &s, resource{ g_geoRt }, resource_usage::shader_resource_pixel, 0);
+                        }
                     }
                 }
             }
@@ -1032,6 +1131,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     if (tracing() && drawIdx < 4)
         logmsg("f%u bb-draw#%u vp=(%.0f,%.0f %.0fx%.0f) -> color=%s (param %d idx %d)", g_frame, drawIdx, s.vp.x, s.vp.y, s.vp.width, s.vp.height, desc_str(dev, color).c_str(), colorParam, colorIdx);
 
+    if (color.handle && color.handle != g_finalRt[0]) { g_finalRt[1] = g_finalRt[0]; g_finalRt[0] = color.handle; }
     if (g_injectedThisFrame || !g_cfgEnabled || !color.handle) return;
     g_injectedThisFrame = true; g_compositeInjections++;
     resource_desc cd = dev->get_resource_desc(color);
@@ -1041,10 +1141,14 @@ static void handle_draw(command_list* cmd, const draw_args& da)
 static bool on_draw(command_list* cmd, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) { handle_draw(cmd, draw_args{ false, vc, ic, fv, fi, 0 }); return false; }
 static bool on_draw_indexed(command_list* cmd, uint32_t ic, uint32_t inst, uint32_t fi, int32_t vo, uint32_t finst) { handle_draw(cmd, draw_args{ true, ic, inst, fi, finst, vo }); return false; }
 
+static uint32_t g_ppMissFrames = 0;   // frames where the geometry target was finished but no draw sampled it (pre-post could not insert)
 static void handle_copy(command_list* cmd, resource src, resource dst, const char* what)
 {
-    if (g_bbW == 0 || !is_backbuffer(dst)) return;
+    if (g_bbW == 0) return;
     device* dev = cmd->get_device();
+    if (tracing() && (src.handle == g_geoRt || dst.handle == g_geoRt) && is_live(src.handle) && is_live(dst.handle))
+        logmsg("f%u %s %s -> %s (3D target involved)", g_frame, what, desc_str(dev, src).c_str(), desc_str(dev, dst).c_str());
+    if (!is_backbuffer(dst)) return;
     if (tracing()) logmsg("f%u %s src=%s -> backbuffer (scene draws so far %u)", g_frame, what, desc_str(dev, src).c_str(), g_sceneDrawsThisFrame);
     if (g_injectedThisFrame || !g_cfgEnabled || g_sceneDrawsThisFrame < 20 || !scene_sized(dev, src) || g_scaling) return;
     g_injectedThisFrame = true;
@@ -1060,10 +1164,14 @@ static void reload_config()
     g_cfgSharpness100 = GetPrivateProfileIntA("DLSS", "Sharpness", 0, g_iniPath);
     g_cfgDebugMode = GetPrivateProfileIntA("DLSS", "DebugMode", 0, g_iniPath);
     g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
+    g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 1, g_iniPath);
+    g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
+    g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
     g_cfgPrePost = GetPrivateProfileIntA("DLSS", "PrePost", 1, g_iniPath);
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 1, g_iniPath);
-    g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 1, g_iniPath);
+    g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
+    g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
@@ -1083,10 +1191,16 @@ static void on_present(command_queue*, swapchain*, const rect*, const rect*, uin
     if (tracing()) { logmsg("f%u: %u shader-view creations, %u descriptor copies this frame", g_frame - 1, g_viewEvents, g_copyEvents); g_viewSamples = 0; }
     if (dumping() && !g_blockHist.empty()) report_blocks();
     g_viewEvents = 0; g_copyEvents = 0;
+    if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
     g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    { uint32_t best = 0; uint64_t bestRt = 0; for (auto& kv : g_drawsPerRt) if (kv.second > best) { best = kv.second; bestRt = kv.first; } g_prevBusiestDraws = best; g_prevBusiestRt = bestRt; }
+    g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
+    g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
+    { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }
+    { uint32_t best = 0; uint64_t bestRt = 0; for (auto& kv : g_drawsPerRt) if (kv.second > best) { best = kv.second; bestRt = kv.first; }
+      if (bestRt != g_prevBusiestRt) g_prevBusiestRt2 = g_prevBusiestRt;
+      g_prevBusiestDraws = best; g_prevBusiestRt = bestRt; }
     g_drawsPerRt.clear(); g_drawsPerDs.clear();
     // jitter bookkeeping for the next frame
     static uint32_t lastLogged = 0;
@@ -1094,7 +1208,7 @@ static void on_present(command_queue*, swapchain*, const rect*, const rect*, uin
         lastLogged = g_frame; g_missLogBudget = 3;
         logmsg("jitter (this frame): calls %u, no-cbv %u, dup-region %u, map-fail %u, patched %u, no-matrix %u; VP found=%d (votes %zu); MV dispatches %u, resets %u, cam delta now rot %.3f pos %.1f, max in window rot %.3f pos %.1f, VP changed in %u frames; insertion pre-post %u / composite %u",
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_compositeInjections);
-        logmsg("   dynamic draws replayed last frame: %u (mask %s, zero-MV %s)", g_dynDrawsLastFrame, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off");
+        logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
         g_camDeltaRotMax = g_camDeltaPosMax = 0; g_vpChanges = 0;
@@ -1131,6 +1245,7 @@ static void on_destroy_device(device* dev)
 {
     release_dlss_resources(dev);
     if (g_mvCb) { g_mvCb->Unmap(0, nullptr); g_mvCb->Release(); g_mvCb = nullptr; g_mvCbPtr = nullptr; }
+    if (g_dummyUav) { g_dummyUav->Release(); g_dummyUav = nullptr; }
     if (g_mvHeap) { g_mvHeap->Release(); g_mvHeap = nullptr; }
     if (g_mvPso) { g_mvPso->Release(); g_mvPso = nullptr; }
     if (g_visPso) { g_visPso->Release(); g_visPso = nullptr; }
@@ -1200,10 +1315,12 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("DLAA before post-process/HUD (pre-post insertion)", &pp)) { g_cfgPrePost = pp ? 1 : 0; write_ini_int("PrePost", g_cfgPrePost); }
     ImGui::Text("Insertion: pre-post %u frames, composite %u frames", g_prePostInjections, g_compositeInjections);
     bool dm = g_cfgDynMask != 0;
-    if (ImGui::Checkbox("Dynamic-object mask (characters/props -> bias current colour)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
+    if (ImGui::Checkbox("Character mask (skinned meshes -> bias current colour)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
+    bool dp2 = g_cfgDynMaskProps != 0;
+    if (ImGui::Checkbox("Also mask props with their own transform", &dp2)) { g_cfgDynMaskProps = dp2 ? 1 : 0; write_ini_int("DynamicMaskProps", g_cfgDynMaskProps); }
     bool dz = g_cfgDynZeroMV != 0;
-    if (ImGui::Checkbox("Zero motion on dynamic objects (third-person friendly)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
-    ImGui::Text("Dynamic draws replayed last frame: %u", g_dynDrawsLastFrame);
+    if (ImGui::Checkbox("Zero motion on masked objects (third-person camera turns)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
+    ImGui::Text("Dynamic draws replayed last frame: %u (skinned %u)", g_dynDrawsLastFrame, g_skinnedDrawsLast);
     ImGui::Text("Jitter (%.3f, %.3f) px | VP: %s | MV pass: %s, %u resets | cam delta rot %.3f pos %.0f", g_jitterX, g_jitterY, g_havePrevVP ? "found" : "missing",
                 g_mvReady ? "ok" : (g_mvInitTried ? "FAILED" : "idle"), g_mvResets, g_camDeltaRot, g_camDeltaPos);
 }
@@ -1230,6 +1347,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         reshade::register_event<reshade::addon_event::create_resource>(on_create_resource);
         reshade::register_event<reshade::addon_event::init_resource>(on_init_resource);
         reshade::register_event<reshade::addon_event::destroy_resource>(on_destroy_resource);
+        reshade::register_event<reshade::addon_event::init_pipeline>(on_init_pipeline);
+        reshade::register_event<reshade::addon_event::destroy_pipeline>(on_destroy_pipeline);
         reshade::register_event<reshade::addon_event::init_resource_view>(on_init_resource_view);
         reshade::register_event<reshade::addon_event::copy_descriptor_tables>(on_copy_descriptor_tables);
         reshade::register_event<reshade::addon_event::bind_render_targets_and_depth_stencil>(on_bind_rts);

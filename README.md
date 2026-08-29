@@ -133,13 +133,32 @@ third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignor
 docs/                  reverse-engineering notes and the DLSS plan
 ```
 
-### Phase 2 (first step): dynamic-object mask
+### Phase 2 (first step): character mask
 
-Characters and props do not carry the camera view-projection at `c[0]` (their matrix sits elsewhere, or their shader
-uses a different constant layout), so the add-on can tell them apart from world geometry per draw. Each such draw is
-replayed once into a private depth buffer (same PSO, same jittered constants, no colour target); the motion-vector
-pass turns that depth into DLSS's **bias-current-colour mask** and, by default, zeroes the camera vector on those pixels
-(third-person characters keep their screen position while the camera turns). Result: no halo/ghosting around the
-player at the cost of less temporal accumulation on the character. Toggles in the panel: "Dynamic-object mask" and
-"Zero motion on dynamic objects"; the MV visualiser shows the mask in blue. True per-object velocity (replaying skinned
-draws with previous-frame bones) remains future work.
+Skinned meshes (PSOs whose input layout has `BLENDWEIGHT`/`BLENDINDICES`, reported by ReShade at pipeline creation)
+are replayed once into a private depth buffer (same PSO, same jittered constants, no colour target). The motion-vector
+pass turns that depth into DLSS's **bias-current-colour mask**, so DLSS leans on the current frame for character
+pixels instead of reprojected history that camera-only vectors cannot describe. Result: no halo/ghosting around
+characters, at the cost of a little temporal accumulation on them. Options (panel / ini): `DynamicMask` (default on),
+`DynamicMaskProps` (also mask props with their own model matrix — off; static props are correct with camera vectors),
+`DynamicZeroMV` (zero motion on masked pixels — off; useful for third-person camera turns where the player stays
+centred). The MV visualiser (`DebugMode=5`) shows the mask in blue. True per-object velocity remains future work.
+
+### DLAA insertion point (pre-HUD)
+
+In DLAA mode DLSS runs *before* post-processing and the HUD: the frame's geometry target is detected in-frame (first
+depth-bound RT reaching 40% of last frame's peak draw count — the port multi-buffers these targets, so "last frame's"
+never matches) and DLSS is inserted at the first draw that samples it, or at the first 2D draw into it, whichever
+comes first. Draws issued after the insertion (transparents, particles, HUD) are left unjittered. Upscaling modes keep
+the composite insertion (they need the SRV redirect).
+
+### Direct stage boot
+
+`mgs4.exe --stage <name>` skips the launcher and menus: `s00title_1` (OTC intro), `s00a00l` (cemetery opening),
+`s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
+relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
+
+### Robustness
+
+Level transitions destroy and recreate render targets; every cross-frame handle (busiest/geometry/final targets, last
+depth, RT->depth map, descriptor-copy map) is validated against the set of live textures and dropped on destruction.
