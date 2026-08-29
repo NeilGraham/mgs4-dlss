@@ -71,15 +71,21 @@ Because the game's render-target size follows the in-game resolution, `InternalR
 
 **Expect it to look soft.** Without sub-pixel jitter DLSS has no extra information to reconstruct detail from, so the upscaling modes currently behave like a good temporal upscaler with no supersampling. They are useful for testing NR/DLSS at lower cost, not for image quality yet - DLAA is the quality mode until jitter lands. On an RTX 5090 the game is not GPU-bound anyway.
 
-### Frame generation (not implemented - here is why)
+### Frame generation (DLSS-G / Multi-Frame Generation via Streamline)
 
-- **2x today:** NVIDIA Smooth Motion (driver-level, RTX 40/50, works on DX12 titles without game support): NVIDIA App -> Graphics -> `mgs4.exe` -> Driver Settings -> Smooth Motion. Nothing to install.
-- **DLSS Frame Generation / Multi-Frame Generation (2x/3x/4x)** is only exposed through NVIDIA Streamline (`sl.dlssg`), not through the plain NGX API this add-on uses. Doing it from an add-on means initialising Streamline in-process, letting it take over the DXGI swapchain (which ReShade also proxies), and feeding it **real motion vectors + depth + HUD-less color** every frame. With this game's zero motion vectors the generated frames would be wrong on any camera movement, so it makes no sense before Phase 1b (camera motion vectors) exists. It is a separate project on the order of the DLSS integration itself.
-- Alternative once motion vectors exist: OptiScaler (loaded as `winmm.dll`, which the game imports) can hook the NGX DLSS feature this add-on creates and provide FSR/XeSS frame generation.
+The add-on drives **NVIDIA Streamline** (`sl.interposer.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll`, `sl.common.dll` + `nvngx_dlssg.dll`, which must sit next to `mgs4.exe`) in *manual hooking* mode from inside the ReShade add-on:
+
+1. `slInit` runs in the `init_device` event, i.e. after the D3D12 device exists but before bgfx creates its swapchain. The add-on then hooks `IDXGIFactory::CreateSwapChain`/`CreateSwapChainForHwnd` in front of ReShade and creates the game's swapchain through Streamline's proxy factory. The result is `game -> Streamline proxy swapchain -> ReShade -> DXGI`: Streamline intercepts `Present` and inserts the generated frames, ReShade (and this add-on's `present` event) run for every presented frame, so the add-on counts a game frame only when scene draws happened.
+2. Every game frame it feeds Streamline what DLSS-G needs: a frame token, Reflex sleep + PCL markers (simulation, render-submit, present), the camera constants derived from the same clip matrix the DLAA path uses (projection, clip<->prev clip, camera position/axes, reversed-Z near, jitter, cut/reset flag), and tags for **depth**, the add-on's **motion vectors** (camera-only, pixels) and — in pre-post insertion — the anti-aliased **HUD-less colour**. When the game image is letter/pillar-boxed, the backbuffer tag carries the game-image rectangle so only that region is interpolated.
+3. `slDLSSGSetOptions` is applied live from the overlay / ini: **Off, 2x, 3x, 4x** or **Dynamic** with a **target frame rate** (`DLSSGMode::eDynamic` + `dynamicTargetFrameRate`, 0 = monitor refresh). If the driver does not report dynamic multi-frame generation, the add-on falls back to its own controller: it measures the game frame rate every second and picks the 2x/3x/4x multiplier that lands closest to the target. Reflex (Off / On / On + Boost) is set through `slReflexSetOptions`.
+
+Ini keys: `FrameGen` (0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic), `FGTargetFps`, `Reflex` (0/1/2). Status (Streamline/DLSS-G version, DLSS-G status flags, max multiplier, dynamic-MFG and vsync support, VRAM, presented/generated frames) is shown in the overlay. Streamline's own log goes to `logs\sl.log`.
+
+Notes: vsync should be off in the game for DLSS-G (the overlay shows whether the driver reports vsync support); the frame limiter of `MGSFPSUnlock` caps the *game* frame rate — generated frames come on top. Alternative without this add-on: NVIDIA Smooth Motion (driver-level 2x, NVIDIA App -> Graphics -> `mgs4.exe` -> Smooth Motion).
 
 ### Overlay controls
 
-The add-on has its own panel in ReShade's **Add-ons** tab (Home key): Enable, DLSS mode (applies on restart — the game creates its render targets once at startup; the panel says so when the selection differs from the active mode), DLSS preset (J/K, applied live by re-creating the feature), sharpness, camera jitter, camera motion vectors, debug modes, and live status (feature size, evaluations/s, jitter, VP detection, MV resets). Every control writes `mgs4_dlss.ini`.
+The add-on has its own panel in ReShade's **Add-ons** tab (Home key): Enable, DLSS mode (applies on restart — the game creates its render targets once at startup; the panel says so when the selection differs from the active mode), DLSS preset (J/K, applied live by re-creating the feature), sharpness, camera jitter, camera motion vectors, debug modes, frame generation (Off/2x/3x/4x/Dynamic + target fps, Reflex; applied live), and live status (feature size, evaluations/s, jitter, VP detection, MV resets). Every control writes `mgs4_dlss.ini`.
 
 ### Phase 1b: camera jitter and camera-only motion vectors
 

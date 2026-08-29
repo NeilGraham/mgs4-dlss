@@ -122,3 +122,39 @@ driver's NGX runtime loads; `EvaluateFeature_C` is not exported by driver 616.56
 - Laplacian-variance sharpness metrics cannot judge jitter correctness: proper supersampling lowers them (fewer jaggies).
 - Launching mgs4.exe directly bounces through Steam (exit 53) and fails when the Master Collection launcher is already
   open; steam_appid.txt next to the exe avoids the relaunch entirely.
+
+## Frame generation via Streamline (2026-08-28, late)
+
+Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 headers / 2.13 runtime, sources of
+`sl.interposer` read):
+
+- **Hook order.** ReShade vtable-hooks `IDXGIFactory::CreateSwapChain` (its function sits in the factory vtable). The
+  add-on MinHooks that same entry, so it runs first and calls Streamline's proxy factory (`slUpgradeInterface` on the
+  real factory). Streamline's proxy then calls the base factory, which hits ReShade. Resulting chain:
+  `game -> SL proxy swapchain -> ReShade proxy -> DXGI`. This is the same topology as a native Streamline game with
+  ReShade's `dxgi.dll` underneath (there SL's own D3D12 proxies wrap ReShade's), so it is a supported configuration.
+- **Queue/device.** Streamline's `queryDevice` passes a plain `ID3D12CommandQueue` through to the base factory
+  (warning "expecting SL proxy", then the "AMD AGS / other SDK" path). The game holds ReShade's queue proxy, so ReShade
+  still recognises the queue and wraps the real swapchain. `slSetD3DDevice` receives `queue->GetDevice()` (ReShade's
+  device proxy) so Streamline/DLSS-G create their resources and queues through the same object SL's swapchain proxy
+  reports; the add-on's native device pointer is only used for the adapter LUID. Routing `CreateCommandQueue` through
+  an SL device proxy was rejected: SL would unwrap to the native queue and ReShade would then not wrap the swapchain.
+- **Off-screen rendering.** With `sl.dlss_g` loaded the proxy swapchain's `GetBuffer` returns DLSS-G's off-screen
+  buffers, not the real backbuffers, so the composite-draw detection accepts those too (`fg::is_app_backbuffer`,
+  recorded from a hook on the proxy's `GetBuffer`; cleared on `ResizeBuffers`).
+- **Threads.** DLSS-G presents from its own thread through ReShade's proxy, so ReShade's `present` event (and ReShade's
+  effects) run for every presented frame, real and generated, off the render thread. The add-on's per-frame rollover
+  therefore moved to a hook on the proxy swapchain's `Present`/`Present1` (the game's call, render thread); the ReShade
+  `present` event is ignored while the swapchain is proxied.
+- **Per frame:** first scene draw -> frame token for `g_frame`, `slReflexSleep`, PCL markers SimulationStart/End +
+  RenderSubmitStart; at the DLSS insertion (after the NGX evaluate, depth/colour/MV in NPSR, output in UAV) ->
+  `slSetConstants` (P and clip<->prev clip from the same unjittered VP the MV pass uses, transposed for SL's row-vector
+  convention, `depthInverted`, `cameraMotionIncluded`, pixel `mvecScale = 1/size`, jitter, reset) and
+  `slSetTagForFrame` (depth + MVs `eOnlyValidNow` with the command list; HUD-less colour = DLSS output in pre-post
+  insertion; backbuffer tag with the game-image extent when letter/pillar-boxed); game Present hook -> RenderSubmitEnd +
+  PresentStart, rollover, SL present, PresentEnd.
+- **Options** live via `slDLSSGSetOptions`: Off / 2x / 3x / 4x / Dynamic(`eDynamic`, `dynamicTargetFrameRate`). If
+  `DLSSGState::bIsDynamicMFGSupported` is false the add-on picks the multiplier itself once per second from the measured
+  game frame rate. Reflex through `slReflexSetOptions`.
+- **Pixel-format note:** depth is tagged with its R24G8 typeless format; MVs are R16G16_FLOAT in pixels (top-left
+  origin, `prev - cur`), which matches DLSS-G's expectation with `mvecScale = (1/w, 1/h)`.

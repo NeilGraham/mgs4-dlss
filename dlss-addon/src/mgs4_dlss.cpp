@@ -23,6 +23,7 @@
 #include <nvsdk_ngx_helpers.h>
 #include "mv_cs.h"   // g_mv_cs[]: compiled src/mv_cs.hlsl (camera-only motion vectors from depth)
 #include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualisation of the motion vectors)
+#include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
@@ -52,6 +53,10 @@ static int g_cfgLastDebugMode = 0;
 static NVSDK_NGX_PerfQuality_Value g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA;
 static char g_cfgModeName[32] = "DLAA";
 static uint32_t g_internalW = 0, g_internalH = 0;   // from ini InternalRes (size of the game's render targets)
+static int g_cfgFgMode = 0;           // FrameGen: 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic (target fps)
+static float g_cfgFgTargetFps = 0.0f; // FGTargetFps (dynamic mode; 0 = monitor refresh rate)
+static int g_cfgReflex = 1;           // Reflex: 0 off, 1 on, 2 on + boost
+static float g_gameVp[4] = { 0, 0, 0, 0 };   // composite draw viewport (x, y, w, h): where the game image sits in the backbuffer
 
 static void logmsg(const char* fmt, ...)
 {
@@ -785,6 +790,20 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         else { if (++g_evalCount == 1 || (g_cfgLogEveryN && g_evalCount % g_cfgLogEveryN == 0)) logmsg("NGX EvaluateFeature ok (#%u)", g_evalCount); }
     }
 
+    if (fg::status().initialised && g_cfgFgMode != 0) {
+        // Frame generation inputs: depth + motion vectors (render res) and, before post/HUD, the anti-aliased image as
+        // HUD-less colour. In composite mode the UI is baked into the image so no HUD-less colour is tagged.
+        fg::FrameInputs fi = {};
+        fi.cmd = native;
+        fi.depth = reinterpret_cast<ID3D12Resource*>(depth.handle); fi.depthFormat = static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        fi.mv = reinterpret_cast<ID3D12Resource*>(g_mv.handle); fi.mvState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        if (g_cfgPrePost && !upscale && g_cfgDebugMode != 5) { fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
+        fi.renderW = cd.texture.width; fi.renderH = cd.texture.height; fi.bbW = g_bbW; fi.bbH = g_bbH;
+        fi.vpX = (int32_t)g_gameVp[0]; fi.vpY = (int32_t)g_gameVp[1]; fi.vpW = (uint32_t)g_gameVp[2]; fi.vpH = (uint32_t)g_gameVp[3];
+        fg::CameraInput ci = { g_frameVP, g_havePrevVP ? g_prevVP : g_frameVP, ep.InJitterOffsetX, ep.InJitterOffsetY, ep.InReset != 0, cd.texture.width, cd.texture.height };
+        fg::frame_inputs(g_frame, fi, ci);
+    }
+
     if ((!g_recreated && g_cfgRecreateAfter > 0 && g_evalCount >= (uint32_t)g_cfgRecreateAfter) || (g_recreateRequested && !g_oldFeature)) {
         g_recreated = true; g_recreateRequested = false;
         g_oldFeature = g_dlss; g_oldFeatureFrame = g_frame; g_dlss = nullptr;
@@ -833,6 +852,7 @@ static bool on_create_resource(device* dev, resource_desc& desc, subresource_dat
 {
     if (!g_scaling || desc.type != resource_type::texture_2d) return false;
     if (desc.texture.width != g_internalW || desc.texture.height != g_internalH) return false;
+    if (fg::inside_streamline()) { static int n = 0; if (n++ < 3) logmsg("not shrinking a %ux%u texture created by Streamline", desc.texture.width, desc.texture.height); return false; }
     if (g_internalW == g_bbW && g_internalH == g_bbH && (desc.usage & resource_usage::render_target) == 0) return false;
     desc.texture.width = g_renderW; desc.texture.height = g_renderH;
     return true;   // desc modified
@@ -1007,7 +1027,7 @@ static std::string desc_str(device* dev, resource r)
     char b[96]; snprintf(b, sizeof(b), "%p %ux%u f%u", (void*)r.handle, d.texture.width, d.texture.height, (unsigned)d.texture.format);
     return b;
 }
-static bool is_backbuffer(resource r) { return g_backbuffers.count(r.handle) != 0; }
+static bool is_backbuffer(resource r) { return g_backbuffers.count(r.handle) != 0 || fg::is_app_backbuffer(r.handle); }
 static bool scene_sized(device* dev, resource r, resource_desc* out)
 {
     if (!r.handle || is_backbuffer(r) || !is_live(r.handle)) return false;
@@ -1041,7 +1061,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     device* dev = cmd->get_device();
     if (!is_backbuffer(s.rt)) {
         if (s.rt_w >= 640 && s.rt_h >= 360) {
-            g_sceneDrawsThisFrame++;
+            if (++g_sceneDrawsThisFrame == 1) fg::frame_begin(g_frame);
             g_drawsPerRt[s.rt.handle]++;
             if (s.ds.handle) {
                 g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
@@ -1135,6 +1155,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
         logmsg("f%u bb-draw#%u vp=(%.0f,%.0f %.0fx%.0f) -> color=%s (param %d idx %d)", g_frame, drawIdx, s.vp.x, s.vp.y, s.vp.width, s.vp.height, desc_str(dev, color).c_str(), colorParam, colorIdx);
 
     if (color.handle && color.handle != g_finalRt[0]) { g_finalRt[1] = g_finalRt[0]; g_finalRt[0] = color.handle; }
+    if (color.handle && s.vp.width > 0) { g_gameVp[0] = s.vp.x; g_gameVp[1] = s.vp.y; g_gameVp[2] = s.vp.width; g_gameVp[3] = s.vp.height; }
     if (g_injectedThisFrame || !g_cfgEnabled || !color.handle) return;
     g_injectedThisFrame = true; g_compositeInjections++;
     resource_desc cd = dev->get_resource_desc(color);
@@ -1147,7 +1168,7 @@ static bool on_draw_indexed(command_list* cmd, uint32_t ic, uint32_t inst, uint3
 static uint32_t g_ppMissFrames = 0;   // frames where the geometry target was finished but no draw sampled it (pre-post could not insert)
 static void handle_copy(command_list* cmd, resource src, resource dst, const char* what)
 {
-    if (g_bbW == 0) return;
+    if (g_bbW == 0 || fg::inside_streamline()) return;
     device* dev = cmd->get_device();
     if (tracing() && (src.handle == g_geoRt || dst.handle == g_geoRt) && is_live(src.handle) && is_live(dst.handle))
         logmsg("f%u %s %s -> %s (3D target involved)", g_frame, what, desc_str(dev, src).c_str(), desc_str(dev, dst).c_str());
@@ -1190,6 +1211,18 @@ static void reload_config()
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
+    {
+        char fps[32] = "0"; GetPrivateProfileStringA("DLSS", "FGTargetFps", "0", fps, sizeof(fps), g_iniPath);
+        const int mode = GetPrivateProfileIntA("DLSS", "FrameGen", 0, g_iniPath), reflex = GetPrivateProfileIntA("DLSS", "Reflex", 1, g_iniPath);
+        const float target = (float)atof(fps);
+        static bool applied = false;
+        if (!applied || mode != g_cfgFgMode || reflex != g_cfgReflex || target != g_cfgFgTargetFps) {
+            applied = true;
+            g_cfgFgMode = mode < 0 ? 0 : (mode > 4 ? 4 : mode); g_cfgReflex = reflex < 0 ? 0 : (reflex > 2 ? 2 : reflex); g_cfgFgTargetFps = target < 0 ? 0 : target;
+            fg::Settings fs; fs.mode = g_cfgFgMode; fs.targetFps = g_cfgFgTargetFps; fs.reflex = g_cfgReflex; fg::set_settings(fs);
+            logmsg("frame generation: %s, target fps %.0f, Reflex %d", g_cfgFgMode == 0 ? "off" : (g_cfgFgMode == 4 ? "dynamic" : (g_cfgFgMode == 1 ? "2x" : (g_cfgFgMode == 2 ? "3x" : "4x"))), g_cfgFgTargetFps, g_cfgReflex);
+        }
+    }
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
@@ -1199,8 +1232,12 @@ static void reload_config()
     }
 }
 
-static void on_present(command_queue*, swapchain*, const rect*, const rect*, uint32_t, const rect*)
+// End-of-frame bookkeeping. Runs on the game's Present: from ReShade's present event normally, or from the
+// Streamline proxy swapchain's Present hook when frame generation is set up (then ReShade's present event fires on
+// Streamline's present thread, for generated frames too, and must not touch the per-frame state).
+static void frame_rollover()
 {
+    fg::poll();
     g_frame++;
     if (g_oldFeature && g_frame > g_oldFeatureFrame + 6) {
         NVSDK_NGX_Result r = NVSDK_NGX_D3D12_ReleaseFeature(g_oldFeature); g_oldFeature = nullptr;
@@ -1239,6 +1276,11 @@ static void on_present(command_queue*, swapchain*, const rect*, const rect*, uin
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }
     if (g_frame % 120 == 0) reload_config();
 }
+static void on_present(command_queue*, swapchain*, const rect*, const rect*, uint32_t, const rect*)
+{
+    if (fg::status().swapchainProxied) return;
+    frame_rollover();
+}
 static void on_init_swapchain(swapchain* sc, bool resize)
 {
     device* dev = sc->get_device();
@@ -1254,6 +1296,8 @@ static void on_init_device(device* dev)
     logmsg("device created: api=%u (d3d12=%u)", (unsigned)dev->get_api(), (unsigned)device_api::d3d12);
     if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (install MGS4_D3D12.asi)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
+    fg::init(g_d3d, g_gameDirW, logmsg);   // before the game creates its swapchain
+    fg::set_frame_callback(frame_rollover);
     if (g_cfgEnabled && g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA) {
         if (!g_internalW) logmsg("Mode=%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgModeName);
         else if (ngx_init(dev)) setup_scaling();
@@ -1271,6 +1315,7 @@ static void on_destroy_device(device* dev)
     g_mvReady = false; g_mvInitTried = false;
     if (g_ngxParams) { NVSDK_NGX_D3D12_DestroyParameters(g_ngxParams); g_ngxParams = nullptr; }
     if (g_ngxReady) { NVSDK_NGX_D3D12_Shutdown1(g_d3d); g_ngxReady = false; }
+    fg::shutdown();
 }
 
 static void load_config()
@@ -1340,6 +1385,30 @@ static void draw_overlay(effect_runtime*)
     bool dz = g_cfgDynZeroMV != 0;
     if (ImGui::Checkbox("Zero motion on masked objects (third-person camera turns)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
     ImGui::Text("Dynamic draws replayed last frame: %u (skinned %u)", g_dynDrawsLastFrame, g_skinnedDrawsLast);
+    ImGui::Separator();
+    {
+        const fg::Status& st = fg::status();
+        const char* fgNames[] = { "Off", "2x", "3x", "4x", "Dynamic (target frame rate)" };
+        int fm = g_cfgFgMode;
+        if (ImGui::Combo("Frame generation", &fm, fgNames, 5)) { write_ini_int("FrameGen", fm); reload_config(); }
+        if (g_cfgFgMode == 4) {
+            float t = g_cfgFgTargetFps;
+            if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }
+            if (!st.dynamicSupported && st.initialised) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
+        }
+        const char* rfNames[] = { "Off", "On", "On + Boost" };
+        int rf = g_cfgReflex;
+        if (ImGui::Combo("NVIDIA Reflex", &rf, rfNames, 3)) { write_ini_int("Reflex", rf); reload_config(); }
+        if (!st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline runtime (sl.interposer.dll, sl.dlss_g.dll, ...) not found next to mgs4.exe");
+        else if (!st.initialised) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline failed to initialise: %s", st.lastError);
+        else if (!st.supported) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS Frame Generation not supported: %s", st.lastError[0] ? st.lastError : "adapter/driver");
+        else if (!st.swapchainProxied) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Swapchain was not created through Streamline (restart the game)");
+        else {
+            ImGui::Text("%s | status 0x%X | max %ux | dynamic MFG %s | vsync %s | VRAM %.0f MB", st.slVersion, st.statusFlags, st.maxFrames + 1, st.dynamicSupported ? "yes" : "no", st.vsyncSupported ? "ok" : "off required", st.vramBytes / 1048576.0);
+            ImGui::Text("Presented %u frames | generated presents seen %u | HUD-less colour: %s", st.framesPresented, st.generatedPresents, g_cfgPrePost ? "yes (pre-post)" : "no (composite: UI inside the image)");
+            if (st.lastError[0]) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", st.lastError);
+        }
+    }
     ImGui::Text("Jitter (%.3f, %.3f) px | VP: %s | MV pass: %s, %u resets | cam delta rot %.3f pos %.0f", g_jitterX, g_jitterY, g_havePrevVP ? "found" : "missing",
                 g_mvReady ? "ok" : (g_mvInitTried ? "FAILED" : "idle"), g_mvResets, g_camDeltaRot, g_camDeltaPos);
 }
