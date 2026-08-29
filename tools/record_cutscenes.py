@@ -19,6 +19,7 @@ sys.path.insert(0, HERE)
 from winfocus import find_window, focus, is_foreground          # noqa: E402
 from ds4 import DS4, CROSS                                       # noqa: E402
 import obs_control as obsc                                       # noqa: E402
+from letterbox import read_ppm                                   # noqa: E402
 
 GAME_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4"
 GAME_EXE = os.path.join(GAME_DIR, "mgs4.exe")
@@ -95,6 +96,53 @@ def start_game(stage, width=3840, height=2160):
     return hwnd
 
 
+# MGS4's HUD is orange, so the two bottom corners of the frame - the ration box and the weapon box - turn much
+# redder than neutral in gameplay while a cutscene leaves them near-neutral. Measured on the recordings:
+# cutscene R-B = +14 / +20, gameplay = +39 / +85. This is the most reliable end-of-cutscene signal available.
+HUD_LEFT_MIN, HUD_RIGHT_MIN = 30.0, 45.0
+PROBE_PATH = os.path.join(os.environ.get("TEMP", "."), "mgs4_hud_probe.ppm")
+
+
+def hud_probe(cl):
+    """(left, right) mean R-B of the bottom corners, or None when no frame is available."""
+    try:
+        cl.save_source_screenshot(obsc.CAPTURE, "ppm", PROBE_PATH, 320, 180, -1)
+        img = read_ppm(PROBE_PATH)
+    except Exception:
+        return None
+    if not img:
+        return None
+    w, h, px = img
+    def region(x0, x1, y0, y1):
+        tot, n = 0, 0
+        for y in range(int(h * y0), int(h * y1)):
+            base = y * w * 3
+            for x in range(int(w * x0), int(w * x1)):
+                tot += px[base + x * 3] - px[base + x * 3 + 2]; n += 1
+        return tot / max(1, n)
+    return region(0.03, 0.25, 0.88, 0.97), region(0.70, 0.96, 0.88, 0.97)
+
+
+def start_record(cl, log):
+    try:
+        if cl.get_record_status().output_active:      # a previous run may have been killed mid-recording
+            log("    OBS was still recording; stopping that first")
+            cl.stop_record(); time.sleep(2)
+    except Exception:
+        pass
+    for _ in range(3):
+        try:
+            cl.start_record(); return True
+        except Exception as e:
+            log(f"    StartRecord failed ({e}); retrying")
+            try:
+                cl.stop_record()
+            except Exception:
+                pass
+            time.sleep(3)
+    return False
+
+
 def record_one(cl, pad, index, stage, args):
     """Returns a dict describing the attempt."""
     act = ACTS.get(stage[1:3], "other")
@@ -106,50 +154,50 @@ def record_one(cl, pad, index, stage, args):
     if not hwnd:
         info["status"] = "no-window"; return info
     state, t0 = "unknown", time.time()
+    # Recording starts before the cutscene is detected: the game plays audio and content over black while a stage
+    # loads, and the classifier only reacts once 3D drawing begins, so anything recorded from the boot prompts on is
+    # guaranteed to contain the whole scene. The offset of the detected start is stored for a later trim.
+    start_record(cl, log)
+    t_rec = time.time()
+    cut_at = None
     # phase 1: get into the cutscene (auto-save notice, "press any button", loading)
     while time.time() - t0 < args.start_timeout:
         if not is_foreground(hwnd):
             focus(hwnd)
-        pad.tap(hold=0.12)
+        pad.tap(hold=args.press_hold)
         for line in tail.new_lines():
             m = STATE_RE.search(line)
             if m:
                 state = m.group(1)
         if state == "cutscene":
+            cut_at = time.time() - t_rec
             break
-        time.sleep(0.5)
+        time.sleep(args.press_period)
     if state != "cutscene":
         log(f"    no cutscene started within {args.start_timeout}s (state={state})")
+        try:
+            r = cl.stop_record(); time.sleep(1)
+            src = getattr(r, "output_path", None)
+            if src and os.path.exists(src):
+                os.remove(src)
+        except Exception:
+            pass
         info["status"] = "no-cutscene"; info["end_reason"] = state
         kill_game(); return info
+    info["cutscene_at"] = round(cut_at or 0, 1)
+    log(f"    cutscene detected {cut_at:.0f}s into the recording")
 
-    # phase 2: record
-    try:
-        if cl.get_record_status().output_active:      # a previous run may have been killed mid-recording
-            log("    OBS was still recording; stopping that first")
-            cl.stop_record(); time.sleep(2)
-    except Exception:
-        pass
-    for attempt in range(3):
-        try:
-            cl.start_record(); break
-        except Exception as e:
-            log(f"    StartRecord failed ({e}); retrying")
-            try:
-                cl.stop_record()
-            except Exception:
-                pass
-            time.sleep(3)
-    else:
-        info["status"] = "obs-error"; kill_game(); return info
-    t_rec = time.time()
+    # phase 2: keep recording until the scene ends. All the end rules are timed from the cutscene's start, not from
+    # the recording's (which began at the boot prompts).
+    t_cut = time.time()
     last_bytes, last_check, static_since, gameplay_since, frozen_since = 0, time.time(), None, None, None
     baseline_draws, busy_ticks = None, 0     # gameplay draws far more than a cutscene: a second, independent signal
+    hud_ticks, last_probe = 0, time.time()
     end_reason = "max-duration"
-    while time.time() - t_rec < args.max_minutes * 60:
+    while time.time() - t_cut < args.max_minutes * 60:
         if not is_foreground(hwnd):
             focus(hwnd)
-        pad.tap(hold=0.12)                      # flashback prompts
+        pad.tap(hold=args.press_hold)           # flashback prompts: MGS4 wants the button mashed
         time.sleep(args.press_period)
         if find_window() is None:
             end_reason = "game-exited"; break
@@ -157,7 +205,7 @@ def record_one(cl, pad, index, stage, args):
             t = TICK_RE.search(line)
             if t:
                 draws, hud = int(t.group(3)), int(t.group(4))
-                if time.time() - t_rec < 60:
+                if time.time() - t_cut < 60:
                     baseline_draws = max(baseline_draws or 0, draws)   # busiest reading of the opening minute
                 elif baseline_draws and draws > max(1200, baseline_draws * 3.0):
                     busy_ticks += 1
@@ -166,25 +214,34 @@ def record_one(cl, pad, index, stage, args):
                         end_reason = "gameplay-drawcount"; break
                 else:
                     busy_ticks = 0
-                if hud > 0 and time.time() - t_rec > args.min_seconds:
+                if hud >= args.hud_min and time.time() - t_cut > args.min_seconds:
                     log(f"    HUD draws {hud} in tick -> gameplay")
                     end_reason = "gameplay-hud"; break
                 continue
             m = STATE_RE.search(line)
             if m:
                 state = m.group(1)
-                log(f"    state -> {state} at {time.time() - t_rec:.0f}s")
+                log(f"    state -> {state} at {time.time() - t_cut:.0f}s")
                 if state == "cutscene":
                     static_since = gameplay_since = None
         if end_reason in ("gameplay-drawcount", "gameplay-hud"):
             break
         now = time.time()
+        if now - last_probe >= 2 and now - t_cut > args.min_seconds:
+            last_probe = now
+            pr = hud_probe(cl)
+            if pr:
+                lv, rv = pr
+                hud_ticks = hud_ticks + 1 if (lv > HUD_LEFT_MIN and rv > HUD_RIGHT_MIN) else 0
+                if hud_ticks >= 4:                 # both corners lit for ~8 s
+                    log(f"    HUD on screen (corners {lv:.0f}/{rv:.0f}) -> gameplay")
+                    end_reason = "gameplay-hud-pixels"; break
         if now - last_check >= 5:
             st = cl.get_record_status()
             rate = (st.output_bytes - last_bytes) / (now - last_check)
             last_bytes, last_check = st.output_bytes, now
             moving = rate > args.moving_bytes_per_s
-            if now - t_rec < args.min_seconds:
+            if now - t_cut < args.min_seconds:
                 # the HUD flickers on for a moment at the start of some cutscenes; never end on that
                 static_since = gameplay_since = frozen_since = None
                 continue
@@ -236,7 +293,9 @@ def main():
     ap.add_argument("--max-minutes", type=float, default=30)
     ap.add_argument("--min-free-gb", type=float, default=100)
     ap.add_argument("--start-timeout", type=float, default=100)
-    ap.add_argument("--press-period", type=float, default=1.0)
+    ap.add_argument("--press-period", type=float, default=0.16)   # ~4 Cross presses a second
+    ap.add_argument("--press-hold", type=float, default=0.07)
+    ap.add_argument("--hud-min", type=int, default=40)   # gameplay draws 100+ HUD elements; a cutscene a handful
     ap.add_argument("--gameplay-grace", type=float, default=9)
     ap.add_argument("--static-grace", type=float, default=25)
     ap.add_argument("--moving-bytes-per-s", type=float, default=700_000)

@@ -220,6 +220,7 @@ static uint32_t g_hudDrawsThisFrame = 0, g_hudDrawsLast = 0;
 static int g_sceneState = -1, g_sceneStateRaw = -1; static uint32_t g_sceneStateFrames = 0;
 static uint32_t g_sceneDrawsLast = 0;   // scene draws of the frame just finished (the counter itself is reset each frame)
 static int g_cfgSceneLog = 1;
+static int g_cfgHudMin = 25;   // a cutscene can issue a handful of 2D draws; gameplay's HUD is dozens
 static bool g_uiClearedThisFrame = false;
 // pre-HUD capture of the final texture (taken right before the first HUD draw) and the HUD-less image built from the
 // DLAA output + that capture under the UI layer (DLSS-G derives the UI from backbuffer - HUD-less when its own UI
@@ -1586,6 +1587,7 @@ static void reload_config()
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 0, g_iniPath);
     g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 0, g_iniPath);
     g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);
+    g_cfgHudMin = GetPrivateProfileIntA("DLSS", "HudMinDraws", 25, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
@@ -1616,7 +1618,7 @@ static void frame_rollover()
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
-        const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast > 0 ? 1 : 0);
+        const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
         if (raw != g_sceneStateRaw) { g_sceneStateRaw = raw; g_sceneStateFrames = 0; }
         // periodic heartbeat so the classifier can be diagnosed from the log even when it never changes state
         if ((g_frame % 600) == 0)
