@@ -213,6 +213,12 @@ static resource_usage g_dynState = resource_usage::depth_stencil_write;
 static resource g_ui = { 0 }; static resource_view g_uiRtv = { 0 };
 static resource_usage g_uiState = resource_usage::render_target;
 static uint32_t g_uiDrawsThisFrame = 0, g_uiDrawsLast = 0, g_uiPostSkippedThisFrame = 0, g_uiPostSkippedLast = 0;
+// Scene state classification (always on): HUD draws are the depth-off draws into the final texture, after the 3D
+// scene, that sample no scene-sized texture (post-process passes do). No HUD + a 3D scene = in-game cutscene;
+// HUD + a 3D scene = gameplay; no 3D scene at all = menu, loading screen or a prerecorded video playing.
+static uint32_t g_hudDrawsThisFrame = 0, g_hudDrawsLast = 0;
+static int g_sceneState = -1, g_sceneStateRaw = -1; static uint32_t g_sceneStateFrames = 0;
+static int g_cfgSceneLog = 1;
 static bool g_uiClearedThisFrame = false;
 // pre-HUD capture of the final texture (taken right before the first HUD draw) and the HUD-less image built from the
 // DLAA output + that capture under the UI layer (DLSS-G derives the UI from backbuffer - HUD-less when its own UI
@@ -1383,8 +1389,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
             // final texture once the 3D scene is in; post-process passes into it are told apart by sampling a scene-sized
             // input (half the frame size or more), HUD draws only sample atlases.
-            if (g_ui.handle && g_uiRtv.handle && g_cfgFgMode != 0 && !g_cfgPrePost && !g_injectedThisFrame && !depthOn && g_geoRt
-                && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH) {
+            const bool uiCandidate = !g_injectedThisFrame && !depthOn && g_geoRt
+                && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
+            const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && g_cfgFgMode != 0 && !g_cfgPrePost;
+            if (uiCandidate) {
                 auto itd = g_depthDrawsPerRt.find(g_geoRt);
                 const uint32_t done = itd != g_depthDrawsPerRt.end() ? itd->second : 0;
                 if (done >= 20 && done * 10 >= g_geoDrawsLast * 8) {
@@ -1394,7 +1402,9 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width * 2 >= g_dlssW && d.texture.height * 2 >= g_dlssH) post = true; }
                     }
                     if (post) g_uiPostSkippedThisFrame++;
+                    else if (!uiReplay) g_hudDrawsThisFrame++;   // classification only
                     else {
+                        g_hudDrawsThisFrame++;
                         t_reentrant = true;
                         if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
                         if (!g_uiClearedThisFrame) {
@@ -1571,6 +1581,7 @@ static void reload_config()
     }
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 0, g_iniPath);
     g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 1, g_iniPath);
+    g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
@@ -1599,6 +1610,17 @@ static void frame_rollover()
     g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_preHudCaptured = false;
+    // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
+    if (g_cfgSceneLog) {
+        const int raw = (g_sceneDrawsThisFrame < 20) ? 2 : (g_hudDrawsLast > 0 ? 1 : 0);
+        if (raw != g_sceneStateRaw) { g_sceneStateRaw = raw; g_sceneStateFrames = 0; }
+        else if (++g_sceneStateFrames == 30 && raw != g_sceneState) {   // ~0.5 s of the same reading
+            static const char* names[3] = { "cutscene", "gameplay", "no-3d" };
+            logmsg("SCENE-STATE %s (frame %u, scene draws %u, HUD draws %u, viewport %.0fx%.0f)", names[raw], g_frame, g_sceneDrawsThisFrame, g_hudDrawsLast, g_sceneVp.width, g_sceneVp.height);
+            g_sceneState = raw;
+        }
+    }
+    g_hudDrawsLast = g_hudDrawsThisFrame; g_hudDrawsThisFrame = 0;
     objmv::new_frame(g_frame); g_drawOccurrence.clear();
     if (g_sceneVpFrameValid) { g_sceneVp = g_sceneVpFrame; g_sceneVpValid = true; } g_sceneVpFrameValid = false; g_vpHist.clear();
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
@@ -1757,6 +1779,8 @@ static void draw_overlay(effect_runtime*)
         if (os.lastError[0] && os.ready) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", os.lastError);
     }
     ImGui::Text("Dynamic draws replayed last frame: %u (skinned %u)", g_dynDrawsLastFrame, g_skinnedDrawsLast);
+    { static const char* names[3] = { "in-game cutscene", "gameplay (HUD visible)", "no 3D scene (menu / loading / video)" };
+      ImGui::Text("Scene state: %s | HUD draws %u, scene draws %u", g_sceneState >= 0 && g_sceneState < 3 ? names[g_sceneState] : "?", g_hudDrawsLast, g_sceneDrawsThisFrame); }
     ImGui::Separator();
     {
         const fg::Status& st = fg::status();

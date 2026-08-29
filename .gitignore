@@ -4,3 +4,4 @@ build/
 *.obj
 *.log
 *.png
+tools/ViGEmClient.dll
