@@ -166,7 +166,7 @@ the final image at full strength, at the cost of the vignette/HUD reprojection a
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
 `tools\launch_stage.ps1` automates a test setup: boots a stage, waits, and sends real key presses (SendInput, so the
-game's raw-input path sees them) to skip/advance scenes, e.g.
+game ignores scan-code SendInput) with the window forced to the foreground. Explicit sequences also work, e.g.
 `powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 55 -Keys "E,3,E"`
 (`-NoRestart` sends the keys to the running game).
 

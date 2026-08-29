@@ -1,4 +1,6 @@
-# Boots MGS4 straight into a stage and presses keys to set the scene up (e.g. wait, Enter, wait, Enter).
+# Boots MGS4 straight into a stage and presses keys to set the scene up. Default: once the window is up, tap Enter
+# every 0.5 s until the add-on log reports the first 3D frame (auto-save notice and "press any button" are gone and
+# the cutscene has started), for at most PressFor seconds.
 #   powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -WaitSeconds 40 -Keys "5,ENTER,4,ENTER"
 # Keys: comma-separated key names (E, SPACE, ENTER, ESC, F1..) and numbers (seconds to wait).
 # Keys are sent with SendInput, which only reaches the FOREGROUND window, so the game window is forced to the
@@ -6,8 +8,13 @@
 # Log: <GameDir>\logs\launch_stage.log
 param(
     [string]$Stage = "s00a00l",
-    [int]$WaitSeconds = 40,
-    [string]$Keys = "5,ENTER,4,ENTER",
+    [int]$WaitSeconds = 0,          # 0 = just wait for the game window to appear (+ SettleSeconds)
+    [double]$SettleSeconds = 2,
+    [string]$Keys = "",             # explicit sequence, e.g. "5,ENTER,4,ENTER"; empty = repeated presses below
+    [string]$PressKey = "ENTER",
+    [double]$PressEvery = 0.5,
+    [double]$PressFor = 60,
+    [switch]$NoSceneDetect,        # keep pressing for the full PressFor instead of stopping at the first 3D frame
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4",
     [switch]$NoRestart
 )
@@ -54,14 +61,28 @@ function VK([string]$name) {
 if (-not $NoRestart) {
     Stop-Process -Name mgs4,launcher -Force -ErrorAction SilentlyContinue; Start-Sleep 4
     Start-Process -FilePath "$GameDir\mgs4.exe" -ArgumentList "--stage $Stage" -WorkingDirectory $GameDir | Out-Null
-    Log "launched --stage $Stage, waiting $WaitSeconds s"
-    Start-Sleep $WaitSeconds
+    Log "launched --stage $Stage"
+    if ($WaitSeconds -gt 0) { Start-Sleep $WaitSeconds }
 }
 $pr = $null
-for ($i = 0; $i -lt 20 -and -not $pr; $i++) { $pr = Get-Process mgs4 -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if (-not $pr) { Start-Sleep 1 } }
+for ($i = 0; $i -lt 120 -and -not $pr; $i++) { $pr = Get-Process mgs4 -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if (-not $pr) { Start-Sleep 1 } }
 if (-not $pr) { Log "no game window"; exit 1 }
 $hw = $pr.MainWindowHandle
+if ($WaitSeconds -le 0 -and $SettleSeconds -gt 0) { Log "window up, settling $SettleSeconds s"; Start-Sleep $SettleSeconds }
 Log ("game window {0} '{1}', foreground now {2}" -f $hw, $pr.MainWindowTitle, [Inp]::GetForegroundWindow())
+$addonLog = Join-Path $GameDir "logs\mgs4_dlss.log"
+function SceneStarted { (Test-Path $addonLog) -and ((Select-String -Path $addonLog -SimpleMatch "tracing backbuffer draws" -Quiet) -eq $true) }
+if ($Keys -eq "") {
+    $vk = [uint16](VK $PressKey); $deadline = (Get-Date).AddSeconds($PressFor); $n = 0
+    Log "pressing $PressKey every $PressEvery s until the first 3D frame (max $PressFor s)"
+    while ((Get-Date) -lt $deadline) {
+        if (-not $NoSceneDetect -and (SceneStarted)) { Log "3D scene detected after $n presses - stopping"; break }
+        $ok = $false; for ($a = 0; $a -lt 3 -and -not $ok; $a++) { $ok = [Inp]::Focus($hw); if (-not $ok) { Start-Sleep -Milliseconds 300 } }
+        [Inp]::Key($vk, $true); Start-Sleep -Milliseconds 120; [Inp]::Key($vk, $false); $n++
+        Start-Sleep $PressEvery
+    }
+    Log "done ($n presses)"; exit 0
+}
 foreach ($tok in $Keys.Split(',')) {
     $t = $tok.Trim(); if ($t -eq "") { continue }
     if ($t -match '^\d+(\.\d+)?$') { Log "wait $t s"; Start-Sleep ([double]$t); continue }
