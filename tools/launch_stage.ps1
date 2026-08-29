@@ -30,9 +30,10 @@ public static class Inp {
   [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  // keybd_event (virtual key + scan code, no KEYEVENTF_SCANCODE) is what this game's input path actually reacts to;
+  // scan-code-only SendInput events were ignored by it.
   public static void Key(ushort vk, bool down) {
-    var i = new INPUT(); i.type = 1; i.u.ki.wVk = vk; i.u.ki.wScan = (ushort)MapVirtualKey(vk, 0); i.u.ki.dwFlags = (uint)((down ? 0 : 2) | 8);
-    SendInput(1, new INPUT[] { i }, Marshal.SizeOf(typeof(INPUT)));
+    keybd_event((byte)vk, (byte)MapVirtualKey(vk, 0), (uint)(down ? 0 : 2), UIntPtr.Zero);
   }
   public static bool Focus(IntPtr h) {
     if (GetForegroundWindow() == h) return true;
@@ -68,6 +69,6 @@ foreach ($tok in $Keys.Split(',')) {
     $ok = $false
     for ($a = 0; $a -lt 5 -and -not $ok; $a++) { $ok = [Inp]::Focus($hw); if (-not $ok) { Start-Sleep -Milliseconds 400 } }
     Log ("press {0} (focus {1}, foreground {2})" -f $t, $ok, [Inp]::GetForegroundWindow())
-    [Inp]::Key($vk, $true); Start-Sleep -Milliseconds 150; [Inp]::Key($vk, $false)
+    [Inp]::Key($vk, $true); Start-Sleep -Milliseconds 300; [Inp]::Key($vk, $false)
 }
 Log "done"
