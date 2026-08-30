@@ -211,7 +211,17 @@ static float g_dofCb[10 * 4] = {}; static bool g_dofCbValid = false;   // the ga
 static float g_dofCbG[10 * 4] = {}; static bool g_dofCbGValid = false; // ... and at its spiral gather pass (each draw has its own constants)
 static uint64_t g_dofDepth = 0;                                          // the depth copy the CoC pass sampled (t1)
 static bool g_dofCocSeen = false, g_dofSeenThisFrame = false, g_dofCocUnorm = false;
-static bool g_dofPrevOk = false;   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
+static bool g_dofPrevOk = false;
+static bool g_dofSkipFrame = false;      // decided at this frame's CoC draw: the game renders at full resolution -> its DoF draws are skipped
+static uint32_t g_dofSubRectFrames = 0;
+// Overlays the game draws AFTER its DoF (title cards, captions: quads into the graded scene texture between the DoF
+// combine and the upscale into the final texture) must stay sharp: they are replayed into a mask layer that the
+// composite pass excludes from the blur.
+static const uint64_t PS_DOF_COMBINE = 0xa3e1f0c86ca4e96dull;
+static bool g_dofCombineSeen = false, g_dofMaskCleared = false;
+static resource g_dofMask = { 0 }; static resource_view g_dofMaskRtv = { 0 }; static resource_usage g_dofMaskState = resource_usage::render_target; static format g_dofMaskFmt = format::unknown;
+static uint32_t g_dofOverlaysThisFrame = 0, g_dofOverlays = 0;
+static bool g_dofReady = false, g_dofInitTried = false;   // frames left to the game's DoF because the scene was a dynamic-resolution sub-rect   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
 static resource g_dofCoc = { 0 }, g_dofBlur = { 0 }; static resource_usage g_dofCocState = resource_usage::unordered_access, g_dofBlurState = resource_usage::unordered_access;
 static uint32_t g_dofW = 0, g_dofH = 0;
@@ -794,8 +804,7 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
 // ---- DoF after DLSS (PostDof) --------------------------------------------------------------------------------------
 static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
 static ID3D12DescriptorHeap* g_dofHeap = nullptr; static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr; static uint32_t g_dofCbSlot = 0;
-static bool g_dofReady = false, g_dofInitTried = false;
-struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], pad[2]; };
+struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask; };
 static bool dof_init()
 {
     if (g_dofInitTried) return g_dofReady;
@@ -858,6 +867,7 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     const float c17x = g_dofCbG[9 * 4];
     cb.stepUV[0] = g_cfgDofStep * c17x / (1280.0f * (kx > 0.05f ? kx : 1.0f)); cb.stepUV[1] = g_cfgDofStep * c17x / (720.0f * (ky > 0.05f ? ky : 1.0f));
     cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius;
+    cb.debugView = g_cfgDebugMode == 10 ? 1.0f : (g_cfgDebugMode == 11 ? 2.0f : (g_cfgDebugMode == 12 ? 3.0f : 0.0f));   // DoF layer views
     const uint32_t cbIdx = g_dofCbSlot++ % 4;
     memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
     const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -877,8 +887,18 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     // pass 2: [coc srv, coc srv, blur uav, blur uav]
     g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(4)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(5));
     g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(6)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(7));
-    // pass 3: [blur srv, blur srv, out uav, out uav]
-    g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(9));
+    // pass 3: [blur srv, overlay mask srv (or the CoC texture when there is no mask layer), out uav, out uav]
+    const bool haveMask = g_dofMask.handle && g_dofMaskRtv.handle;
+    if (haveMask) {
+        if (!g_dofMaskCleared) {   // no overlay this frame: an empty mask
+            if (g_dofMaskState != resource_usage::render_target) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::render_target); g_dofMaskState = resource_usage::render_target; }
+            const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_dofMaskRtv, zero); g_dofMaskCleared = true;
+        }
+        if (g_dofMaskState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::shader_resource_non_pixel); g_dofMaskState = resource_usage::shader_resource_non_pixel; }
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvMask = srvOut; srvMask.Format = static_cast<DXGI_FORMAT>(g_dofMaskFmt);
+        g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_dofMask.handle), &srvMask, cpu(9));
+    } else { g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(9)); }
+    cb.hasMask = haveMask ? 1.0f : 0.0f; memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
     g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(10)); g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(11));
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     ID3D12DescriptorHeap* heaps[1] = { g_dofHeap };
@@ -1133,6 +1153,8 @@ static void release_dlss_resources(device* dev)
     if (g_scratch.handle) { dev->destroy_resource(g_scratch); g_scratch = { 0 }; }
     if (g_dofCoc.handle) { dev->destroy_resource(g_dofCoc); g_dofCoc = { 0 }; }
     if (g_dofBlur.handle) { dev->destroy_resource(g_dofBlur); g_dofBlur = { 0 }; }
+    if (g_dofMaskRtv.handle) { dev->destroy_resource_view(g_dofMaskRtv); g_dofMaskRtv = { 0 }; }
+    if (g_dofMask.handle) { dev->destroy_resource(g_dofMask); g_dofMask = { 0 }; }
     g_dofW = g_dofH = 0;
 }
 
@@ -1496,7 +1518,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     if (g_cfgPostDof && g_dofSeenThisFrame && g_dofCbValid && g_dofCbGValid && !upscale && !frozenPass && !g_windowMode && !NVSDK_NGX_FAILED(r)
         && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9 && g_cfgDRS != 2) {
         const float kx = drsActive ? float(subW) / float(cd.texture.width) : 1.0f, ky = drsActive ? float(subH) / float(cd.texture.height) : 1.0f;
-        if (dof_apply(cmd, dev, outW, outH, static_cast<DXGI_FORMAT>(cd.texture.format), kx, ky)) g_dofFrames++; else g_dofMissed++;
+        // g_out is always the DLSS output size; the colour texture must match it (a smaller texture - e.g. a 1920x1080 seed -
+        // would squeeze the blur layer into the top-left quadrant of the output)
+        if (outW != g_dlssOutW || outH != g_dlssOutH) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: skipped on frame %u - colour %ux%u is not the DLSS output size %ux%u", g_frame, outW, outH, g_dlssOutW, g_dlssOutH); g_dofMissed++; }
+        else if (dof_apply(cmd, dev, g_dlssOutW, g_dlssOutH, static_cast<DXGI_FORMAT>(cd.texture.format), kx, ky)) g_dofFrames++; else g_dofMissed++;
     } else if (g_cfgPostDof && g_dofSeenThisFrame) g_dofMissed++;
     objmv::mark_frame_end(native);
 
@@ -1891,6 +1916,17 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 const uint64_t ph = objmv::pso_ps_hash(s.pso);
                 if (ph == PS_DOF_COC || ph == PS_DOF_GATHER || ph == PS_DOF_COMPOSITE) {
                     if (ph == PS_DOF_COC) {
+                        // Dynamic resolution: the game's DoF runs on the scene sub-rect (this pass's viewport is half of it).
+                        // The re-apply assumes the full grid, so sub-rect frames keep the game's own DoF (v1.1.1 behaviour).
+                        const bool subRect = !s.vp_valid || s.vp.width < float(s.rt_w / 2) - 1.0f || s.vp.height < float(s.rt_h / 2) - 1.0f;
+                        g_dofSkipFrame = !subRect;
+                        if (subRect) {
+                            g_dofSubRectFrames++;
+                            static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u scene is a dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u, scene vp %.0fx%.0f) - the game's DoF stays", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_sceneVpFrame.width, g_sceneVpFrame.height);
+                        }
+                    }
+                    if (!g_dofSkipFrame) { if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++; goto dof_not_skipped; }
+                    if (ph == PS_DOF_COC) {
                         float cb[18 * 4];
                         if (read_cbv(s, 2, cb, 18 * 4)) { memcpy(g_dofCb, cb + 8 * 4, sizeof(g_dofCb)); g_dofCbValid = true; }
                         resource dep = s.table_set[1] ? resolve_descriptor(dev, s.tables[1], 1) : resource{ 0 };
@@ -1914,6 +1950,38 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
             }
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
+        dof_not_skipped:
+            if (g_cfgPostDof && g_dofSkipFrame && !g_dofCombineSeen && da.count <= 4 && s.rt_w == g_dlssW && objmv::pso_ps_hash(s.pso) == PS_DOF_COMBINE) g_dofCombineSeen = true;   // the DoF combine (3-vertex pass): overlays come after it
+            if (g_cfgPostDof && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
+                && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && g_dlssW && g_dofReady) {
+                {
+                    // quads / strips drawn into a scene-sized (non-final) texture after the DoF combine whose primary input is
+                    // not the scene itself: title cards and captions. Fullscreen post passes (3/4 vertices, scene input) are not.
+                    bool slot0scene = false;
+                    if (s.table_set[1]) { resource r0 = resolve_descriptor(dev, s.tables[1], 0); if (r0.handle && is_live(r0.handle)) { resource_desc d0 = dev->get_resource_desc(r0); slot0scene = d0.type == resource_type::texture_2d && d0.texture.width * 2 >= g_dlssW && d0.texture.height * 2 >= g_dlssH && fabsf(float(d0.texture.width) / float(d0.texture.height) - float(g_dlssW) / float(g_dlssH)) < 0.2f; } }
+                    if (!slot0scene) {
+                        const resource_desc rd = dev->get_resource_desc(s.rt);
+                        if (g_dofMask.handle && (g_dofMaskFmt != rd.texture.format)) { if (g_dofMaskRtv.handle) dev->destroy_resource_view(g_dofMaskRtv); dev->destroy_resource(g_dofMask); g_dofMask = { 0 }; g_dofMaskRtv = { 0 }; }
+                        if (!g_dofMask.handle) {
+                            if (dev->create_resource(resource_desc(g_dlssW, g_dlssH, 1, 1, rd.texture.format, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource), nullptr, resource_usage::render_target, &g_dofMask)
+                                && dev->create_resource_view(g_dofMask, resource_usage::render_target, resource_view_desc(rd.texture.format), &g_dofMaskRtv)) { dev->set_resource_name(g_dofMask, "MGS4DLSS DoF overlay mask"); g_dofMaskState = resource_usage::render_target; g_dofMaskFmt = rd.texture.format; logmsg("PostDof: overlay mask layer %ux%u fmt %u", g_dlssW, g_dlssH, (unsigned)rd.texture.format); }
+                            else { logmsg("PostDof: overlay mask layer failed"); if (g_dofMask.handle) { dev->destroy_resource(g_dofMask); g_dofMask = { 0 }; } }
+                        }
+                        if (g_dofMask.handle && g_dofMaskRtv.handle) {
+                            t_reentrant = true;
+                            if (g_dofMaskState != resource_usage::render_target) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::render_target); g_dofMaskState = resource_usage::render_target; }
+                            if (!g_dofMaskCleared) { const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_dofMaskRtv, zero); g_dofMaskCleared = true; }
+                            cmd->bind_render_targets_and_depth_stencil(1, &g_dofMaskRtv, resource_view{ 0 });
+                            if (da.indexed) cmd->draw_indexed(da.count, da.instances, da.first, da.vertex_offset, da.first_instance);
+                            else cmd->draw(da.count, da.instances, da.first, da.first_instance);
+                            cmd->bind_render_targets_and_depth_stencil(s.rtv_count, s.rtvs, s.dsv);
+                            t_reentrant = false;
+                            g_dofOverlaysThisFrame++; g_dofOverlays++;
+                            static uint32_t nlog = 0; if (nlog++ < 6) logmsg("PostDof: overlay draw f%u replayed into the mask (%u verts, pso %p, into %s)", g_frame, da.count, (void*)s.pso, desc_str(dev, s.rt).c_str());
+                        }
+                    }
+                }
+            }
             if (s.ds.handle) {
                 if (tracing()) { static uint32_t nf = 0, lastf = 0; if (lastf != g_frame) { lastf = g_frame; nf = 0; } if (nf++ < 12) logmsg("f%u depth-draw rt=%p %ux%u ds=%p vp=(%.0f,%.0f %.0fx%.0f) count=%u depthOn=%d", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h, (void*)s.ds.handle, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (int)pso_depth_enabled(s.pso)); }
                 g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
@@ -2392,7 +2460,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_dofSeenThisFrame = false; g_dofCocSeen = false; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2441,7 +2509,7 @@ static void frame_rollover()
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
@@ -2571,7 +2639,7 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
     bool pdof = g_cfgPostDof != 0;
     if (ImGui::Checkbox("Depth of field after DLSS / NR (PostDof: the game's DoF draws are skipped and re-applied on the DLSS output)", &pdof)) { g_cfgPostDof = pdof ? 1 : 0; write_ini_int("PostDof", g_cfgPostDof); }
-    if (g_cfgPostDof) ImGui::Text("   DoF frames re-applied %u | draws skipped %u | skipped without re-apply %u | CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofCbValid ? "captured" : "none");
+    if (g_cfgPostDof) ImGui::Text("   DoF frames re-applied %u | draws skipped %u | skipped without re-apply %u | dynamic-resolution frames left to the game %u", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames);
     bool mvs = g_cfgMotionVectors != 0;
     if (ImGui::Checkbox("Camera motion vectors (reprojected from depth)", &mvs)) { g_cfgMotionVectors = mvs ? 1 : 0; write_ini_int("MotionVectors", g_cfgMotionVectors); }
     const char* ppNames[] = { "Auto (composite when a DLSS post-processing add-on such as DLSS 5 NR is loaded, else pre-post)", "Pre-post: DLAA before post-process/HUD", "Composite: DLAA on the final image" };

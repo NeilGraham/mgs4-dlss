@@ -415,7 +415,14 @@ With `PostDof=1` (live key, panel checkbox) the three draws are skipped - identi
 shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - the CoC constants (`cb0[8..17]`) and the depth copy are taken
 from the skipped CoC pass, and an exact HLSL transcription of the three passes (`dof_coc_cs`, `dof_gather_cs`,
 `dof_composite_cs`) runs on the DLSS output before it is copied back, so the blur is applied to the NR-processed image.
-The stats line reports `PostDof: frames re-applied N, draws skipped M, skipped without re-apply K`; K should stay 0.
+Two things the game does around its DoF are handled explicitly: (1) while the scene is a dynamic-resolution sub-rect
+(the CoC pass's viewport is smaller than half the target - scene starts, heavy load) the game's own DoF is left in place
+for that frame, since the re-apply assumes the full grid; (2) overlays the game draws *after* its DoF combine and before
+the upscale into the final texture (title cards such as "Three Days Earlier", captions: 5-8-vertex quads into the graded
+scene texture whose input is not the scene) are replayed into a mask layer, and the composite keeps those pixels sharp -
+otherwise they would be blurred with the surface behind them. The stats line reports `PostDof: frames re-applied N,
+draws skipped M, skipped without re-apply K, sub-rect frames left to the game S, overlay draws masked O`; K should stay 0.
+Debug views: `DebugMode=10` the blurred layer, `11` its coverage, `12` the overlay mask.
 `DumpShaders=1` writes every pipeline's bytecode to `logs\shaders` (with `TraceFreeze=1` + `DebugMode=3` the freeze
 trace lists each full-frame draw with its `ps=` hash) - that is how the three passes were found.
 

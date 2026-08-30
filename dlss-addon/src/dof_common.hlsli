@@ -13,6 +13,7 @@ cbuffer CB : register(b0)
     float  cocUnorm;     // 1 = the game stored the CoC in an 8-bit UNORM alpha (negative = near blur was lost) - mirror that
     float  radiusScale;  // tuning multiplier on the CoC (1 = the game's)
     float2 depthOff;     // the CoC pass's c12.xy: depth uv = (2 * pixel + depthOff) / depthSize
-    float2 pad;
+    float  debugView;    // 0 = normal, 1 = blurred layer only, 2 = coverage (grey), 3 = overlay mask
+    float  hasMask;      // t1 of the composite = the overlay mask layer (title cards / captions drawn after the game DoF stay sharp)
 };
 SamplerState linClamp : register(s0);
