@@ -291,6 +291,17 @@ game's seed blit (the full-viewport draw that samples the seed) to point at that
 rewrite the upscaling modes use for the composite - so the frozen background is the live frame, pixel for pixel. The
 kept copy is invalidated as soon as the game writes into the seed again without the add-on's insertion.
 
+### Resuming from a frozen screen keeps the history
+
+Leaving the pause menu (or a dismissed dialog) used to reset DLSS and NR: a visible drop in detail that re-converged
+over about a second (measured: -15 % background sharpness at the unpause). The world has not moved during the freeze,
+so the history from the last live frame is still valid. The add-on remembers the camera of the last live evaluation
+and, when the first evaluation after a frozen screen sees the same camera (the cut heuristic's thresholds), it keeps
+the history: no reset, motion computed relative to that last live frame rather than to the pause menu's model camera,
+and only the rectangle the 3D window (the Snake model) occupied meanwhile is excluded for that one frame (its history
+belongs to the model, not the world). Log: `RESUME f…: same camera as before the freeze -> DLSS history kept`. A
+different camera still resets as before.
+
 ### Frame generation on frozen screens and at Codec transitions
 
 DLSS-G interpolates between consecutive game frames; on a frozen screen that gains nothing, and across the Codec's

@@ -214,6 +214,23 @@ static uint32_t g_frozenPassFrames = 0;
 // warped: stale history reprojected with meaningless vectors). The next evaluation resets.
 static bool g_forceReset = false; static int g_lastEvalWindow = -1; static uint32_t g_discontResets = 0;
 static uint32_t g_fgCutFrames = 0;   // evaluations after a discontinuity during which DLSS-G is told 'cut' (no interpolation)
+// Resuming from a frozen screen (unpause, a dismissed dialog) with the camera where it was: the DLSS / NR history from
+// the last live frame is still valid, so nothing is reset; only the rectangle a 3D window (pause-menu model) occupied
+// in the meantime is excluded from the history for that frame (bias-current-colour mask), since window-mode
+// evaluations overwrote the history there.
+static float g_liveVP[16]; static bool g_haveLiveVP = false;
+static viewport g_lastWinRect = {}; static bool g_lastWinRectValid = false;
+static uint32_t g_resumesKept = 0;
+static bool camera_position(const float* m, float* out);
+static bool camera_close(const float* a, const float* b)
+{
+    float pa[3], pb[3];
+    const bool okA = camera_position(a, pa), okB = camera_position(b, pb);
+    const float dp = okA && okB ? sqrtf((pa[0] - pb[0]) * (pa[0] - pb[0]) + (pa[1] - pb[1]) * (pa[1] - pb[1]) + (pa[2] - pb[2]) * (pa[2] - pb[2])) : 0.0f;
+    const float dr = 1.0f - (a[12] * b[12] + a[13] * b[13] + a[14] * b[14]);
+    return dr <= 0.06f && dp <= 1500.0f;
+}
+
 static int g_cfgTraceFreeze = 0; static uint32_t g_freezeTracedAt = 0;
 // Freeze trace (TraceFreeze=1): the full-size draw / copy chain of the last frames is kept in a ring and written to the
 // log when the world stops rendering, followed by the next non-empty frames. (The game stalls for a few empty frames
@@ -1195,6 +1212,22 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     }
     // Camera-only motion vectors from this frame's depth (VP = majority block of this frame's scene draws).
     select_frame_vp();
+    // Frozen screen: no 3D scene and the final texture holds a recycled image (the seed blit, a copy of the other final
+    // texture, or no rewrite at all) that DLSS + NR already produced on a live frame. Pass it through untouched.
+    // The world is frozen from the seed capture until the final texture receives a fresh scene write (the geometry
+    // target's upscale, a video frame). A frozen frame is never judged by its depth-tested draws: the pause menu's panels
+    // are depth-tested quads and its Snake model brings a camera matrix, yet the background is the recycled seed.
+    // Without the seed state (e.g. a blocking dialog that stops the world some other way) a frame with no camera / no
+    // depth-tested draws and no fresh write is treated the same.
+    if (g_freshWrite || (g_haveFrameVP && g_depthOnDrawsThisFrame >= 400)) g_frozen = false;
+    const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && (g_frozen || !g_haveFrameVP || g_depthOnDrawsThisFrame == 0);
+    { static bool was = false; if (frozenPass != was) { was = frozenPass; logmsg("frozen screen pass-through %s at frame %u (frozen %d, fresh write %d, scene write %d from %p, camera %d, depth-tested draws %u, window %d)", frozenPass ? "ON" : "off", g_frame, (int)g_frozen, (int)g_freshWrite, (int)g_finalSceneWritten, (void*)g_finalSceneSrc, (int)g_haveFrameVP, g_depthOnDrawsThisFrame, (int)g_windowMode); } }
+    const bool discont = g_forceReset || (g_lastEvalWindow >= 0 && g_lastEvalWindow != (int)g_windowMode);
+    bool resumeKept = false;
+    if (discont && !frozenPass && !g_windowMode && g_haveLiveVP && g_haveFrameVP && camera_close(g_frameVP, g_liveVP)) {
+        resumeKept = true; memcpy(g_prevVP, g_liveVP, 64); g_havePrevVP = true;   // motion relative to the last live frame, not to the pause menu's model camera
+        g_resumesKept++; if (g_resumesKept <= 50) logmsg("RESUME f%u: same camera as before the freeze -> DLSS history kept%s", g_frame, g_lastWinRectValid ? " (the 3D window's rectangle excluded for this frame)" : "");
+    }
     const float mvRect[4] = { g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height };
     const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, mvW, mvH, kx, ky, mvRect);
 
@@ -1231,16 +1264,22 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     { static bool was = false; if (no3d != was) { was = no3d; logmsg("no 3D scene this frame (%s): %s", no3d ? "e.g. Codec" : "3D scene back", no3d ? "whole frame bias-current-colour, zero motion" : "normal reconstruction"); } }
     if (no3d) { uimask_dispatch(cmd, cd.texture.width, cd.texture.height, true); uiMasked = true; }
     else if (uiMasked) uimask_dispatch(cmd, cd.texture.width, cd.texture.height, false);
-    // Frozen screen: no 3D scene and the final texture holds a recycled image (the seed blit, a copy of the other final
-    // texture, or no rewrite at all) that DLSS + NR already produced on a live frame. Pass it through untouched.
-    // The world is frozen from the seed capture until the final texture receives a fresh scene write (the geometry
-    // target's upscale, a video frame). A frozen frame is never judged by its depth-tested draws: the pause menu's panels
-    // are depth-tested quads and its Snake model brings a camera matrix, yet the background is the recycled seed.
-    // Without the seed state (e.g. a blocking dialog that stops the world some other way) a frame with no camera / no
-    // depth-tested draws and no fresh write is treated the same.
-    if (g_freshWrite || (g_haveFrameVP && g_depthOnDrawsThisFrame >= 400)) g_frozen = false;
-    const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && (g_frozen || !g_haveFrameVP || g_depthOnDrawsThisFrame == 0);
-    { static bool was = false; if (frozenPass != was) { was = frozenPass; logmsg("frozen screen pass-through %s at frame %u (frozen %d, fresh write %d, scene write %d from %p, camera %d, depth-tested draws %u, window %d)", frozenPass ? "ON" : "off", g_frame, (int)g_frozen, (int)g_freshWrite, (int)g_finalSceneWritten, (void*)g_finalSceneSrc, (int)g_haveFrameVP, g_depthOnDrawsThisFrame, (int)g_windowMode); } }
+    if (resumeKept && g_lastWinRectValid && g_mask.handle && g_mvHeap && g_lastWinRect.width > 0) {
+        // the pause-menu model was evaluated in this rectangle: its history is not the world's - current colour there
+        const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(23) * 4 * inc;
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(23) * 4 * inc;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R8_UNORM; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mask.handle), nullptr, &uav, cpu);
+        cmd->barrier(g_mask, g_maskState, resource_usage::unordered_access); g_maskState = resource_usage::unordered_access;
+        ID3D12GraphicsCommandList* nat = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+        ID3D12DescriptorHeap* heaps[1] = { g_mvHeap }; nat->SetDescriptorHeaps(1, heaps);
+        const float one[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        const D3D12_RECT rc = { (LONG)g_lastWinRect.x, (LONG)g_lastWinRect.y, (LONG)(g_lastWinRect.x + g_lastWinRect.width + 0.5f), (LONG)(g_lastWinRect.y + g_lastWinRect.height + 0.5f) };
+        nat->ClearUnorderedAccessViewFloat(gpu, cpu, reinterpret_cast<ID3D12Resource*>(g_mask.handle), one, 1, &rc);
+        cmd->barrier(g_mask, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_maskState = resource_usage::shader_resource_non_pixel;
+        uiMasked = true;
+    }
     NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
     ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(color.handle);
     ep.Feature.pInOutput = reinterpret_cast<ID3D12Resource*>(g_out.handle);
@@ -1253,11 +1292,11 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // DRS=1: DLSS evaluates the whole texture (the sub-rect content at its native scale, garbage outside it that the
     // composite never samples), so NGX post-processing add-ons see a full-size contract; DRS=2 = sub-rect evaluation.
     ep.InRenderSubrectDimensions = (g_cfgDRS == 2) ? NVSDK_NGX_Dimensions{ subW, subH } : NVSDK_NGX_Dimensions{ cd.texture.width, cd.texture.height };
-    const bool discont = g_forceReset || (g_lastEvalWindow >= 0 && g_lastEvalWindow != (int)g_windowMode);
-    if (discont && !frozenPass) { g_discontResets++; if (g_discontResets <= 50) logmsg("RESET f%u: %s -> DLSS history cleared", g_frame, g_forceReset ? "first evaluation after frozen pass-through frames" : "insertion moved between the final texture and a 3D window"); }
+    if (discont && !frozenPass && !resumeKept) { g_discontResets++; if (g_discontResets <= 50) logmsg("RESET f%u: %s -> DLSS history cleared", g_frame, g_forceReset ? "first evaluation after frozen pass-through frames" : "insertion moved between the final texture and a 3D window"); }
     if (frozenPass) g_forceReset = true; else { g_forceReset = false; g_lastEvalWindow = (int)g_windowMode; }
-    if (discont && !frozenPass) g_fgCutFrames = 8;
-    ep.InReset = (g_frame <= g_createdFrame + 1 || (mvReset && g_cfgMotionVectors) || (discont && !frozenPass)) ? 1 : 0;
+    if (discont && !frozenPass && !resumeKept) g_fgCutFrames = 8;
+    ep.InReset = (g_frame <= g_createdFrame + 1 || (mvReset && g_cfgMotionVectors) || (discont && !frozenPass && !resumeKept)) ? 1 : 0;
+    if (!frozenPass) { if (g_windowMode) { g_lastWinRect = g_windowVp; g_lastWinRectValid = true; } else if (g_haveFrameVP) { memcpy(g_liveVP, g_frameVP, 64); g_haveLiveVP = true; if (!resumeKept) g_lastWinRectValid = false; } }
     ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f;
     ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
