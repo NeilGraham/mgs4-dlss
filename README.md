@@ -275,6 +275,22 @@ Verified with the vector view: leave `DebugMode=5` on and pause - the frozen bac
 (before, it stayed the plain scene); same for the Codec list and a Codec call. The insertion fires once per freeze
 (`frozen-background insertions` in the stats line).
 
+The frozen frames themselves are **passed through**: a frame with no 3D scene whose final texture holds a recycled
+image (the seed blit, a copy of the other final texture, or no rewrite at all) is not evaluated by DLSS at all - the
+image already went through DLSS and NR on the live frame it came from, and evaluating it again applied NR a second
+time. That second pass was visible as a sharpness jump right after pausing (the ~0.3 s until the pause menu's 3D
+model window appears, after which the insertion moves to that window), for the whole Codec frequency list, and
+behind blocking dialogs such as the controller connect / disconnect notice. Measured on a 120 fps capture: the
+background band went from 4.4 to 5.4 (+40 %) in that window before, and stays flat now. Frames with fresh 2D content
+(prerecorded videos, menus rendered from atlases) are still evaluated as before. Counters: `frozen pass-through frames`
+in the stats line and the overlay.
+
+Finally, the seed is only a 1920x1080 downsample, so even with DLSS in it the frozen background was a touch softer
+than the live frame. The add-on keeps a full-size copy of the DLSS output at the capture and rewrites the SRV of the
+game's seed blit (the full-viewport draw that samples the seed) to point at that copy - the same in-place descriptor
+rewrite the upscaling modes use for the composite - so the frozen background is the live frame, pixel for pixel. The
+kept copy is invalidated as soon as the game writes into the seed again without the add-on's insertion.
+
 ### Known limitations
 
 - Alpha-tested surfaces (hair cards) get object vectors over their transparent texels too (the velocity pass has no alpha test); not visible in practice.

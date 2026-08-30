@@ -196,6 +196,19 @@ static resource g_mv = { 0 }, g_out = { 0 };
 // the final texture every frame the screen stays frozen. DLSS therefore runs before that capture (FrozenBackground=1).
 static uint32_t g_frozenInjections = 0;
 static bool g_prevFrameHadScene = false;       // the previous frame rendered a full-frame 3D scene
+// Frozen screens hold an image DLSS (+NR) already produced: the seed, or the other final texture, or simply the final
+// texture left as it was. Evaluating DLSS on such a frame would run NR a second time on it (visible as a sharpness
+// jump for the frames before the pause menu's 3D window appears, for the whole Codec list, and while the controller
+// connect / disconnect message is up), so those frames are passed through instead.
+static std::unordered_set<uint64_t> g_seedTex;   // small targets a few-vertex draw wrote from a final texture (the seed captures)
+static uint64_t g_finalSceneSrc = 0;             // slot-0 texture of this frame's scene write into the final texture
+static bool g_frozen = false;                    // the world stopped through the game's seed capture; cleared by a fresh scene write
+// The seed is a 1920x1080 downsample, so even with DLSS in it the frozen background is softer than the live frame.
+// A full-size copy of the DLSS output is kept at the capture and the game's seed blit is redirected to sample it.
+static resource g_keep = { 0 }; static resource_usage g_keepState = resource_usage::copy_dest;
+static uint64_t g_keepSeed = 0; static bool g_keepValid = false; static uint32_t g_keepRedirects = 0;
+static bool g_freshWrite = false;                // this frame the final texture received a scene write from a live source (geometry target, video)
+static uint32_t g_frozenPassFrames = 0;
 static int g_cfgTraceFreeze = 0; static uint32_t g_freezeTracedAt = 0;
 // Freeze trace (TraceFreeze=1): the full-size draw / copy chain of the last frames is kept in a ring and written to the
 // log when the world stops rendering, followed by the next non-empty frames. (The game stalls for a few empty frames
@@ -958,6 +971,7 @@ static void release_dlss_resources(device* dev)
     if (g_uiRtv.handle) { dev->destroy_resource_view(g_uiRtv); g_uiRtv = { 0 }; }
     if (g_ui.handle) { dev->destroy_resource(g_ui); g_ui = { 0 }; }
     if (g_preHud.handle) { dev->destroy_resource(g_preHud); g_preHud = { 0 }; }
+    if (g_keep.handle) { dev->destroy_resource(g_keep); g_keep = { 0 }; g_keepValid = false; }
     if (g_hudless.handle) { dev->destroy_resource(g_hudless); g_hudless = { 0 }; }
     if (g_scratch.handle) { dev->destroy_resource(g_scratch); g_scratch = { 0 }; }
 }
@@ -1042,6 +1056,8 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     } else logmsg("UI layer texture failed");
     if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource), nullptr, resource_usage::copy_dest, &g_preHud)) { dev->set_resource_name(g_preHud, "MGS4DLSS pre-HUD capture"); g_preHudState = resource_usage::copy_dest; }
     else logmsg("pre-HUD capture texture failed");
+    if (dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::shader_resource), nullptr, resource_usage::copy_dest, &g_keep)) { dev->set_resource_name(g_keep, "MGS4DLSS frozen frame"); g_keepState = resource_usage::copy_dest; g_keepValid = false; }
+    else logmsg("frozen-frame texture failed (the frozen background will be the game's 1080p seed)");
     if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::copy_dest, &g_hudless)) { dev->set_resource_name(g_hudless, "MGS4DLSS HUD-less colour"); g_hudlessState = resource_usage::copy_dest; }
     else logmsg("HUD-less texture failed");
     if (dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::unordered_access, &g_scratch)) { dev->set_resource_name(g_scratch, "MGS4DLSS DRS resample"); g_scratchState = resource_usage::unordered_access; }
@@ -1210,6 +1226,16 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     { static bool was = false; if (no3d != was) { was = no3d; logmsg("no 3D scene this frame (%s): %s", no3d ? "e.g. Codec" : "3D scene back", no3d ? "whole frame bias-current-colour, zero motion" : "normal reconstruction"); } }
     if (no3d) { uimask_dispatch(cmd, cd.texture.width, cd.texture.height, true); uiMasked = true; }
     else if (uiMasked) uimask_dispatch(cmd, cd.texture.width, cd.texture.height, false);
+    // Frozen screen: no 3D scene and the final texture holds a recycled image (the seed blit, a copy of the other final
+    // texture, or no rewrite at all) that DLSS + NR already produced on a live frame. Pass it through untouched.
+    // The world is frozen from the seed capture until the final texture receives a fresh scene write (the geometry
+    // target's upscale, a video frame). A frozen frame is never judged by its depth-tested draws: the pause menu's panels
+    // are depth-tested quads and its Snake model brings a camera matrix, yet the background is the recycled seed.
+    // Without the seed state (e.g. a blocking dialog that stops the world some other way) a frame with no camera / no
+    // depth-tested draws and no fresh write is treated the same.
+    if (g_freshWrite || (g_haveFrameVP && g_depthOnDrawsThisFrame >= 400)) g_frozen = false;
+    const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && (g_frozen || !g_haveFrameVP || g_depthOnDrawsThisFrame == 0);
+    { static bool was = false; if (frozenPass != was) { was = frozenPass; logmsg("frozen screen pass-through %s at frame %u (frozen %d, fresh write %d, scene write %d from %p, camera %d, depth-tested draws %u, window %d)", frozenPass ? "ON" : "off", g_frame, (int)g_frozen, (int)g_freshWrite, (int)g_finalSceneWritten, (void*)g_finalSceneSrc, (int)g_haveFrameVP, g_depthOnDrawsThisFrame, (int)g_windowMode); } }
     NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
     ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(color.handle);
     ep.Feature.pInOutput = reinterpret_cast<ID3D12Resource*>(g_out.handle);
@@ -1256,6 +1282,13 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         // on the rendered character (any offset = the vectors are on a different grid than the image)
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (!NVSDK_NGX_FAILED(r)) vis_dispatch(cmd, visInW, visInH, outW, outH, 0.5f);
+    } else if (frozenPass) {
+        cmd->barrier(color, resource_usage::shader_resource_non_pixel, resource_usage::copy_source);
+        cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_dest);
+        cmd->copy_resource(color, g_out);
+        cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
+        cmd->barrier(color, resource_usage::copy_source, resource_usage::shader_resource_non_pixel);
+        g_frozenPassFrames++;
     } else {
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (NVSDK_NGX_FAILED(r)) { if (g_failCount++ < 5) logmsg("NGX EvaluateFeature -> %s", ngx_str(r)); }
@@ -1432,11 +1465,12 @@ static void on_destroy_resource(device*, resource res)
     // forget every cross-frame reference to it (level transitions destroy and recreate the render targets)
     if (g_prevBusiestRt == res.handle) g_prevBusiestRt = 0;
     if (g_prevBusiestRt2 == res.handle) g_prevBusiestRt2 = 0;
-    if (g_finalRt[0] == res.handle) g_finalRt[0] = 0;
+    if (g_finalRt[0] == res.handle) { g_finalRt[0] = 0; g_frozen = false; }
+    if (g_keepSeed == res.handle) { g_keepSeed = 0; g_keepValid = false; }
     if (g_finalRt[1] == res.handle) g_finalRt[1] = 0;
     if (g_geoRt == res.handle) g_geoRt = 0;
     if (g_curGeoRt == res.handle) g_curGeoRt = 0;
-    g_depthDrawsPerRt.erase(res.handle);
+    g_depthDrawsPerRt.erase(res.handle); g_seedTex.erase(res.handle);
     if (g_lastDepth == res.handle) g_lastDepth = 0;
     g_drawsPerRt.erase(res.handle); g_drawsPerDs.erase(res.handle);
     for (auto it = g_dsForRt.begin(); it != g_dsForRt.end();) { if (it->first == res.handle || it->second == res.handle) it = g_dsForRt.erase(it); else ++it; }
@@ -1704,16 +1738,42 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // over the final texture every frame. The capture comes BEFORE the pre-HUD insertion, so the still image was
             // the raw frame; running DLSS on the final texture right before the capture makes the seed the DLSS (+NR) image.
             // Shape: a few-vertex draw into a smaller, non-final target that samples this frame's final scene texture.
-            if (g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
-                && !depthOn && da.count <= 8 && g_sceneVpFrameValid && g_finalSceneWritten && g_finalSceneRt && is_live(g_finalSceneRt)
-                && s.rt.handle != g_finalSceneRt && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && g_dlssW && s.rt_w < g_dlssW) {
-                int idx = -1, param = -1;
-                for (int p = 1; p < 3 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 4; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_finalSceneRt) { idx = i; param = p; break; } }
-                if (idx >= 0) {
+            if (g_keepValid && s.rt.handle == g_keepSeed) g_keepValid = false;   // the game re-captures into the seed without us: the kept frame is stale
+            // The seed blit: a full-viewport draw into a final-size target sampling the seed at slot 0 -> sample the kept
+            // full-size DLSS frame instead (descriptor rewritten in place, like the upscaling modes' composite redirect).
+            if (g_keepValid && g_keep.handle && !depthOn && da.count <= 8 && s.rt_w == g_dlssOutW && s.rt_h == g_dlssOutH && s.table_set[1] && s.vp_valid && s.vp.width >= s.rt_w - 2.0f) {
+                if (resolve_descriptor(dev, s.tables[1], 0).handle == g_keepSeed) {
+                    uint64_t cpu = 0, size = 0; D3D12_DESCRIPTOR_HEAP_TYPE type;
+                    if (table_to_cpu(dev, s.tables[1], 0, &cpu, &size, &type) && type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) {
+                        if (g_keepState != resource_usage::shader_resource) { cmd->barrier(g_keep, g_keepState, resource_usage::shader_resource); g_keepState = resource_usage::shader_resource; }
+                        g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_keep.handle), nullptr, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)cpu });
+                        g_keepRedirects++;
+                        static bool once = false; if (!once) { once = true; logmsg("frozen frame: the seed blit into %s now samples the kept full-size DLSS frame (seed %p) at frame %u", desc_str(dev, s.rt).c_str(), (void*)g_keepSeed, g_frame); }
+                    }
+                }
+            }
+            if (!depthOn && da.count <= 8 && g_dlssW && s.rt_w < g_dlssW && s.rt.handle != g_finalSceneRt && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]) {
+                int idx = -1, param = -1; bool fromFinal = false;
+                for (int p = 1; p < 3 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 4; ++i) {
+                    resource r = resolve_descriptor(dev, s.tables[p], i);
+                    if (r.handle && (r.handle == g_finalSceneRt || r.handle == g_finalRt[0] || r.handle == g_finalRt[1])) { fromFinal = true; if (r.handle == g_finalSceneRt && g_finalSceneWritten) { idx = i; param = p; break; } }
+                }
+                if (fromFinal) g_seedTex.insert(s.rt.handle);   // a capture of the frozen image (the pause / Codec seed, the frosted-panel source)
+                if (idx >= 0 && g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
+                    && g_sceneVpFrameValid && is_live(g_finalSceneRt)) {
                     static bool once = false; if (!once) { once = true; logmsg("frozen-screen seed: DLSS on the final texture %s before the game's capture into %s (r%d[%d], count %u) at frame %u", desc_str(dev, resource{ g_finalSceneRt }).c_str(), desc_str(dev, s.rt).c_str(), param, idx, da.count, g_frame); }
                     g_finalPreHudThisFrame = true;   // same role as the pre-HUD insertion: HUD replay and the FG HUD-less image work as there
                     run_dlss(cmd, &s, resource{ g_finalSceneRt }, resource_usage::shader_resource_pixel, 0);
-                    g_injectedThisFrame = true; g_finalPreHudInjections++; g_frozenInjections++;
+                    g_injectedThisFrame = true; g_finalPreHudInjections++; g_frozenInjections++; g_frozen = true;
+                    // keep the full-size DLSS frame for the seed blit (the seed itself is a 1080p downsample of it)
+                    if (g_keep.handle && g_out.handle && g_outState == resource_usage::unordered_access && g_cfgDebugMode == 0) {
+                        cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_source);
+                        if (g_keepState != resource_usage::copy_dest) { cmd->barrier(g_keep, g_keepState, resource_usage::copy_dest); g_keepState = resource_usage::copy_dest; }
+                        cmd->copy_resource(g_out, g_keep);
+                        cmd->barrier(g_out, resource_usage::copy_source, resource_usage::unordered_access);
+                        cmd->barrier(g_keep, resource_usage::copy_dest, resource_usage::shader_resource); g_keepState = resource_usage::shader_resource;
+                        g_keepSeed = s.rt.handle; g_keepValid = true;
+                    } else g_keepValid = false;
                 }
             }
             const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame || g_windowInjectedThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
@@ -1744,10 +1804,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         const float a = float(d.texture.width) / float(d.texture.height), fa = float(g_dlssW) / float(g_dlssH);
                         return fabsf(a - fa) < 0.2f;
                     };
-                    bool big = false, slot0big = false;
+                    bool big = false, slot0big = false; uint64_t slot0 = 0;
                     for (int p = 1; p < 5 && !big; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !big; ++i) {
                         resource r = resolve_descriptor(dev, s.tables[p], i);
-                        if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (sceneSized(d)) { big = true; if (p == 1 && i == 0) slot0big = true; } }
+                        if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (sceneSized(d)) { big = true; if (p == 1 && i == 0) { slot0big = true; slot0 = r.handle; } } }
                     }
                     // Not HUD: anything with the scene's (dynamic-resolution) viewport; 3/4-vertex fullscreen passes (HUD is
                     // 6-vertex quads and 2-vertex lines); quads whose primary input is a scene-sized texture (the port's
@@ -1756,7 +1816,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // The final texture receives the scene (the fullscreen pass at the full viewport that samples a
                     // scene-sized input, i.e. the game's upscale/tonemap) before the HUD; remember which texture, since
                     // the final image is double-buffered and the other one takes scene-space effect draws this frame.
-                    if (post && slot0big && fullVp) { g_finalSceneWritten = true; g_finalSceneRt = s.rt.handle; }   // the game's upscale/tonemap, or the frozen-scene blits of the Codec / pause screens
+                    if (post && slot0big && fullVp) {
+                        g_finalSceneWritten = true; g_finalSceneRt = s.rt.handle; g_finalSceneSrc = slot0;
+                        if (slot0 != g_finalRt[0] && slot0 != g_finalRt[1] && g_seedTex.count(slot0) == 0) g_freshWrite = true;   // not the seed, not the other final texture: live content
+                    }   // the game's upscale/tonemap, or the frozen-scene blits of the Codec / pause screens
                     const bool preScene = !post && (!g_finalSceneWritten || s.rt.handle != g_finalSceneRt);
                     if (preScene) { post = true; g_uiPreSceneThisFrame++; }
                     if (tracing()) logmsg("f%u    -> %s (fullVp %d, big %d, slot0big %d, sceneRt %p)", g_frame, preScene ? "pre-scene" : (post ? "post" : "HUD"), (int)fullVp, (int)big, (int)slot0big, (void*)g_finalSceneRt);
@@ -2038,7 +2101,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2085,7 +2148,7 @@ static void frame_rollover()
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_finalPreHudInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
-        { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec)", g_frozenInjections);
+        { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
@@ -2228,7 +2291,7 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Zero motion on masked objects (third-person camera turns)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
     bool fb = g_cfgFrozenBg != 0;
     if (ImGui::Checkbox("Frozen screens (pause menu / Codec): DLSS before the game captures its background", &fb)) { g_cfgFrozenBg = fb ? 1 : 0; write_ini_int("FrozenBackground", g_cfgFrozenBg); }
-    ImGui::Text("Frozen-screen insertions: %u", g_frozenInjections);
+    ImGui::Text("Frozen-screen insertions: %u | pass-through frames (no second NR on a frozen image): %u", g_frozenInjections, g_frozenPassFrames);
     bool om = g_cfgObjectMV != 0;
     if (ImGui::Checkbox("Per-object motion vectors (stream-out of the game's vertex shaders)", &om)) { g_cfgObjectMV = om ? 1 : 0; write_ini_int("ObjectMV", g_cfgObjectMV); }
     {
