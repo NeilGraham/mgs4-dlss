@@ -74,6 +74,10 @@ DynamicZeroMV=0          ; character mask options (superseded by ObjectMV, kept 
 DynamicMaskProps=0
 DynamicMask=0
 PrePost=auto             ; DLAA insertion: auto = on the final image when a DLSS post-processing add-on (DLSS 5 NR) is loaded, else before post/HUD
+PostDof=0                ; 1 = skip the game's depth-of-field draws and re-apply the same DoF on the DLSS / NR output (see "Depth of field after NR")
+DofStep=2.0              ; PostDof tuning: spiral step scale (2.0 = the game's blur size at the full grid)
+DofRadius=1.0            ; PostDof tuning: multiplier on the game's circle of confusion
+DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
 FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
 FGTargetFps=120
 Reflex=1
@@ -400,6 +404,20 @@ game's DOF, colour grading and vignette are applied afterwards, which flattens t
 So the insertion point is **automatic** (`PrePost=auto`): if `renodx-dlss5.addon64` is loaded in the process, DLAA runs
 at the composite so NR gets the final image; without it, DLAA runs pre-post for the cleanest AA (vignette/HUD outside
 DLSS). Override with the "Insertion point" combo in the panel or `PrePost=1` / `PrePost=0`.
+
+### Depth of field after NR (`PostDof=1`)
+
+The port applies its depth of field inside the scene target (three passes: a half-resolution circle-of-confusion pass
+that samples the linear depth copy, a golden-angle spiral bokeh gather, and an alpha blend of the blurred layer over the
+sharp image) before the tonemap / upscale into the final texture. DLSS and the DLSS 5 NR add-on therefore only ever see
+the defocused image: an out-of-focus character carries no NR detail and the NR look "pops in" on every rack focus.
+With `PostDof=1` (live key, panel checkbox) the three draws are skipped - identified by the FNV-1a hash of their pixel
+shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - the CoC constants (`cb0[8..17]`) and the depth copy are taken
+from the skipped CoC pass, and an exact HLSL transcription of the three passes (`dof_coc_cs`, `dof_gather_cs`,
+`dof_composite_cs`) runs on the DLSS output before it is copied back, so the blur is applied to the NR-processed image.
+The stats line reports `PostDof: frames re-applied N, draws skipped M, skipped without re-apply K`; K should stay 0.
+`DumpShaders=1` writes every pipeline's bytecode to `logs\shaders` (with `TraceFreeze=1` + `DebugMode=3` the freeze
+trace lists each full-frame draw with its `ps=` hash) - that is how the three passes were found.
 
 ### Direct stage boot
 

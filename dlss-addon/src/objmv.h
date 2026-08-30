@@ -66,4 +66,10 @@ namespace objmv {
     void mark_frame_end(ID3D12GraphicsCommandList* cl);
 
     const Stats& stats();
+
+    // Shader identification: FNV-1a hash of the pixel / vertex shader bytecode of a recorded pipeline (0 if unknown).
+    uint64_t pso_ps_hash(ID3D12PipelineState* pso);
+    uint64_t pso_vs_hash(ID3D12PipelineState* pso);
+    // Dump every new VS/PS bytecode to <dir>\<hash>.{vs,ps}.dxbc (to identify the game's post passes); "" = off.
+    void set_shader_dump_dir(const char* dir);
 }

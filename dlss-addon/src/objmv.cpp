@@ -38,8 +38,19 @@ struct PsoRec {
     ID3D12PipelineState* soPso = nullptr;   // not owned: shared entry in g_soShared
     uint64_t shareKey = 0;
     bool failed = false, skinned = false;
+    uint64_t psHash = 0, vsHash = 0;
 };
 static std::unordered_map<ID3D12PipelineState*, PsoRec> g_psos;
+static std::string g_dumpDir;                    // shader dump directory ("" = off)
+static std::unordered_set<uint64_t> g_dumped;    // bytecode hashes already written
+static uint64_t fnv(const void* data, size_t n, uint64_t h);
+static void dump_shader(const D3D12_SHADER_BYTECODE& bc, uint64_t hash, const char* kind)
+{
+    if (g_dumpDir.empty() || !bc.pShaderBytecode || !bc.BytecodeLength || !g_dumped.insert(hash ^ (kind[0] == 'p' ? 1 : 0)).second) return;
+    char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\%016llx.%s.dxbc", g_dumpDir.c_str(), (unsigned long long)hash, kind);
+    FILE* f = fopen(path, "wb"); if (!f) return;
+    fwrite(bc.pShaderBytecode, 1, bc.BytecodeLength, f); fclose(f);
+}
 struct SoShared { ID3D12PipelineState* pso = nullptr; bool failed = false; uint32_t users = 0; };
 static std::unordered_map<uint64_t, SoShared> g_soShared;   // bgfx re-creates pipeline objects continuously; the VS + layout repeat
 static uint64_t fnv(const void* data, size_t n, uint64_t h = 1469598103934665603ull) { const uint8_t* b = static_cast<const uint8_t*>(data); for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; } return h; }
@@ -53,11 +64,14 @@ static PFN_CreatePipelineState o_CreatePipelineState = nullptr;
 static thread_local bool t_inside = false;
 
 static void remember_pso(ID3D12PipelineState* pso, const D3D12_SHADER_BYTECODE& vs, const D3D12_INPUT_LAYOUT_DESC& il, const D3D12_RASTERIZER_DESC& raster,
-                         D3D12_PRIMITIVE_TOPOLOGY_TYPE topo, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE stripCut, UINT nodeMask, ID3D12RootSignature* rootSig)
+                         D3D12_PRIMITIVE_TOPOLOGY_TYPE topo, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE stripCut, UINT nodeMask, ID3D12RootSignature* rootSig, const D3D12_SHADER_BYTECODE& ps)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
     PsoRec& p = g_psos[pso];
     p = PsoRec();
+    p.vsHash = fnv(vs.pShaderBytecode, vs.BytecodeLength);
+    p.psHash = ps.pShaderBytecode && ps.BytecodeLength ? fnv(ps.pShaderBytecode, ps.BytecodeLength) : 0;
+    dump_shader(vs, p.vsHash, "vs"); if (p.psHash) dump_shader(ps, p.psHash, "ps");
     p.vs.assign(static_cast<const uint8_t*>(vs.pShaderBytecode), static_cast<const uint8_t*>(vs.pShaderBytecode) + vs.BytecodeLength);
     p.names.reserve(il.NumElements);
     for (UINT i = 0; i < il.NumElements; ++i) {
@@ -114,7 +128,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreatePipelineState(ID3D12Device2* self, con
     HRESULT hr = o_CreatePipelineState(self, desc, riid, out);
     if (FAILED(hr) || t_inside || !out || !*out || !desc || !desc->pPipelineStateSubobjectStream || riid != __uuidof(ID3D12PipelineState)) return hr;
     const uint8_t* ptr = static_cast<const uint8_t*>(desc->pPipelineStateSubobjectStream); const uint8_t* end = ptr + desc->SizeInBytes;
-    D3D12_SHADER_BYTECODE vs = {}; D3D12_INPUT_LAYOUT_DESC il = {}; D3D12_RASTERIZER_DESC raster = {}; bool haveRaster = false;
+    D3D12_SHADER_BYTECODE vs = {}, ps = {}; D3D12_INPUT_LAYOUT_DESC il = {}; D3D12_RASTERIZER_DESC raster = {}; bool haveRaster = false;
     D3D12_PRIMITIVE_TOPOLOGY_TYPE topo = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE; D3D12_INDEX_BUFFER_STRIP_CUT_VALUE cut = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
     UINT nodeMask = 0; ID3D12RootSignature* rs = nullptr; bool otherStages = false, ok = true;
     while (ptr + 8 <= end) {
@@ -125,6 +139,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreatePipelineState(ID3D12Device2* self, con
         switch (type) {
         case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE: rs = *reinterpret_cast<ID3D12RootSignature* const*>(v); break;
         case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_VS: vs = *reinterpret_cast<const D3D12_SHADER_BYTECODE*>(v); break;
+        case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS: ps = *reinterpret_cast<const D3D12_SHADER_BYTECODE*>(v); break;
         case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_GS: case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_HS: case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DS:
         case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS: case D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS:
             if (reinterpret_cast<const D3D12_SHADER_BYTECODE*>(v)->pShaderBytecode) otherStages = true; break;
@@ -144,7 +159,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreatePipelineState(ID3D12Device2* self, con
     }
     if (!ok || !vs.pShaderBytecode || !vs.BytecodeLength || otherStages || topo != D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE) return hr;
     if (!haveRaster) { raster.FillMode = D3D12_FILL_MODE_SOLID; raster.CullMode = D3D12_CULL_MODE_BACK; raster.DepthClipEnable = TRUE; }
-    remember_pso(reinterpret_cast<ID3D12PipelineState*>(*out), vs, il, raster, topo, cut, nodeMask, rs);
+    remember_pso(reinterpret_cast<ID3D12PipelineState*>(*out), vs, il, raster, topo, cut, nodeMask, rs, ps);
     return hr;
 }
 
@@ -188,9 +203,13 @@ static HRESULT STDMETHODCALLTYPE hk_CreateGraphicsPipelineState(ID3D12Device* se
     HRESULT hr = o_CreateGraphicsPipelineState(self, desc, riid, out);
     if (SUCCEEDED(hr) && !t_inside && out && *out && desc && desc->VS.pShaderBytecode && desc->VS.BytecodeLength && riid == __uuidof(ID3D12PipelineState)
         && desc->PrimitiveTopologyType == D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE && !desc->GS.pShaderBytecode && !desc->HS.pShaderBytecode)
-        remember_pso(reinterpret_cast<ID3D12PipelineState*>(*out), desc->VS, desc->InputLayout, desc->RasterizerState, desc->PrimitiveTopologyType, desc->IBStripCutValue, desc->NodeMask, desc->pRootSignature);
+        remember_pso(reinterpret_cast<ID3D12PipelineState*>(*out), desc->VS, desc->InputLayout, desc->RasterizerState, desc->PrimitiveTopologyType, desc->IBStripCutValue, desc->NodeMask, desc->pRootSignature, desc->PS);
     return hr;
 }
+
+uint64_t pso_ps_hash(ID3D12PipelineState* pso) { std::lock_guard<std::mutex> lock(g_mutex); auto it = g_psos.find(pso); return it == g_psos.end() ? 0 : it->second.psHash; }
+uint64_t pso_vs_hash(ID3D12PipelineState* pso) { std::lock_guard<std::mutex> lock(g_mutex); auto it = g_psos.find(pso); return it == g_psos.end() ? 0 : it->second.vsHash; }
+void set_shader_dump_dir(const char* dir) { std::lock_guard<std::mutex> lock(g_mutex); g_dumpDir = dir ? dir : ""; if (!g_dumpDir.empty()) CreateDirectoryA(g_dumpDir.c_str(), nullptr); }
 
 void forget_pso(ID3D12PipelineState* pso)
 {

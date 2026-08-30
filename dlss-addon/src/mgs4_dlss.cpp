@@ -26,6 +26,9 @@
 #include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
 #include "resample_cs.h"
 #include "depth_stretch_cs.h"   // g_depth_stretch_cs
+#include "dof_coc_cs.h"        // g_dof_coc_cs / g_dof_gather_cs / g_dof_composite_cs: the game's DoF re-applied after DLSS (PostDof=1)
+#include "dof_gather_cs.h"
+#include "dof_composite_cs.h"
 #include "uimask_cs.h"          // g_uimask_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include "objmv.h"   // per-object motion vectors via stream output (objmv.cpp)
@@ -195,6 +198,23 @@ static resource g_mv = { 0 }, g_out = { 0 };
 // 1920x1080 seed (after its upscale, before the HUD - and before the pre-HUD insertion) and blits that seed back over
 // the final texture every frame the screen stays frozen. DLSS therefore runs before that capture (FrozenBackground=1).
 static uint32_t g_frozenInjections = 0;
+// ---- DoF after DLSS / NR (PostDof=1) ---------------------------------------------------------------------------------
+// The port applies its depth of field inside the scene target before the tonemap / upscale into the final texture, so
+// DLSS and the DLSS 5 NR add-on only ever see the defocused image: out-of-focus characters carry no NR detail and the
+// look "pops" on every rack focus. With PostDof the three DoF draws are skipped (identified by their pixel-shader
+// bytecode hash), the CoC constants and the depth copy are taken from the skipped pass, and an exact transcription of
+// the three passes runs on the DLSS output before the copy back (see dof_*.hlsl).
+static int g_cfgPostDof = 0;
+static float g_cfgDofStep = 2.0f, g_cfgDofRadius = 1.0f;
+static const uint64_t PS_DOF_COC = 0xbf2a546d733f4efcull, PS_DOF_GATHER = 0x9feb2d2e92bbc108ull, PS_DOF_COMPOSITE = 0x01978e62bca9c941ull;
+static float g_dofCb[10 * 4] = {}; static bool g_dofCbValid = false;   // the game's cb0[8..17] at this frame's CoC pass
+static float g_dofCbG[10 * 4] = {}; static bool g_dofCbGValid = false; // ... and at its spiral gather pass (each draw has its own constants)
+static uint64_t g_dofDepth = 0;                                          // the depth copy the CoC pass sampled (t1)
+static bool g_dofCocSeen = false, g_dofSeenThisFrame = false, g_dofCocUnorm = false;
+static bool g_dofPrevOk = false;   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
+static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
+static resource g_dofCoc = { 0 }, g_dofBlur = { 0 }; static resource_usage g_dofCocState = resource_usage::unordered_access, g_dofBlurState = resource_usage::unordered_access;
+static uint32_t g_dofW = 0, g_dofH = 0;
 static bool g_prevFrameHadScene = false;       // the previous frame rendered a full-frame 3D scene
 // Frozen screens hold an image DLSS (+NR) already produced: the seed, or the other final texture, or simply the final
 // texture left as it was. Evaluating DLSS on such a frame would run NR a second time on it (visible as a sharpness
@@ -771,6 +791,121 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
     g_uiMaskFrames++; cbSlot++;
 }
 
+// ---- DoF after DLSS (PostDof) --------------------------------------------------------------------------------------
+static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
+static ID3D12DescriptorHeap* g_dofHeap = nullptr; static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr; static uint32_t g_dofCbSlot = 0;
+static bool g_dofReady = false, g_dofInitTried = false;
+struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], pad[2]; };
+static bool dof_init()
+{
+    if (g_dofInitTried) return g_dofReady;
+    g_dofInitTried = true;
+    D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_DESCRIPTOR_RANGE uavRange = { D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+    D3D12_ROOT_PARAMETER params[3] = {};
+    params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[1].DescriptorTable = { 1, &srvRange }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; params[2].DescriptorTable = { 1, &uavRange }; params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_STATIC_SAMPLER_DESC samp = {}; samp.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR; samp.AddressU = samp.AddressV = samp.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP; samp.MaxLOD = D3D12_FLOAT32_MAX; samp.ShaderRegister = 0; samp.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    D3D12_ROOT_SIGNATURE_DESC rs = { 3, params, 1, &samp, D3D12_ROOT_SIGNATURE_FLAG_NONE };
+    ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
+    HRESULT hr = D3D12SerializeRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &err);
+    if (FAILED(hr)) { logmsg("PostDof: root signature serialize failed 0x%08lX %s", (unsigned long)hr, err ? (const char*)err->GetBufferPointer() : ""); return false; }
+    hr = g_d3d->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&g_dofRootSig)); blob->Release();
+    if (FAILED(hr)) { logmsg("PostDof: CreateRootSignature failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pso = {}; pso.pRootSignature = g_dofRootSig;
+    pso.CS = { g_dof_coc_cs, sizeof(g_dof_coc_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofCocPso)); if (FAILED(hr)) { logmsg("PostDof: CoC PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    pso.CS = { g_dof_gather_cs, sizeof(g_dof_gather_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofGatherPso)); if (FAILED(hr)) { logmsg("PostDof: gather PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    pso.CS = { g_dof_composite_cs, sizeof(g_dof_composite_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofCompositePso)); if (FAILED(hr)) { logmsg("PostDof: composite PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 16, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // 3 passes x [srv0, srv1, uav0, uav1]
+    hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_dofHeap)); if (FAILED(hr)) { logmsg("PostDof: descriptor heap failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
+    D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = 4 * 256; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    hr = g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_dofCbRes)); if (FAILED(hr)) { logmsg("PostDof: constant buffer failed 0x%08lX", (unsigned long)hr); return false; }
+    D3D12_RANGE none = { 0, 0 }; g_dofCbRes->Map(0, &none, reinterpret_cast<void**>(&g_dofCbPtr));
+    g_dofReady = g_dofCbPtr != nullptr;
+    logmsg("PostDof: compute passes ready (%s)", g_dofReady ? "ok" : "map failed");
+    return g_dofReady;
+}
+// Runs the game's DoF on g_out (in unordered_access state, left in that state). kx/ky = dynamic-resolution scale of the
+// depth copy (its scene sub-rect over the full grid). Returns false when a required input is missing.
+static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t outH, DXGI_FORMAT outFmt, float kx, float ky)
+{
+    if (!dof_init() || !g_out.handle || !g_dofDepth || !is_live(g_dofDepth)) return false;
+    const uint32_t hw = (outW + 1) / 2, hh = (outH + 1) / 2;
+    if (g_dofW != hw || g_dofH != hh) {
+        if (g_dofCoc.handle) { dev->destroy_resource(g_dofCoc); g_dofCoc = { 0 }; }
+        if (g_dofBlur.handle) { dev->destroy_resource(g_dofBlur); g_dofBlur = { 0 }; }
+        const resource_desc td(hw, hh, 1, 1, format::r16g16b16a16_float, 1, memory_heap::default_, resource_usage::shader_resource | resource_usage::unordered_access);
+        if (!dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofCoc) || !dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofBlur)) { logmsg("PostDof: half-res textures failed"); return false; }
+        dev->set_resource_name(g_dofCoc, "MGS4DLSS DoF CoC"); dev->set_resource_name(g_dofBlur, "MGS4DLSS DoF blur");
+        g_dofCocState = g_dofBlurState = resource_usage::unordered_access; g_dofW = hw; g_dofH = hh;
+        logmsg("PostDof: half-res textures %ux%u", hw, hh);
+    }
+    const resource depth = { g_dofDepth };
+    const resource_desc dd = dev->get_resource_desc(depth);
+    DXGI_FORMAT depthFmt = static_cast<DXGI_FORMAT>(dd.texture.format);
+    if (depthFmt == DXGI_FORMAT_R32_TYPELESS) depthFmt = DXGI_FORMAT_R32_FLOAT; else if (depthFmt == DXGI_FORMAT_R16_TYPELESS) depthFmt = DXGI_FORMAT_R16_UNORM; else if (depthFmt == DXGI_FORMAT_R24G8_TYPELESS) depthFmt = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    // constants: the game's rows + ours. Spiral step: the game steps c17.x/(1280,720) in the UV of a 3840-wide texture
+    // whose top-left quadrant holds the half-res image, i.e. 2x that in the half-res image's own UV; a dynamic-resolution
+    // sub-rect is stretched to the full grid afterwards, so the step grows by 1/k there.
+    DofCB cb = {}; memcpy(cb.c, g_dofCb, sizeof(cb.c)); memcpy(cb.g, g_dofCbG, sizeof(cb.g));
+    cb.halfSize[0] = float(hw); cb.halfSize[1] = float(hh); cb.fullSize[0] = float(outW); cb.fullSize[1] = float(outH);
+    // depth sampling exactly as the game's CoC pass: uv = (2 * halfResPixel + c12.xy) / c16.xy
+    const float* c12 = g_dofCb + 4 * 4; const float* c16 = g_dofCb + 8 * 4;
+    cb.depthScale[0] = kx; cb.depthScale[1] = ky; cb.depthOff[0] = c12[0]; cb.depthOff[1] = c12[1];
+    cb.depthSize[0] = c16[0] >= 1.0f ? c16[0] : float(dd.texture.width); cb.depthSize[1] = c16[1] >= 1.0f ? c16[1] : float(dd.texture.height);
+    const float c17x = g_dofCbG[9 * 4];
+    cb.stepUV[0] = g_cfgDofStep * c17x / (1280.0f * (kx > 0.05f ? kx : 1.0f)); cb.stepUV[1] = g_cfgDofStep * c17x / (720.0f * (ky > 0.05f ? ky : 1.0f));
+    cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius;
+    const uint32_t cbIdx = g_dofCbSlot++ % 4;
+    memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
+    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu0 = g_dofHeap->GetCPUDescriptorHandleForHeapStart(); D3D12_GPU_DESCRIPTOR_HANDLE gpu0 = g_dofHeap->GetGPUDescriptorHandleForHeapStart();
+    auto cpu = [&](int i) { D3D12_CPU_DESCRIPTOR_HANDLE h = cpu0; h.ptr += SIZE_T(i) * inc; return h; };
+    auto gpu = [&](int i) { D3D12_GPU_DESCRIPTOR_HANDLE h = gpu0; h.ptr += UINT64(i) * inc; return h; };
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvOut = {}; srvOut.Format = outFmt; srvOut.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srvOut.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srvOut.Texture2D.MipLevels = 1;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDep = srvOut; srvDep.Format = depthFmt;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvHalf = srvOut; srvHalf.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavHalf = {}; uavHalf.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; uavHalf.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavOut = uavHalf; uavOut.Format = outFmt;
+    ID3D12Resource* outRes = reinterpret_cast<ID3D12Resource*>(g_out.handle); ID3D12Resource* depRes = reinterpret_cast<ID3D12Resource*>(depth.handle);
+    ID3D12Resource* cocRes = reinterpret_cast<ID3D12Resource*>(g_dofCoc.handle); ID3D12Resource* blurRes = reinterpret_cast<ID3D12Resource*>(g_dofBlur.handle);
+    // pass 1: [out srv, depth srv, coc uav, coc uav]
+    g_d3d->CreateShaderResourceView(outRes, &srvOut, cpu(0)); g_d3d->CreateShaderResourceView(depRes, &srvDep, cpu(1));
+    g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, cpu(2)); g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, cpu(3));
+    // pass 2: [coc srv, coc srv, blur uav, blur uav]
+    g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(4)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(5));
+    g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(6)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(7));
+    // pass 3: [blur srv, blur srv, out uav, out uav]
+    g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(9));
+    g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(10)); g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(11));
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    ID3D12DescriptorHeap* heaps[1] = { g_dofHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_dofRootSig);
+    native->SetComputeRootConstantBufferView(0, g_dofCbRes->GetGPUVirtualAddress() + cbIdx * 256);
+    // pass 1
+    cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel);
+    cmd->barrier(depth, resource_usage::shader_resource_pixel, resource_usage::shader_resource_non_pixel);
+    if (g_dofCocState != resource_usage::unordered_access) { cmd->barrier(g_dofCoc, g_dofCocState, resource_usage::unordered_access); g_dofCocState = resource_usage::unordered_access; }
+    native->SetPipelineState(g_dofCocPso); native->SetComputeRootDescriptorTable(1, gpu(0)); native->SetComputeRootDescriptorTable(2, gpu(2));
+    native->Dispatch((hw + 7) / 8, (hh + 7) / 8, 1);
+    cmd->barrier(depth, resource_usage::shader_resource_non_pixel, resource_usage::shader_resource_pixel);
+    // pass 2
+    cmd->barrier(g_dofCoc, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_dofCocState = resource_usage::shader_resource_non_pixel;
+    if (g_dofBlurState != resource_usage::unordered_access) { cmd->barrier(g_dofBlur, g_dofBlurState, resource_usage::unordered_access); g_dofBlurState = resource_usage::unordered_access; }
+    native->SetPipelineState(g_dofGatherPso); native->SetComputeRootDescriptorTable(1, gpu(4)); native->SetComputeRootDescriptorTable(2, gpu(6));
+    native->Dispatch((hw + 7) / 8, (hh + 7) / 8, 1);
+    // pass 3
+    cmd->barrier(g_dofBlur, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_dofBlurState = resource_usage::shader_resource_non_pixel;
+    cmd->barrier(g_out, resource_usage::shader_resource_non_pixel, resource_usage::unordered_access);
+    native->SetPipelineState(g_dofCompositePso); native->SetComputeRootDescriptorTable(1, gpu(8)); native->SetComputeRootDescriptorTable(2, gpu(10));
+    native->Dispatch((outW + 7) / 8, (outH + 7) / 8, 1);
+    cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::unordered_access);   // UAV -> UAV: make the writes visible to the copy that follows
+    return true;
+}
+
 // Debug: paint the motion-vector field into g_out (must be in unordered_access state).
 // HUD-less colour: g_hudless (a copy of the DLAA output, in UAV state) gets the pre-HUD capture wherever the UI layer has content.
 static void hudless_dispatch(command_list* cmd, uint32_t w, uint32_t h, DXGI_FORMAT fmt)
@@ -996,6 +1131,9 @@ static void release_dlss_resources(device* dev)
     if (g_keep.handle) { dev->destroy_resource(g_keep); g_keep = { 0 }; g_keepValid = false; }
     if (g_hudless.handle) { dev->destroy_resource(g_hudless); g_hudless = { 0 }; }
     if (g_scratch.handle) { dev->destroy_resource(g_scratch); g_scratch = { 0 }; }
+    if (g_dofCoc.handle) { dev->destroy_resource(g_dofCoc); g_dofCoc = { 0 }; }
+    if (g_dofBlur.handle) { dev->destroy_resource(g_dofBlur); g_dofBlur = { 0 }; }
+    g_dofW = g_dofH = 0;
 }
 
 // Whether an NGX-hooking add-on (renodx-dlss5) has detoured the NGX D3D12 CreateFeature export: Detours rewrites the
@@ -1355,6 +1493,11 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         else { if (++g_evalCount == 1 || (g_cfgLogEveryN && g_evalCount % g_cfgLogEveryN == 0)) logmsg("NGX EvaluateFeature ok (#%u)", g_evalCount); }
     }
 
+    if (g_cfgPostDof && g_dofSeenThisFrame && g_dofCbValid && g_dofCbGValid && !upscale && !frozenPass && !g_windowMode && !NVSDK_NGX_FAILED(r)
+        && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9 && g_cfgDRS != 2) {
+        const float kx = drsActive ? float(subW) / float(cd.texture.width) : 1.0f, ky = drsActive ? float(subH) / float(cd.texture.height) : 1.0f;
+        if (dof_apply(cmd, dev, outW, outH, static_cast<DXGI_FORMAT>(cd.texture.format), kx, ky)) g_dofFrames++; else g_dofMissed++;
+    } else if (g_cfgPostDof && g_dofSeenThisFrame) g_dofMissed++;
     objmv::mark_frame_end(native);
 
     if (fg::status().initialised && g_cfgFgMode != 0) {
@@ -1737,9 +1880,37 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 if (da.count <= 8 || sw >= 640) {
                     std::string big;   // every frame-sized texture bound in the first two tables
                     for (int p = 1; p < 3; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width >= 640) { char b[64]; snprintf(b, sizeof(b), " r%d[%d]=%p %ux%u", p, i, (void*)r.handle, d.texture.width, d.texture.height); big += b; } } }
-                    frz_record("f%u draw rt=%p %ux%u%s vp=(%.0f,%.0f %.0fx%.0f) n=%u ds=%p depthOn=%d pso=%p src0=%p %ux%u%s |%s [fullVp %d win %d inj %d]", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h,
-                               s.rt.handle == g_finalRt[0] ? " FINAL0" : (s.rt.handle == g_finalRt[1] ? " FINAL1" : ""), s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (void*)s.ds.handle, (int)depthTested, (void*)s.pso,
+                    frz_record("f%u draw rt=%p %ux%u%s vp=(%.0f,%.0f %.0fx%.0f) n=%u ds=%p depthOn=%d pso=%p ps=%016llx src0=%p %ux%u%s |%s [fullVp %d win %d inj %d]", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h,
+                               s.rt.handle == g_finalRt[0] ? " FINAL0" : (s.rt.handle == g_finalRt[1] ? " FINAL1" : ""), s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (void*)s.ds.handle, (int)depthTested, (void*)s.pso, (unsigned long long)objmv::pso_ps_hash(s.pso),
                                (void*)src0.handle, sw, sh, "", big.c_str(), (int)g_sceneVpFrameValid, (int)g_winVpFrameValid, (int)g_injectedThisFrame);
+                }
+            }
+            if (g_cfgPostDof && !g_cfgPrePost && g_dofPrevOk && da.count <= 8 && s.rt_w >= 1280 && g_cfgEnabled) {
+                // The game's DoF: CoC pass (half-res viewport, samples the depth copy) -> spiral gather -> blend over the
+                // sharp image. Skip all three; keep the constants and the depth texture for our own pass after DLSS.
+                const uint64_t ph = objmv::pso_ps_hash(s.pso);
+                if (ph == PS_DOF_COC || ph == PS_DOF_GATHER || ph == PS_DOF_COMPOSITE) {
+                    if (ph == PS_DOF_COC) {
+                        float cb[18 * 4];
+                        if (read_cbv(s, 2, cb, 18 * 4)) { memcpy(g_dofCb, cb + 8 * 4, sizeof(g_dofCb)); g_dofCbValid = true; }
+                        resource dep = s.table_set[1] ? resolve_descriptor(dev, s.tables[1], 1) : resource{ 0 };
+                        if (dep.handle && is_live(dep.handle)) g_dofDepth = dep.handle;
+                        resource_desc rd = dev->get_resource_desc(s.rt);
+                        g_dofCocUnorm = rd.texture.format == format::r8g8b8a8_unorm || rd.texture.format == format::b8g8r8a8_unorm || rd.texture.format == format::r8g8b8a8_unorm_srgb;
+                        g_dofCocSeen = true;
+                        static uint32_t nlog = 0;
+                        if (nlog++ < 3) {
+                            logmsg("PostDof: CoC pass f%u into %s vp=(%.0f,%.0f %.0fx%.0f), depth copy %s, cb rows 8..17:", g_frame, desc_str(dev, s.rt).c_str(), s.vp.x, s.vp.y, s.vp.width, s.vp.height, dep.handle ? desc_str(dev, dep).c_str() : "none");
+                            for (int r = 0; r < 10 && g_dofCbValid; ++r) logmsg("   c%d = (%.4f %.4f %.4f %.4f)", 8 + r, g_dofCb[r * 4], g_dofCb[r * 4 + 1], g_dofCb[r * 4 + 2], g_dofCb[r * 4 + 3]);
+                        }
+                    } else if (ph == PS_DOF_GATHER) {
+                        float cb[18 * 4];
+                        if (read_cbv(s, 2, cb, 18 * 4)) { memcpy(g_dofCbG, cb + 8 * 4, sizeof(g_dofCbG)); g_dofCbGValid = true; }
+                        static uint32_t nlog = 0;
+                        if (nlog++ < 2 && g_dofCbGValid) { logmsg("PostDof: gather pass f%u into %s vp=(%.0f,%.0f %.0fx%.0f), cb rows 8..17:", g_frame, desc_str(dev, s.rt).c_str(), s.vp.x, s.vp.y, s.vp.width, s.vp.height); for (int r = 0; r < 10; ++r) logmsg("   c%d = (%.5f %.5f %.5f %.5f)", 8 + r, g_dofCbG[r * 4], g_dofCbG[r * 4 + 1], g_dofCbG[r * 4 + 2], g_dofCbG[r * 4 + 3]); }
+                    } else if (ph == PS_DOF_COMPOSITE) g_dofSeenThisFrame = true;
+                    g_skipThisDraw = true; g_dofSkipped++;
+                    return;
                 }
             }
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
@@ -2152,6 +2323,16 @@ static void reload_config()
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 1, g_iniPath);
     g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 1, g_iniPath);
     g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);
+    {
+        const int pd = GetPrivateProfileIntA("DLSS", "PostDof", 0, g_iniPath);
+        if (pd != g_cfgPostDof) { g_cfgPostDof = pd; logmsg("PostDof -> %d (%s)", pd, pd ? "the game's DoF draws are skipped and the DoF re-applied on the DLSS output" : "the game's DoF stays in its post chain"); }
+        char v[32]; GetPrivateProfileStringA("DLSS", "DofStep", "2.0", v, sizeof(v), g_iniPath); g_cfgDofStep = (float)atof(v);
+        GetPrivateProfileStringA("DLSS", "DofRadius", "1.0", v, sizeof(v), g_iniPath); g_cfgDofRadius = (float)atof(v);
+    }
+    {   // DumpShaders=1: write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (post-pass identification)
+        static int last = -1; const int dump = GetPrivateProfileIntA("DLSS", "DumpShaders", 0, g_iniPath);
+        if (dump != last) { last = dump; char dir[MAX_PATH]; snprintf(dir, MAX_PATH, "%s\\logs\\shaders", g_gameDir); objmv::set_shader_dump_dir(dump ? dir : ""); logmsg("shader dump %s", dump ? dir : "off"); }
+    }
     g_cfgHudMin = GetPrivateProfileIntA("DLSS", "HudMinDraws", 25, g_iniPath);
     g_cfgJitterSignX = GetPrivateProfileIntA("DLSS", "JitterSignX", 1, g_iniPath) < 0 ? -1.0f : 1.0f;
     g_cfgJitterSignY = GetPrivateProfileIntA("DLSS", "JitterSignY", -1, g_iniPath) < 0 ? -1.0f : 1.0f;
@@ -2207,10 +2388,11 @@ static void frame_rollover()
     if (dumping() && !g_blockHist.empty()) report_blocks();
     g_viewEvents = 0; g_copyEvents = 0;
     if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
+    g_dofPrevOk = g_finalPreHudThisFrame && !g_windowInjectedThisFrame && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9;
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_dofSeenThisFrame = false; g_dofCocSeen = false; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2259,6 +2441,7 @@ static void frame_rollover()
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
@@ -2386,6 +2569,9 @@ static void draw_overlay(effect_runtime*)
     }
     bool jit = g_cfgJitter != 0;
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }
+    bool pdof = g_cfgPostDof != 0;
+    if (ImGui::Checkbox("Depth of field after DLSS / NR (PostDof: the game's DoF draws are skipped and re-applied on the DLSS output)", &pdof)) { g_cfgPostDof = pdof ? 1 : 0; write_ini_int("PostDof", g_cfgPostDof); }
+    if (g_cfgPostDof) ImGui::Text("   DoF frames re-applied %u | draws skipped %u | skipped without re-apply %u | CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofCbValid ? "captured" : "none");
     bool mvs = g_cfgMotionVectors != 0;
     if (ImGui::Checkbox("Camera motion vectors (reprojected from depth)", &mvs)) { g_cfgMotionVectors = mvs ? 1 : 0; write_ini_int("MotionVectors", g_cfgMotionVectors); }
     const char* ppNames[] = { "Auto (composite when a DLSS post-processing add-on such as DLSS 5 NR is loaded, else pre-post)", "Pre-post: DLAA before post-process/HUD", "Composite: DLAA on the final image" };
