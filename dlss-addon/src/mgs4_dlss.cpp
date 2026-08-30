@@ -232,6 +232,7 @@ static int g_cfgSceneLog = 1;
 static int g_cfgHudMin = 25;   // a cutscene can issue a handful of 2D draws; gameplay's HUD is dozens
 static bool g_uiClearedThisFrame = false;
 static bool g_finalSceneWritten = false;      // this frame's scene has been written into the final texture (HUD comes after)
+static uint64_t g_finalSceneRt = 0;           // ... and into which texture (the final image is double-buffered)
 static uint32_t g_uiPreSceneThisFrame = 0;
 // pre-HUD capture of the final texture (taken right before the first HUD draw) and the HUD-less image built from the
 // DLAA output + that capture under the UI layer (DLSS-G derives the UI from backbuffer - HUD-less when its own UI
@@ -1622,19 +1623,27 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // HUD draws always use the full viewport; anything drawn with the scene's (dynamic-resolution) viewport
                     // is scene-space (tints, vignettes, the upscale) whatever its vertex count.
                     const bool fullVp = s.vp_valid && fabsf(s.vp.width - float(g_dlssW)) < 2.0f && fabsf(s.vp.height - float(g_dlssH)) < 2.0f;
-                    bool post = !fullVp, big = false;
-                    if (da.count <= 4) {
-                        for (int p = 1; p < 5 && !big; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !big; ++i) {
-                            resource r = resolve_descriptor(dev, s.tables[p], i);
-                            if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width * 2 >= g_dlssW && d.texture.height * 2 >= g_dlssH) big = true; }
-                        }
-                        post = post || big;
+                    // scene-sized input: at least half the frame in both dimensions with the frame's aspect (HUD atlases are
+                    // 2048x4096 and the like - large, but not frame-shaped)
+                    auto sceneSized = [&](const resource_desc& d) {
+                        if (d.type != resource_type::texture_2d || d.texture.width * 2 < g_dlssW || d.texture.height * 2 < g_dlssH) return false;
+                        const float a = float(d.texture.width) / float(d.texture.height), fa = float(g_dlssW) / float(g_dlssH);
+                        return fabsf(a - fa) < 0.2f;
+                    };
+                    bool big = false, slot0big = false;
+                    for (int p = 1; p < 5 && !big; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !big; ++i) {
+                        resource r = resolve_descriptor(dev, s.tables[p], i);
+                        if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (sceneSized(d)) { big = true; if (p == 1 && i == 0) slot0big = true; } }
                     }
-                    // The final texture receives the scene (the fullscreen pass that samples a scene-sized input, i.e. the
-                    // game's upscale/tonemap) before the HUD. Until that has happened this frame, nothing into it is HUD:
-                    // the pre-HUD capture must not be taken from a texture still holding the previous frame.
-                    if (post && big) g_finalSceneWritten = true;
-                    if (!post && !g_finalSceneWritten) { post = true; g_uiPreSceneThisFrame++; }
+                    // Not HUD: anything with the scene's (dynamic-resolution) viewport; 3/4-vertex fullscreen passes (HUD is
+                    // 6-vertex quads and 2-vertex lines); quads whose primary input is a scene-sized texture (the port's
+                    // motion feedback quad, drawn into the other final texture).
+                    bool post = !fullVp || da.count == 3 || da.count == 4 || (da.count >= 6 && slot0big);
+                    // The final texture receives the scene (the fullscreen pass at the full viewport that samples a
+                    // scene-sized input, i.e. the game's upscale/tonemap) before the HUD; remember which texture, since
+                    // the final image is double-buffered and the other one takes scene-space effect draws this frame.
+                    if (post && big && fullVp && da.count <= 4) { g_finalSceneWritten = true; g_finalSceneRt = s.rt.handle; }
+                    if (!post && (!g_finalSceneWritten || s.rt.handle != g_finalSceneRt)) { post = true; g_uiPreSceneThisFrame++; }
                     if (post) g_uiPostSkippedThisFrame++;
                     else if (!g_injectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2) {
                         // Composite mode with a HUD: run DLSS on the final texture now, before its first HUD draw. DLSS (and
@@ -1864,7 +1873,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);

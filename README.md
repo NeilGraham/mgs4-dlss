@@ -213,13 +213,16 @@ composite insertion as before. `DebugMode=7` drops the HUD draws in this mode (t
 shows the UI layer of the previous frame (it is replayed after the insertion); the magenta test (`DebugMode=1`) is
 skipped at this insertion point.
 
-HUD draws are told apart from the post-process passes into the same texture by shape: HUD elements are drawn with
-the full viewport after the fullscreen pass that writes the scene into the final texture; anything drawn with the
-scene's (dynamic-resolution) viewport is scene-space whatever its vertex count, and <= 4-vertex fullscreen draws
-that sample a scene-sized input are post passes. Nothing counts as HUD until that scene write has happened. (The
-earlier "samples anything scene-sized" test mis-filed about a third of the HUD draws - descriptor slots a HUD shader
-does not use carry stale scene-sized textures - which made the UI layer flicker; a scene-space tint quad
-classified as HUD made the HUD-less view shrink with the dynamic resolution and flash during camera turns.)
+HUD draws are told apart from the post-process passes by shape and place: HUD elements are 6-vertex quads (and
+2-vertex lines) drawn with the full viewport, into the final texture that received this frame's scene write (the
+3/4-vertex fullscreen pass at the full viewport sampling a scene-sized input - the game's upscale/tonemap), after
+it. Not HUD: anything drawn with the scene's (dynamic-resolution) viewport, 3/4-vertex fullscreen passes, quads
+whose primary input is scene-sized, and anything drawn into the *other* final texture - the final image is
+double-buffered and during camera motion the port draws a full-viewport quad that samples the scene into the other
+one (a motion feedback effect). "Scene-sized" means at least half the frame with the frame's aspect (HUD atlases are
+2048x4096). (Earlier heuristics mis-filed a third of the HUD draws - stale scene-sized descriptors in unused slots -
+and, once, that feedback quad: DLSS then ran on the wrong texture for the frame, the real one was presented raw,
+and the quad's scene copy faded into the UI layer whenever the camera moved.)
 
 `UIMask=1` (live) is the fallback for the composite insertion: where the replayed UI layer holds bright HUD detail,
 DLSS's bias-current-colour mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
