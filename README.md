@@ -79,6 +79,8 @@ DofStep=2.0              ; PostDof tuning: spiral step scale (2.0 = the game's b
 DofRadius=1.0            ; PostDof tuning: multiplier on the game's circle of confusion
 DofJitterSign=1          ; PostDof: read the depth at the frame's camera-jitter offset (the depth copy is jittered, the DLSS output is not); 0 = off
 DofMask=1                ; PostDof: keep title cards / captions drawn after the game's DoF sharp (0 = diagnostics)
+DofSubRect=1             ; PostDof also on dynamic-resolution frames (exact per-frame scale from the CoC pass viewport); 0 = leave those frames to the game's DoF
+PreWarm=1                ; create the DLSS feature (+ the NR add-on's) and run warm-up evaluations on no-3D frames (title / loading screens) so the setup stall is not in the first cutscene frames
 DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
 FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
 FGTargetFps=120
@@ -425,6 +427,20 @@ scene texture whose input is not the scene) are replayed into a mask layer, and 
 otherwise they would be blurred with the surface behind them. The stats line reports `PostDof: frames re-applied N,
 draws skipped M, skipped without re-apply K, sub-rect frames left to the game S, overlay draws masked O`; K should stay 0.
 Debug views: `DebugMode=10` the blurred layer, `11` its coverage, `12` the overlay mask.
+Dynamic resolution: the CoC pass's viewport is exactly half the scene sub-rect, so the scale is known per frame
+without the add-on's 20-frame viewport hysteresis; the depth sample, the spiral step and the overlay mask are scaled by
+it and PostDof stays on through sub-rect frames (`DofSubRect=0` leaves them to the game's DoF instead). The CoC depth
+sample is read at the frame's camera-jitter offset (`DofJitterSign`): the depth copy is jittered, the DLSS output is not,
+and without that every blur boundary wobbled by a sub-pixel per frame.
+
+### Pre-warm (`PreWarm=1`)
+
+The DLSS feature is normally created at the first 3D frame, and the DLSS 5 NR add-on creates its own feature inside
+that call and initialises its model on the first evaluations - about half a second of stalls and dropped resolution
+right at the start of the first cutscene. With `PreWarm=1` the add-on creates the feature at the swapchain size (DLAA)
+and runs 12 evaluations on its own scratch textures during frames without a 3D scene (the title / loading screens,
+after 30 such frames), restoring the game's state after each; the NGX-hooking add-on's one re-create happens there too.
+Log lines `pre-warm: ...` show the timings; the stats line counts `pre-warm evaluations`.
 `DumpShaders=1` writes every pipeline's bytecode to `logs\shaders` (with `TraceFreeze=1` + `DebugMode=3` the freeze
 trace lists each full-frame draw with its `ps=` hash) - that is how the three passes were found.
 

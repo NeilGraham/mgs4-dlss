@@ -213,7 +213,9 @@ static float g_dofCbG[10 * 4] = {}; static bool g_dofCbGValid = false; // ... an
 static uint64_t g_dofDepth = 0;                                          // the depth copy the CoC pass sampled (t1)
 static bool g_dofCocSeen = false, g_dofSeenThisFrame = false, g_dofCocUnorm = false;
 static bool g_dofPrevOk = false;
-static bool g_dofSkipFrame = false;      // decided at this frame's CoC draw: the game renders at full resolution -> its DoF draws are skipped
+static bool g_dofSkipFrame = false;      // decided at this frame's CoC draw: the game's DoF draws are skipped (re-applied after DLSS)
+static float g_dofKx = 1.0f, g_dofKy = 1.0f;   // this frame's dynamic-resolution scale, exact: the CoC pass viewport is half the scene sub-rect
+static int g_cfgDofSubRect = 1;          // 1 = PostDof also on sub-rect frames (depth / step / mask scaled by the exact k), 0 = leave those to the game
 static uint32_t g_dofSubRectFrames = 0;
 // Overlays the game draws AFTER its DoF (title cards, captions: quads into the graded scene texture between the DoF
 // combine and the upscale into the final texture) must stay sharp: they are replayed into a mask layer that the
@@ -222,6 +224,11 @@ static const uint64_t PS_DOF_COMBINE = 0xa3e1f0c86ca4e96dull;
 static bool g_dofCombineSeen = false, g_dofMaskCleared = false;
 static resource g_dofMask = { 0 }; static resource_view g_dofMaskRtv = { 0 }; static resource_usage g_dofMaskState = resource_usage::render_target; static format g_dofMaskFmt = format::unknown;
 static uint32_t g_dofOverlaysThisFrame = 0, g_dofOverlays = 0;
+// Pre-warm (PreWarm=1): the DLSS feature (and with it the DLSS 5 NR add-on's feature, created inside our CreateFeature)
+// plus a few evaluations are done on frames without a 3D scene - the title / loading screens - so the model setup and
+// first-evaluation stalls do not land in the first half second of the first cutscene.
+static int g_cfgPreWarm = 1;
+static bool g_warmDone = false; static uint32_t g_warmEvals = 0, g_noSceneFrames = 0;
 static bool g_dofReady = false, g_dofInitTried = false;   // frames left to the game's DoF because the scene was a dynamic-resolution sub-rect   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
 static resource g_dofCoc = { 0 }, g_dofBlur = { 0 }; static resource_usage g_dofCocState = resource_usage::unordered_access, g_dofBlurState = resource_usage::unordered_access;
@@ -805,7 +812,7 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
 // ---- DoF after DLSS (PostDof) --------------------------------------------------------------------------------------
 static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
 static ID3D12DescriptorHeap* g_dofHeap = nullptr; static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr; static uint32_t g_dofCbSlot = 0;
-struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask, depthJitter[2], pad2[2]; };
+struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask, depthJitter[2], maskScale[2]; };
 static bool dof_init()
 {
     if (g_dofInitTried) return g_dofReady;
@@ -867,7 +874,7 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     cb.depthSize[0] = c16[0] >= 1.0f ? c16[0] : float(dd.texture.width); cb.depthSize[1] = c16[1] >= 1.0f ? c16[1] : float(dd.texture.height);
     const float c17x = g_dofCbG[9 * 4];
     cb.stepUV[0] = g_cfgDofStep * c17x / (1280.0f * (kx > 0.05f ? kx : 1.0f)); cb.stepUV[1] = g_cfgDofStep * c17x / (720.0f * (ky > 0.05f ? ky : 1.0f));
-    cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius;
+    cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius; cb.maskScale[0] = kx; cb.maskScale[1] = ky;   // overlays were replayed at the sub-rect viewport
     // the projection jitter shifts the rendered (depth) image by (signX*jx, -signY*jy) render pixels; the depth copy has render-grid texels
     cb.depthJitter[0] = g_cfgJitter ? float(g_cfgDofJitterSign) * g_cfgJitterSignX * g_jitterX : 0.0f; cb.depthJitter[1] = g_cfgJitter ? float(g_cfgDofJitterSign) * -g_cfgJitterSignY * g_jitterY : 0.0f;
     cb.debugView = g_cfgDebugMode == 10 ? 1.0f : (g_cfgDebugMode == 11 ? 2.0f : (g_cfgDebugMode == 12 ? 3.0f : 0.0f));   // DoF layer views
@@ -1520,11 +1527,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
 
     if (g_cfgPostDof && g_dofSeenThisFrame && g_dofCbValid && g_dofCbGValid && !upscale && !frozenPass && !g_windowMode && !NVSDK_NGX_FAILED(r)
         && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9 && g_cfgDRS != 2) {
-        const float kx = drsActive ? float(subW) / float(cd.texture.width) : 1.0f, ky = drsActive ? float(subH) / float(cd.texture.height) : 1.0f;
         // g_out is always the DLSS output size; the colour texture must match it (a smaller texture - e.g. a 1920x1080 seed -
         // would squeeze the blur layer into the top-left quadrant of the output)
         if (outW != g_dlssOutW || outH != g_dlssOutH) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: skipped on frame %u - colour %ux%u is not the DLSS output size %ux%u", g_frame, outW, outH, g_dlssOutW, g_dlssOutH); g_dofMissed++; }
-        else if (dof_apply(cmd, dev, g_dlssOutW, g_dlssOutH, static_cast<DXGI_FORMAT>(cd.texture.format), kx, ky)) g_dofFrames++; else g_dofMissed++;
+        else if (dof_apply(cmd, dev, g_dlssOutW, g_dlssOutH, static_cast<DXGI_FORMAT>(cd.texture.format), g_dofKx, g_dofKy)) g_dofFrames++; else g_dofMissed++;
     } else if (g_cfgPostDof && g_dofSeenThisFrame) g_dofMissed++;
     objmv::mark_frame_end(native);
 
@@ -1884,6 +1890,44 @@ static void remember_internal_res(uint32_t w, uint32_t h)
 
 struct draw_args { bool indexed; uint32_t count, instances, first, first_instance; int32_t vertex_offset; };
 
+// One warm-up step on a frame without a 3D scene: create the resources + the DLSS feature at the swapchain size (DLAA)
+// and run an evaluation on our own scratch textures. The game's state is restored afterwards (the draw goes on as usual).
+static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
+{
+    if (g_scaling || g_bbW == 0 || g_bbH == 0) { g_warmDone = true; return; }   // only the DLAA layout is known in advance
+    LARGE_INTEGER f, t0, t1; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
+    const format fmt = g_dlssFmt != format::unknown ? g_dlssFmt : format::r8g8b8a8_unorm;
+    if (!g_dlss) {
+        if (!ensure_resources(dev, cmd, g_bbW, g_bbH, g_bbW, g_bbH, fmt)) { logmsg("pre-warm: feature creation failed - giving up"); g_warmDone = true; return; }
+        QueryPerformanceCounter(&t1);
+        logmsg("pre-warm: DLSS feature created on a no-3D frame (f%u, %.0f ms)", g_frame, double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
+        restore_state(dev, cmd, s);
+        return;   // the evaluations start next frame (NGX skips the create frame anyway)
+    }
+    if (!g_hudless.handle || !g_depthFull.handle || !g_mv.handle || !g_out.handle) { g_warmDone = true; return; }
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    if (g_hudlessState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_hudless, g_hudlessState, resource_usage::shader_resource_non_pixel); g_hudlessState = resource_usage::shader_resource_non_pixel; }
+    if (g_depthFullState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_depthFull, g_depthFullState, resource_usage::shader_resource_non_pixel); g_depthFullState = resource_usage::shader_resource_non_pixel; }
+    if (g_mvState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_mv, g_mvState, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel; }
+    if (g_outState != resource_usage::unordered_access) { cmd->barrier(g_out, g_outState, resource_usage::unordered_access); g_outState = resource_usage::unordered_access; }
+    NVSDK_NGX_D3D12_DLSS_Eval_Params ep = {};
+    ep.Feature.pInColor = reinterpret_cast<ID3D12Resource*>(g_hudless.handle);
+    ep.Feature.pInOutput = reinterpret_cast<ID3D12Resource*>(g_out.handle);
+    ep.Feature.InSharpness = g_cfgSharpness100 / 100.0f;
+    ep.pInDepth = reinterpret_cast<ID3D12Resource*>(g_depthFull.handle);
+    ep.pInMotionVectors = reinterpret_cast<ID3D12Resource*>(g_mv.handle);
+    ep.InRenderSubrectDimensions = NVSDK_NGX_Dimensions{ g_dlssW, g_dlssH };
+    ep.InReset = 1; ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f; ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
+    const NVSDK_NGX_Result r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
+    QueryPerformanceCounter(&t1);
+    g_warmEvals++; g_evalCount++;
+    logmsg("pre-warm: evaluation %u on a no-3D frame (f%u) -> %s, %.1f ms CPU", g_warmEvals, g_frame, ngx_str(r), double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
+    // an NGX-hooking add-on that only saw our create after installing its hooks gets the one re-create here, off-screen
+    if (!g_recreated && g_autoRecreateAt && g_evalCount >= g_autoRecreateAt) { g_recreated = true; g_oldFeature = g_dlss; g_oldFeatureFrame = g_frame; g_dlss = nullptr; logmsg("pre-warm: re-creating the DLSS feature for the NGX-hooking add-on (off-screen)"); }
+    if (NVSDK_NGX_FAILED(r) || g_warmEvals >= 12) { g_warmDone = true; logmsg("pre-warm: done (%u evaluations)", g_warmEvals); }
+    restore_state(dev, cmd, s);
+}
+
 static void handle_draw(command_list* cmd, const draw_args& da)
 {
     if (t_reentrant) return;   // our replayed draw
@@ -1894,6 +1938,8 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     }
     if (!s.rt.handle || g_bbW == 0) return;
     device* dev = cmd->get_device();
+    if (g_cfgPreWarm && !g_warmDone && g_cfgEnabled && g_noSceneFrames >= 30 && g_sceneDrawsThisFrame == 0 && g_depthOnDrawsThisFrame == 0 && !is_backbuffer(s.rt) && g_ngxParams)
+        prewarm_step(dev, cmd, s);
     if (!is_backbuffer(s.rt)) {
         if (s.rt_w >= 640 && s.rt_h >= 360) {
             if (++g_sceneDrawsThisFrame == 1) { fg::frame_begin(g_frame); objmv::mark_frame_begin(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native())); }
@@ -1921,11 +1967,13 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     if (ph == PS_DOF_COC) {
                         // Dynamic resolution: the game's DoF runs on the scene sub-rect (this pass's viewport is half of it).
                         // The re-apply assumes the full grid, so sub-rect frames keep the game's own DoF (v1.1.1 behaviour).
-                        const bool subRect = !s.vp_valid || s.vp.width < float(s.rt_w / 2) - 1.0f || s.vp.height < float(s.rt_h / 2) - 1.0f;
-                        g_dofSkipFrame = !subRect;
+                        const float kx = s.vp_valid ? s.vp.width * 2.0f / float(s.rt_w) : 1.0f, ky = s.vp_valid ? s.vp.height * 2.0f / float(s.rt_h) : 1.0f;
+                        const bool subRect = !s.vp_valid || kx < 0.999f || ky < 0.999f;
+                        g_dofKx = (s.vp_valid && kx > 0.05f) ? (kx > 1.0f ? 1.0f : kx) : 1.0f; g_dofKy = (s.vp_valid && ky > 0.05f) ? (ky > 1.0f ? 1.0f : ky) : 1.0f;
+                        g_dofSkipFrame = s.vp_valid && (!subRect || g_cfgDofSubRect != 0);
                         if (subRect) {
                             g_dofSubRectFrames++;
-                            static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u scene is a dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u, scene vp %.0fx%.0f) - the game's DoF stays", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_sceneVpFrame.width, g_sceneVpFrame.height);
+                            static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u -> k %.3f x %.3f) - %s", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_dofKx, g_dofKy, g_dofSkipFrame ? "handled at that scale" : "the game's DoF stays");
                         }
                     }
                     if (!g_dofSkipFrame) { if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++; goto dof_not_skipped; }
@@ -2401,6 +2449,8 @@ static void reload_config()
         GetPrivateProfileStringA("DLSS", "DofRadius", "1.0", v, sizeof(v), g_iniPath); g_cfgDofRadius = (float)atof(v);
         g_cfgDofMask = GetPrivateProfileIntA("DLSS", "DofMask", 1, g_iniPath);
         g_cfgDofJitterSign = GetPrivateProfileIntA("DLSS", "DofJitterSign", 1, g_iniPath);
+        g_cfgDofSubRect = GetPrivateProfileIntA("DLSS", "DofSubRect", 1, g_iniPath);
+        g_cfgPreWarm = GetPrivateProfileIntA("DLSS", "PreWarm", 1, g_iniPath);
     }
     {   // DumpShaders=1: write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (post-pass identification)
         static int last = -1; const int dump = GetPrivateProfileIntA("DLSS", "DumpShaders", 0, g_iniPath);
@@ -2465,7 +2515,7 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_noSceneFrames = g_depthOnDrawsThisFrame < 20 ? g_noSceneFrames + 1 : 0; g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2514,7 +2564,7 @@ static void frame_rollover()
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);

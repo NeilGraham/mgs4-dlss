@@ -16,6 +16,6 @@ cbuffer CB : register(b0)
     float  debugView;    // 0 = normal, 1 = blurred layer only, 2 = coverage (grey), 3 = overlay mask
     float  hasMask;      // t1 of the composite = the overlay mask layer (title cards / captions drawn after the game DoF stay sharp)
     float2 depthJitter;  // this frame's camera jitter in depth texels (the depth copy is jittered, the DLSS output is not)
-    float2 pad2;
+    float2 maskScale;    // the overlay mask was drawn at the game's (sub-rect) viewport: mask texel = pixel * maskScale
 };
 SamplerState linClamp : register(s0);
