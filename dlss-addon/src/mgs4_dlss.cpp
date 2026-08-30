@@ -1604,18 +1604,21 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
             // final texture once the 3D scene is in; post-process passes into it are told apart by sampling a scene-sized
             // input (half the frame size or more), HUD draws only sample atlases.
-            const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame) && !depthOn && g_geoRt
+            // HUD candidates: depth-off draws into a final texture. The gate is the scene write into that texture
+            // (g_finalSceneWritten / g_finalSceneRt below), not the in-frame geometry-target heuristics: those compare
+            // against last frame's draw counts and fail on frames where the count swings (rolling, fast turns).
+            const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
                 && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
             const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && !g_cfgPrePost;
             if (uiCandidate) {
-                auto itd = g_depthDrawsPerRt.find(g_geoRt);
+                auto itd = g_geoRt ? g_depthDrawsPerRt.find(g_geoRt) : g_depthDrawsPerRt.end();
                 const uint32_t done = itd != g_depthDrawsPerRt.end() ? itd->second : 0;
                 if (tracing()) {
                     std::string texs;
                     for (int p = 1; p < 5; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { char b[48]; snprintf(b, sizeof(b), " r%d[%d]=%ux%u", p, i, d.texture.width, d.texture.height); texs += b; } } }
                     logmsg("f%u ui-cand rt=%p done=%u/%u count=%u pso=%p vp=%.0fx%.0f%s", g_frame, (void*)s.rt.handle, done, g_geoDrawsLast, da.count, (void*)s.pso, s.vp.width, s.vp.height, texs.c_str());
                 }
-                if (done >= 20 && done * 10 >= g_geoDrawsLast * 8) {
+                {
                     // Post-process passes into the final texture are fullscreen triangles/quads (<= 4 vertices) that sample a
                     // scene-sized input or use the scene's (dynamic-resolution) viewport; HUD elements are 6+-vertex quads at
                     // the full viewport. Descriptor slots beyond the ones a HUD shader uses carry stale scene-sized textures,
@@ -2111,7 +2114,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.0 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.0.1 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
