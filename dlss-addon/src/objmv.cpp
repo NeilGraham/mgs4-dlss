@@ -279,9 +279,9 @@ static double g_accSo = 0, g_accVel = 0, g_accFrame = 0, g_accCpu = 0; static ui
 static double g_cpuThisFrame = 0; static LARGE_INTEGER g_qpf = {};
 static bool g_velRan = false;
 
-struct Slot { uint32_t lastFrame; uint32_t off[2], bound[2], ctr[2]; uint64_t velKey[2]; bool jit[2]; };
+struct Slot { uint32_t lastFrame; uint32_t off[2], bound[2], ctr[2]; uint64_t velKey[2]; bool jit[2]; bool ownVp[2]; D3D12_VIEWPORT vp[2]; };
 static std::unordered_map<uint64_t, Slot> g_slots;
-struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; };
+struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; bool ownVp; D3D12_VIEWPORT vp; };
 static std::vector<VelEntry> g_vel;
 
 static bool create_buffer(ID3D12Resource** out, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags, const wchar_t* name)
@@ -495,7 +495,7 @@ static void begin_captures(ID3D12GraphicsCommandList* cl)
     transition(cl, g_soBuf[p], &g_soState[p], D3D12_RESOURCE_STATE_STREAM_OUT);
 }
 
-bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered)
+bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp)
 {
     if (!g_st.ready || !gamePso) return false;
     const double t0 = cpu_now_ms();
@@ -521,8 +521,8 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
     Slot& s = g_slots[key];
     const bool havePrev = s.lastFrame == g_curFrame - 1 && s.bound[p ^ 1] == bound;
     uint64_t velKey = 0, velKeyM = 0; vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, false, &velKey); vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, true, &velKeyM);   // creates the variants lazily
-    if (havePrev) { g_vel.push_back({ velKey, velKeyM, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u) }); g_st.withPrev++; }
-    s.lastFrame = g_curFrame; s.off[p] = off; s.bound[p] = bound; s.ctr[p] = idx; s.jit[p] = jittered; s.velKey[p] = velKey;
+    if (havePrev) { VelEntry e = { velKey, velKeyM, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u), ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{} }; g_vel.push_back(e); g_st.withPrev++; }
+    s.lastFrame = g_curFrame; s.off[p] = off; s.bound[p] = bound; s.ctr[p] = idx; s.jit[p] = jittered; s.velKey[p] = velKey; s.ownVp[p] = ownVp != nullptr; if (ownVp) s.vp[p] = *ownVp;
 
     if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 4 + 2 * idx);
     cl->SetPipelineState(so);
@@ -571,8 +571,10 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
         cl->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         const bool manual = manualDepth != nullptr;
         std::sort(g_vel.begin(), g_vel.end(), [manual](const VelEntry& a, const VelEntry& b) { return (manual ? a.psoKeyManual : a.psoKey) < (manual ? b.psoKeyManual : b.psoKey); });
-        uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr;
+        uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr; bool curOwn = false; D3D12_VIEWPORT curVp = vp;
         for (const VelEntry& e : g_vel) {
+            // objects drawn into their own 3D window use that viewport (their clip positions map to it)
+            if (e.ownVp != curOwn || (e.ownVp && memcmp(&e.vp, &curVp, sizeof(curVp)) != 0)) { curOwn = e.ownVp; curVp = e.ownVp ? e.vp : vp; cl->RSSetViewports(1, &curVp); }
             const uint64_t want = manual ? e.psoKeyManual : e.psoKey;
             if (want != boundKey) { boundKey = want; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == want) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
             if (!cur) continue;

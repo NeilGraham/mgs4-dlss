@@ -45,7 +45,9 @@ namespace objmv {
     // Stream out the clip positions of the draw about to be issued (the command list carries the game's complete state
     // for it). `topology` = the D3D primitive topology set by the game, `jittered` = its clip matrix carries this
     // frame's sub-pixel jitter. Leaves the game's PSO bound again. Returns true if the draw was captured.
-    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered);
+    // ownVp: the draw's own viewport when it is not the frame's scene viewport (a 3D window such as the pause-menu
+    // model); the velocity pass then rasterises this object into that rectangle instead of the pass viewport.
+    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp);
 
     // At the injection point after the camera motion vectors were written: rasterise every captured object that was
     // also captured last frame into mvRtv (R16G16_FLOAT, pixels, prev - cur), depth-tested (reversed-Z, greater-equal)

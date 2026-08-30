@@ -14,6 +14,7 @@ cbuffer CB : register(b0)
     float  dynZeroMV;            // 1 = zero motion on dynamic pixels
     float2 depthScale;           // dynamic resolution: the scene depth occupies the top-left (scale x size) of its texture
     float  pad;
+    float4 rect;                 // the 3D scene's rectangle in the frame (x, y, w, h): the camera's NDC maps to it; outside it the screen is static
 };
 Texture2D<float>    depthTex : register(t0);
 Texture2D<float>    dynDepth : register(t1);
@@ -33,7 +34,8 @@ void main(uint3 id : SV_DispatchThreadID)
     if (reset > 0.5 || (dyn && dynZeroMV > 0.5)) { mvTex[id.xy] = float2(0, 0); return; }
 
     float2 cur = float2(id.x + 0.5, id.y + 0.5);
-    float2 ndc = float2(cur.x / size.x * 2.0 - 1.0, 1.0 - cur.y / size.y * 2.0);
+    if (cur.x < rect.x || cur.y < rect.y || cur.x >= rect.x + rect.z || cur.y >= rect.y + rect.w) { mvTex[id.xy] = float2(0, 0); return; }   // frozen screen around a 3D window
+    float2 ndc = float2((cur.x - rect.x) / rect.z * 2.0 - 1.0, 1.0 - (cur.y - rect.y) / rect.w * 2.0);
     float4 clip;
     if (d <= 1e-7)
         clip = float4(ndc.x, ndc.y, 0.0, 1.0);             // far plane: a direction (point at infinity), still moves under rotation
@@ -45,6 +47,6 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 pc = mul(prevVP, world);
     if (pc.w <= 1e-3) { mvTex[id.xy] = float2(0, 0); return; }
     float2 pndc = pc.xy / pc.w;
-    float2 prev = float2((pndc.x * 0.5 + 0.5) * size.x, (0.5 - pndc.y * 0.5) * size.y);
+    float2 prev = float2(rect.x + (pndc.x * 0.5 + 0.5) * rect.z, rect.y + (0.5 - pndc.y * 0.5) * rect.w);
     mvTex[id.xy] = prev - cur;
 }
