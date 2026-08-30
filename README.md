@@ -1,6 +1,6 @@
 # mgs4-dlss
 
-**v1.1 (2026-08-30)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
+**v1.1.1 (2026-08-30)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
 
 Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
 
@@ -317,6 +317,19 @@ pass-through frame ending, the insertion moving between the final texture and a 
 history reset on the first evaluation after such a transition (the caller's first frame used to come out warped from
 seconds-old history). In window mode it now also tags a HUD-less image (the pre-HUD capture, valid until present) and
 the UI layer for DLSS-G, which helps where UI recomposition is available.
+
+### v1.1.1: the v1.1 freeze logic misfired inside live cutscenes
+
+v1.1's frozen-screen logic could trigger inside a running cutscene, and every misfire cost a raw frame (no DLSS, no
+NR), a history reset and - with frame generation on - an eight-frame DLSS-G cut: visible as flicker and stutter that
+v1.0 did not have. Three causes, all fixed: the pass-through fired on any frame whose camera matrix or scene write was
+missed (now only from the seed-freeze state and only from the second consecutive frame without a scene write); the
+seed-capture insertion matched a cutscene's own 2048x2048 screen capture (now only the half-resolution seed), moving the
+insertion point on a few percent of frames; and a picture-in-picture pass (the Mk. II's monitor, 1024x1024 in a corner
+of the scene target, hundreds of draws) took the frame's "3D target" slot, so the scene itself was never recognised and
+the 3D-window insertion ran on the picture-in-picture instead (now a 3D target needs a full-frame viewport, and the
+window path needs the previous frame to have had no scene either). Verified on the Mk. II intro and the Meryl garage
+scenes: no window switches, no mid-scene seed insertions, no pass-through frames, resets only at real camera cuts.
 
 ### Known limitations
 

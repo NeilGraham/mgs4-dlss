@@ -1227,7 +1227,12 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         g_frozen = false;
         static uint32_t nlog = 0; if (nlog++ < 40) logmsg("frozen state cleared at frame %u: %s (scene write from %s, geo target %p, finals %p/%p, colour %p, depth-tested %u, window %d)", g_frame, g_freshWrite ? "fresh scene write" : "live scene into a geometry target", desc_str(dev, resource{ g_finalSceneSrc }).c_str(), (void*)g_curGeoRt, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)color.handle, g_depthOnDrawsThisFrame, (int)g_windowMode);
     }
-    const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && (g_frozen || !g_haveFrameVP || g_depthOnDrawsThisFrame == 0);
+    // Pass-through only from the seed state, and only from the second consecutive frame without a fresh scene write:
+    // a single frame whose camera matrix or scene write was missed inside a live cutscene must never be shown raw
+    // (that was a one-frame flicker plus a history reset, dozens of times per scene).
+    static uint32_t s_noFreshRun = 0;
+    if (g_freshWrite) s_noFreshRun = 0; else s_noFreshRun++;
+    const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && g_frozen && s_noFreshRun >= 2;
     { static bool was = false; if (frozenPass != was) { was = frozenPass; logmsg("frozen screen pass-through %s at frame %u (frozen %d, fresh write %d, scene write %d from %p, camera %d, depth-tested draws %u, window %d)", frozenPass ? "ON" : "off", g_frame, (int)g_frozen, (int)g_freshWrite, (int)g_finalSceneWritten, (void*)g_finalSceneSrc, (int)g_haveFrameVP, g_depthOnDrawsThisFrame, (int)g_windowMode); } }
     const bool discont = g_forceReset || (g_lastEvalWindow >= 0 && g_lastEvalWindow != (int)g_windowMode);
     bool resumeKept = false;
@@ -1801,8 +1806,11 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             if (s.ds.handle) {
                 const uint32_t n = ++g_depthDrawsPerRt[s.rt.handle];
                 if (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) g_depthDrawsIntoFinal++;
-                // in-frame detection of the 3D target: the first depth-bound RT that reaches 40% of last frame's peak
-                if (!g_curGeoRt && n >= 20 && n * 10 >= g_geoDrawsLast * 4) g_curGeoRt = s.rt.handle;
+                // in-frame detection of the 3D target: the first depth-bound RT that reaches 40% of last frame's peak,
+                // drawn with a plausible full-frame viewport - a picture-in-picture pass (the Mk. II's monitor: 1024x1024
+                // in a corner of the scene target, hundreds of draws) must not take the slot from the scene itself
+                const bool fullFrameVp = !s.vp_valid || (s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f);
+                if (!g_curGeoRt && n >= 20 && n * 10 >= g_geoDrawsLast * 4 && fullFrameVp) g_curGeoRt = s.rt.handle;
             }
             g_geoRt = g_curGeoRt;
             // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
@@ -1837,7 +1845,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     if (r.handle && (r.handle == g_finalSceneRt || r.handle == g_finalRt[0] || r.handle == g_finalRt[1] || g_seedTex.count(r.handle))) { fromFinal = true; if (r.handle == g_finalSceneRt && g_finalSceneWritten) { idx = i; param = p; break; } }
                 }
                 if (fromFinal) g_seedTex.insert(s.rt.handle);   // a capture of the frozen image (the pause / Codec seed, the frosted-panel source)
-                if (idx >= 0 && g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
+                // the pause / Codec seed is the half-resolution capture (1920x1080 at 4K); cutscenes take other captures of
+                // the final texture every few frames (a 2048x2048 one for an effect) and must not move the insertion point
+                const bool halfSize = g_dlssW && abs((int)s.rt_w - (int)g_dlssW / 2) <= 2 && abs((int)s.rt_h - (int)g_dlssH / 2) <= 2;
+                if (idx >= 0 && halfSize && g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
                     && g_sceneVpFrameValid && is_live(g_finalSceneRt)) {
                     static bool once = false; if (!once) { once = true; logmsg("frozen-screen seed: DLSS on the final texture %s before the game's capture into %s (r%d[%d], count %u) at frame %u", desc_str(dev, resource{ g_finalSceneRt }).c_str(), desc_str(dev, s.rt).c_str(), param, idx, da.count, g_frame); }
                     g_finalPreHudThisFrame = true;   // same role as the pre-HUD insertion: HUD replay and the FG HUD-less image work as there
@@ -1963,8 +1974,11 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // post-processed (the Codec's CRT/scanline pass) and blitted into the frame. Run DLSS on that target at its
             // first reader: the caller's scene gets DLAA and Neural Rendering, while the CRT overlay and every panel
             // around the window are drawn afterwards and stay out of DLSS entirely.
+            // Only on frozen screens: the previous frame must have had no full-frame 3D scene either. A cutscene with a
+            // picture-in-picture window (the Mk. II's monitor) reaches this point before its own scene draws have
+            // started, and inserting on the window there left the scene itself raw for the frame (flicker + resets).
             if (g_cfgWindowScene && !g_injectedThisFrame && g_cfgEnabled && !g_scaling && g_cfgDebugMode != 2
-                && g_winGeoRt && g_winGeoDraws >= 20 && g_winVpFrameValid && !g_sceneVpFrameValid
+                && g_winGeoRt && g_winGeoDraws >= 20 && g_winVpFrameValid && !g_sceneVpFrameValid && !g_prevFrameHadScene
                 && s.rt.handle != g_winGeoRt && is_live(g_winGeoRt)) {
                 int idx = -1, param = -1;
                 for (int p = 1; p < 5 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_winGeoRt) { idx = i; param = p; break; } }
@@ -2151,10 +2165,24 @@ static void reload_config()
 // End-of-frame bookkeeping. Runs on the game's Present: from ReShade's present event normally, or from the
 // Streamline proxy swapchain's Present hook when frame generation is set up (then ReShade's present event fires on
 // Streamline's present thread, for generated frames too, and must not touch the per-frame state).
+static std::vector<float> g_frameMs;   // present-to-present intervals of the last stats window (pacing diagnostics)
 static void frame_rollover()
 {
     fg::poll();
     g_frame++;
+    {
+        static LARGE_INTEGER freq = {}, last = {}; LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
+        if (last.QuadPart) g_frameMs.push_back(float(double(now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart)));
+        last = now;
+        if (g_frameMs.size() >= 600) {
+            std::vector<float> v = g_frameMs; std::sort(v.begin(), v.end());
+            const float med = v[v.size() / 2], p5 = v[v.size() / 20], p95 = v[v.size() * 19 / 20];
+            uint32_t out = 0; for (float x : g_frameMs) if (x > med * 1.35f || x < med * 0.65f) out++;
+            logmsg("frame pacing: %zu frames, median %.2f ms, p5 %.2f, p95 %.2f, min %.2f, max %.2f, outliers (>35%% off) %u", g_frameMs.size(), med, p5, p95, v.front(), v.back(), out);
+            g_frameMs.clear();
+        }
+    }
     if (g_cfgTraceFreeze) {
         frz_record("f%u end: scene draws %u, depth-tested %u, fullVp %d (%.0f,%.0f %.0fx%.0f), winVp %d (%.0f,%.0f %.0fx%.0f), HUD %u, insertion preHUD %d window %d any %d, finals %p/%p, 3D target %p (%u)",
                    g_frame - 1, g_sceneDrawsThisFrame, g_depthOnDrawsThisFrame, (int)g_sceneVpFrameValid, g_sceneVpFrame.x, g_sceneVpFrame.y, g_sceneVpFrame.width, g_sceneVpFrame.height, (int)g_winVpFrameValid, g_winVpFrame.x, g_winVpFrame.y, g_winVpFrame.width, g_winVpFrame.height,
@@ -2427,7 +2455,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.1 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.1.1 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
