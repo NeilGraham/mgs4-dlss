@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -190,13 +191,29 @@ static NVSDK_NGX_Handle* g_dlss = nullptr;
 static uint32_t g_dlssW = 0, g_dlssH = 0, g_dlssOutW = 0, g_dlssOutH = 0;
 static format g_dlssFmt = format::unknown;
 static resource g_mv = { 0 }, g_out = { 0 };
-static resource g_lastDlss = { 0 };            // the most recent DLSS image of a live frame, kept for the frozen screens
-static resource_usage g_lastDlssState = resource_usage::copy_dest;
-static bool g_lastDlssValid = false; static uint32_t g_lastDlssFrame = 0, g_frozenInjections = 0;
-static uint64_t g_lastDlssColor = 0;   // the texture DLSS last wrote into while the world was rendering
-static bool g_prevFrameHadScene = false;
-static int g_cfgTraceFreeze = 0; static uint32_t g_freezeTracedAt = 0;       // the previous frame rendered a full-frame 3D scene
-static bool g_frozenInjectedThisFrame = false;
+// Frozen screens (pause menu, Codec): the frame before the world stops, the game downsamples the final texture into a
+// 1920x1080 seed (after its upscale, before the HUD - and before the pre-HUD insertion) and blits that seed back over
+// the final texture every frame the screen stays frozen. DLSS therefore runs before that capture (FrozenBackground=1).
+static uint32_t g_frozenInjections = 0;
+static bool g_prevFrameHadScene = false;       // the previous frame rendered a full-frame 3D scene
+static int g_cfgTraceFreeze = 0; static uint32_t g_freezeTracedAt = 0;
+// Freeze trace (TraceFreeze=1): the full-size draw / copy chain of the last frames is kept in a ring and written to the
+// log when the world stops rendering, followed by the next non-empty frames. (The game stalls for a few empty frames
+// at the freeze while it loads the menu, so a fixed frame window there logged nothing.)
+struct frz_line { uint32_t frame; std::string text; };
+static std::deque<frz_line> g_frzRing; static std::mutex g_frzMutex;
+static uint32_t g_frzTraceFrames = 0;   // non-empty frames still to log after the freeze
+static bool g_frzDumping = false;
+static uint32_t g_frzFreezes = 0;
+static void frz_record(const char* fmt, ...)
+{
+    if (!g_cfgTraceFreeze) return;
+    char b[640]; va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof(b), fmt, ap); va_end(ap);
+    if (g_frzDumping || tracing()) { logmsg("FRZ %s", b); return; }
+    std::lock_guard<std::mutex> lock(g_frzMutex);
+    g_frzRing.push_back(frz_line{ g_frame, b });
+    if (g_frzRing.size() > 4000) g_frzRing.pop_front();
+}
 static resource g_depthFull = { 0 }; static resource_usage g_depthFullState = resource_usage::unordered_access;   // scene depth stretched to the full grid (dynamic resolution)
 static resource_usage g_outState = resource_usage::unordered_access;
 static uint32_t g_evalCount = 0, g_failCount = 0;
@@ -225,7 +242,7 @@ static char g_nrAddonName[64] = "";          // which one
 static int g_cfgDynMask = 0;
 static int g_cfgUiMask = 1;
 static int g_cfgWindowScene = 1;
-static int g_cfgFrozenBg = 0;                // keep the DLSS image as the frozen background of the Codec / pause screens             // DLSS on a 3D window's own target (Codec caller, pause-menu model)                  // UI layer -> DLSS bias-current-colour mask + zero vectors on the HUD
+static int g_cfgFrozenBg = 1;                // frozen screens (pause / Codec): run DLSS before the game captures its background seed
 static int g_cfgDynZeroMV = 1;
 static resource g_dynDepth = { 0 }; static resource_view g_dynDsv = { 0 };
 static resource_usage g_dynState = resource_usage::depth_stencil_write;
@@ -934,7 +951,6 @@ static void release_dlss_resources(device* dev)
     if (g_mvRtv.handle) { dev->destroy_resource_view(g_mvRtv); g_mvRtv = { 0 }; }
     if (g_mv.handle) { dev->destroy_resource(g_mv); g_mv = { 0 }; }
     if (g_depthFull.handle) { dev->destroy_resource(g_depthFull); g_depthFull = { 0 }; }
-    if (g_lastDlss.handle) { dev->destroy_resource(g_lastDlss); g_lastDlss = { 0 }; g_lastDlssValid = false; }
     if (g_out.handle) { dev->destroy_resource(g_out); g_out = { 0 }; }
     if (g_dynDsv.handle) { dev->destroy_resource_view(g_dynDsv); g_dynDsv = { 0 }; }
     if (g_dynDepth.handle) { dev->destroy_resource(g_dynDepth); g_dynDepth = { 0 }; }
@@ -1004,8 +1020,6 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
                               nullptr, resource_usage::unordered_access, &g_out)) { logmsg("create output texture failed"); return false; }
     g_outState = resource_usage::unordered_access;
     dev->set_resource_name(g_mv, "MGS4DLSS motion vectors");
-    if (dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source), nullptr, resource_usage::copy_dest, &g_lastDlss)) { dev->set_resource_name(g_lastDlss, "MGS4DLSS kept frame"); g_lastDlssState = resource_usage::copy_dest; g_lastDlssValid = false; }
-    else logmsg("kept-frame texture failed (the Codec / pause background will stay as the game renders it)");
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r32_float, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource), nullptr, resource_usage::unordered_access, &g_depthFull)) { dev->set_resource_name(g_depthFull, "MGS4DLSS depth (full grid)"); g_depthFullState = resource_usage::unordered_access; }
     else logmsg("create full-grid depth texture failed (dynamic resolution will not be corrected)");
     dev->set_resource_name(g_out, "MGS4DLSS output");
@@ -1340,13 +1354,6 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
                                               (uint32_t)(g_windowVp.x + g_windowVp.width + 0.5f), (uint32_t)(g_windowVp.y + g_windowVp.height + 0.5f), 1 };
                 cmd->copy_texture_region(g_out, 0, &box, color, 0, &box, filter_mode::min_mag_mip_point);
             } else cmd->copy_resource(g_out, color);
-            // Keep this image: when the game freezes the screen for the Codec or the pause menu it recycles whatever
-            // the final texture holds, and that has to be the DLSS frame rather than the raw one.
-            if (g_cfgFrozenBg && !g_windowMode && g_lastDlss.handle && !upscale && g_sceneVpFrameValid) {
-                if (g_lastDlssState != resource_usage::copy_dest) { cmd->barrier(g_lastDlss, g_lastDlssState, resource_usage::copy_dest); g_lastDlssState = resource_usage::copy_dest; }
-                cmd->copy_resource(g_out, g_lastDlss);
-                g_lastDlssValid = true; g_lastDlssFrame = g_frame; g_lastDlssColor = color.handle;
-            }
         }
         const resource res2[2] = { color, g_out };
         const resource_usage from2[2] = { resource_usage::copy_dest, resource_usage::copy_source };
@@ -1606,12 +1613,16 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             const bool depthTested = pso_depth_enabled(s.pso);
             // frozen screens (Codec / pause): log the full-frame draw chain so the snapshot the background is built
             // from can be identified (source texture -> blur target -> the blit into the final image)
-            if (tracing() && s.rt_w >= 1280 && s.rt_h >= 720) {
-                static uint32_t nf = 0, lastf = 0; if (lastf != g_frame) { lastf = g_frame; nf = 0; }
-                if (nf++ < 90) {
-                    resource src0 = { 0 }; uint32_t sw = 0, sh = 0;
-                    for (int p = 1; p < 5 && !src0.handle; ++p) if (s.table_set[p]) { resource r = resolve_descriptor(dev, s.tables[p], 0); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { src0 = r; sw = d.texture.width; sh = d.texture.height; } } }
-                    logmsg("f%u frozen-draw rt=%p %ux%u vp=(%.0f,%.0f %.0fx%.0f) count=%u depth=%d src0=%p %ux%u%s [fullVp %d win %d inj %d]", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (int)depthTested, (void*)src0.handle, sw, sh, src0.handle && src0.handle == g_lastDlssColor ? " <- the DLSS target" : "", (int)g_sceneVpFrameValid, (int)g_winVpFrameValid, (int)g_injectedThisFrame);
+            if ((g_cfgTraceFreeze || tracing()) && s.rt_w >= 1280 && s.rt_h >= 720) {
+                // blits / fullscreen passes (few vertices) and any draw whose first texture is frame-sized; geometry is summarised per frame
+                resource src0 = { 0 }; uint32_t sw = 0, sh = 0;
+                if (s.table_set[1]) { resource r = resolve_descriptor(dev, s.tables[1], 0); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { src0 = r; sw = d.texture.width; sh = d.texture.height; } } }
+                if (da.count <= 8 || sw >= 640) {
+                    std::string big;   // every frame-sized texture bound in the first two tables
+                    for (int p = 1; p < 3; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d && d.texture.width >= 640) { char b[64]; snprintf(b, sizeof(b), " r%d[%d]=%p %ux%u", p, i, (void*)r.handle, d.texture.width, d.texture.height); big += b; } } }
+                    frz_record("f%u draw rt=%p %ux%u%s vp=(%.0f,%.0f %.0fx%.0f) n=%u ds=%p depthOn=%d pso=%p src0=%p %ux%u%s |%s [fullVp %d win %d inj %d]", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h,
+                               s.rt.handle == g_finalRt[0] ? " FINAL0" : (s.rt.handle == g_finalRt[1] ? " FINAL1" : ""), s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (void*)s.ds.handle, (int)depthTested, (void*)s.pso,
+                               (void*)src0.handle, sw, sh, "", big.c_str(), (int)g_sceneVpFrameValid, (int)g_winVpFrameValid, (int)g_injectedThisFrame);
                 }
             }
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
@@ -1688,6 +1699,23 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // HUD candidates: depth-off draws into a final texture. The gate is the scene write into that texture
             // (g_finalSceneWritten / g_finalSceneRt below), not the in-frame geometry-target heuristics: those compare
             // against last frame's draw counts and fail on frames where the count swings (rolling, fast turns).
+            // Frozen-screen seed (pause menu, Codec): on the last live frame the game downsamples the final texture into a
+            // 1920x1080 seed - after its upscale, before the first HUD draw - and the frozen screens blit that seed back
+            // over the final texture every frame. The capture comes BEFORE the pre-HUD insertion, so the still image was
+            // the raw frame; running DLSS on the final texture right before the capture makes the seed the DLSS (+NR) image.
+            // Shape: a few-vertex draw into a smaller, non-final target that samples this frame's final scene texture.
+            if (g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
+                && !depthOn && da.count <= 8 && g_sceneVpFrameValid && g_finalSceneWritten && g_finalSceneRt && is_live(g_finalSceneRt)
+                && s.rt.handle != g_finalSceneRt && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && g_dlssW && s.rt_w < g_dlssW) {
+                int idx = -1, param = -1;
+                for (int p = 1; p < 3 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 4; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_finalSceneRt) { idx = i; param = p; break; } }
+                if (idx >= 0) {
+                    static bool once = false; if (!once) { once = true; logmsg("frozen-screen seed: DLSS on the final texture %s before the game's capture into %s (r%d[%d], count %u) at frame %u", desc_str(dev, resource{ g_finalSceneRt }).c_str(), desc_str(dev, s.rt).c_str(), param, idx, da.count, g_frame); }
+                    g_finalPreHudThisFrame = true;   // same role as the pre-HUD insertion: HUD replay and the FG HUD-less image work as there
+                    run_dlss(cmd, &s, resource{ g_finalSceneRt }, resource_usage::shader_resource_pixel, 0);
+                    g_injectedThisFrame = true; g_finalPreHudInjections++; g_frozenInjections++;
+                }
+            }
             const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame || g_windowInjectedThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
                 && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
             const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && !g_cfgPrePost;
@@ -1857,6 +1885,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
         logmsg("f%u bb-draw#%u count=%u depth=%d pso=%p vp=%.0fx%.0f%s", g_frame, drawIdx, da.count, (int)pso_depth_enabled(s.pso), (void*)s.pso, s.vp.width, s.vp.height, texs.c_str());
     }
 
+    if (g_cfgTraceFreeze && drawIdx == 0) frz_record("f%u composite -> backbuffer samples %s (scene draws %u, depth-tested %u, injected %d, HUD draws %u)", g_frame, desc_str(dev, color).c_str(), g_sceneDrawsThisFrame, g_depthOnDrawsThisFrame, (int)g_injectedThisFrame, g_hudDrawsThisFrame);
     if (color.handle && color.handle != g_finalRt[0]) { g_finalRt[1] = g_finalRt[0]; g_finalRt[0] = color.handle; }
     if (color.handle && s.vp.width > 0) { g_gameVp[0] = s.vp.x; g_gameVp[1] = s.vp.y; g_gameVp[2] = s.vp.width; g_gameVp[3] = s.vp.height; }
     if (color.handle && g_sceneVpValid && g_dlssW && (uint32_t)(g_sceneVp.width + 0.5f) < g_dlssW) {   // composite of a DRS sub-rect: where does the scale live?
@@ -1900,6 +1929,11 @@ static void handle_copy(command_list* cmd, resource src, resource dst, const cha
     device* dev = cmd->get_device();
     if (tracing() && (src.handle == g_geoRt || dst.handle == g_geoRt) && is_live(src.handle) && is_live(dst.handle))
         logmsg("f%u %s %s -> %s (3D target involved)", g_frame, what, desc_str(dev, src).c_str(), desc_str(dev, dst).c_str());
+    if (g_cfgTraceFreeze && is_live(src.handle) && is_live(dst.handle)) {
+        const resource_desc sd = dev->get_resource_desc(src), ddst = dev->get_resource_desc(dst);
+        if ((sd.type == resource_type::texture_2d && sd.texture.width >= 640) || (ddst.type == resource_type::texture_2d && ddst.texture.width >= 640))
+            frz_record("f%u %s %s -> %s%s%s", g_frame, what, desc_str(dev, src).c_str(), desc_str(dev, dst).c_str(), "", is_backbuffer(dst) ? " (backbuffer)" : "");
+    }
     if (!is_backbuffer(dst)) return;
     if (tracing()) logmsg("f%u %s src=%s -> backbuffer (scene draws so far %u)", g_frame, what, desc_str(dev, src).c_str(), g_sceneDrawsThisFrame);
     if (g_injectedThisFrame || !g_cfgEnabled || g_sceneDrawsThisFrame < 20 || !scene_sized(dev, src) || g_scaling) return;
@@ -1919,7 +1953,7 @@ static void reload_config()
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
-    g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 0, g_iniPath);
+    g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 1, g_iniPath);
     g_cfgTraceFreeze = GetPrivateProfileIntA("DLSS", "TraceFreeze", 0, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
@@ -1943,7 +1977,6 @@ static void reload_config()
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
-    g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     {
@@ -1978,6 +2011,22 @@ static void frame_rollover()
 {
     fg::poll();
     g_frame++;
+    if (g_cfgTraceFreeze) {
+        frz_record("f%u end: scene draws %u, depth-tested %u, fullVp %d (%.0f,%.0f %.0fx%.0f), winVp %d (%.0f,%.0f %.0fx%.0f), HUD %u, insertion preHUD %d window %d any %d, finals %p/%p, 3D target %p (%u)",
+                   g_frame - 1, g_sceneDrawsThisFrame, g_depthOnDrawsThisFrame, (int)g_sceneVpFrameValid, g_sceneVpFrame.x, g_sceneVpFrame.y, g_sceneVpFrame.width, g_sceneVpFrame.height, (int)g_winVpFrameValid, g_winVpFrame.x, g_winVpFrame.y, g_winVpFrame.width, g_winVpFrame.height,
+                   g_hudDrawsThisFrame, (int)g_finalPreHudThisFrame, (int)g_windowInjectedThisFrame, (int)g_injectedThisFrame, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_curGeoRt, g_geoDrawsLast);
+        if (g_prevFrameHadScene && !g_sceneVpFrameValid && g_frame > g_freezeTracedAt + 300 && !g_frzDumping) {
+            g_freezeTracedAt = g_frame; g_frzFreezes++;
+            std::deque<frz_line> ring; { std::lock_guard<std::mutex> lock(g_frzMutex); ring.swap(g_frzRing); }
+            logmsg("=== world stopped rendering at frame %u (freeze #%u): last frames' full-size chain follows (%zu lines), then the next 6 non-empty frames ===", g_frame - 1, g_frzFreezes, ring.size());
+            for (const frz_line& l : ring) logmsg("FRZ %s", l.text.c_str());
+            g_frzDumping = true; g_frzTraceFrames = 6;
+        } else if (g_frzDumping) {
+            if (g_sceneDrawsThisFrame >= 20 && --g_frzTraceFrames == 0) { g_frzDumping = false; logmsg("=== freeze trace #%u done ===", g_frzFreezes); }
+        }
+        std::lock_guard<std::mutex> lock(g_frzMutex);
+        while (!g_frzRing.empty() && g_frzRing.front().frame + 3 < g_frame) g_frzRing.pop_front();   // keep the last 3 frames
+    }
     if (g_oldFeature && g_frame > g_oldFeatureFrame + 6) {
         NVSDK_NGX_Result r = NVSDK_NGX_D3D12_ReleaseFeature(g_oldFeature); g_oldFeature = nullptr;
         logmsg("released previous DLSS feature -> %s", ngx_str(r));
@@ -2018,11 +2067,7 @@ static void frame_rollover()
             g_sceneVp = pending; g_sceneVpValid = true;
         } else if (!g_sceneVpValid && stable >= 20) { g_sceneVp = pending; g_sceneVpValid = true; }
     }
-    if (g_cfgTraceFreeze && g_prevFrameHadScene && !g_sceneVpFrameValid && g_frame > g_freezeTracedAt + 600) {
-        g_freezeTracedAt = g_frame; g_traceUntil = g_frame + 4;
-        logmsg("world stopped rendering at frame %u: tracing the next frames (final textures %p / %p, DLSS last wrote into %p at frame %u)", g_frame, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_lastDlssColor, g_lastDlssFrame);
-    }
-    g_prevFrameHadScene = g_sceneVpFrameValid; g_frozenInjectedThisFrame = false;
+    g_prevFrameHadScene = g_sceneVpFrameValid;
     g_sceneVpFrameValid = false; g_vpHist.clear(); g_winVpFrameValid = false; g_winVpHist.clear();
     g_winGeoRtLast = g_winGeoRt; g_winGeoRt = 0; g_winGeoDraws = 0; g_winGeoDrawsPerRt.clear();
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
@@ -2040,7 +2085,7 @@ static void frame_rollover()
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_finalPreHudInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
-        { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background injections %u (kept DLSS frame %s, from frame %u)", g_frozenInjections, g_lastDlssValid ? "available" : "none", g_lastDlssFrame);
+        { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec)", g_frozenInjections);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
@@ -2181,6 +2226,9 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Also mask props with their own transform", &dp2)) { g_cfgDynMaskProps = dp2 ? 1 : 0; write_ini_int("DynamicMaskProps", g_cfgDynMaskProps); }
     bool dz = g_cfgDynZeroMV != 0;
     if (ImGui::Checkbox("Zero motion on masked objects (third-person camera turns)", &dz)) { g_cfgDynZeroMV = dz ? 1 : 0; write_ini_int("DynamicZeroMV", g_cfgDynZeroMV); }
+    bool fb = g_cfgFrozenBg != 0;
+    if (ImGui::Checkbox("Frozen screens (pause menu / Codec): DLSS before the game captures its background", &fb)) { g_cfgFrozenBg = fb ? 1 : 0; write_ini_int("FrozenBackground", g_cfgFrozenBg); }
+    ImGui::Text("Frozen-screen insertions: %u", g_frozenInjections);
     bool om = g_cfgObjectMV != 0;
     if (ImGui::Checkbox("Per-object motion vectors (stream-out of the game's vertex shaders)", &om)) { g_cfgObjectMV = om ? 1 : 0; write_ini_int("ObjectMV", g_cfgObjectMV); }
     {
@@ -2235,7 +2283,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.0.1 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.0.2 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);

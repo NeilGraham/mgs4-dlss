@@ -1,6 +1,6 @@
 # mgs4-dlss
 
-**v1.0.1 (2026-08-29)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, and DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation). Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
+**v1.0.2 (2026-08-29)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
 
 Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
 
@@ -81,6 +81,8 @@ ObjectMV=1               ; per-object motion vectors (stream-out of the game's v
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
+FrozenBackground=1       ; live: pause menu / Codec: run DLSS before the game captures the still background it shows behind those screens
+TraceFreeze=0            ; diagnostics: log the full-size draw chain around the moment the world stops rendering
 UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-colour mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
 ```
 
@@ -251,6 +253,27 @@ exactly (1680,296) 1864x1024 - the caller's box on screen - 99 % filled with non
 (`DebugMode=5`) shows the field only inside that box with the character silhouettes on it, in every pan direction;
 DLSS and NR evaluate on every frame of the call. In gameplay the insertion never fires (a full-frame 3D viewport is
 present), and the pause menu keeps the normal path for the same reason.
+
+### Frozen screens: the pause menu and Codec backgrounds (`FrozenBackground`, on by default)
+
+Behind the pause menu and the Codec the game shows a **still image of the world**, and until v1.0.2 that image was
+the raw (non-DLSS, non-NR) frame, which broke the illusion the moment you paused. The mechanism, from the freeze
+trace (`TraceFreeze=1`): on the last live frame the game draws its upscaled scene into the final texture, then a
+6-vertex draw **downsamples that final texture into a 1920x1080 seed texture**, and only then come the HUD draws -
+so the capture ran *before* the pre-HUD DLSS insertion. From the next frame on the world is no longer rendered; every
+frame of the pause menu and of the Codec begins with a full-screen blit of that seed into the final texture, then
+the panels (and the 3D window with the model / the caller, which `WindowScene` handles). Nothing ever rewrites the
+seed, so whatever it captured is the background for the whole time the screen stays frozen.
+
+With `FrozenBackground=1` the add-on recognises that capture (a few-vertex draw into a smaller, non-final target
+that samples this frame's final scene texture, after the scene write and before any HUD draw) and runs the normal
+pre-HUD insertion on the final texture right before it. The seed is then the DLSS (+NR) image and the frozen
+background matches the live picture. No game texture is written out of band - the game's own capture does the copy
+(the earlier attempt to copy a kept frame into the final texture crashed the device with DLSS-G active).
+
+Verified with the vector view: leave `DebugMode=5` on and pause - the frozen background is now the vector-view image
+(before, it stayed the plain scene); same for the Codec list and a Codec call. The insertion fires once per freeze
+(`frozen-background insertions` in the stats line).
 
 ### Known limitations
 
