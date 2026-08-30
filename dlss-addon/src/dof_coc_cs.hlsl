@@ -9,7 +9,7 @@ void main(uint3 id : SV_DispatchThreadID)
     if (id.x >= (uint)halfSize.x || id.y >= (uint)halfSize.y) return;
     float2 uvc = (float2(id.xy) + 0.5) / halfSize;
     float3 col = colorTex.SampleLevel(linClamp, uvc, 0).rgb;
-    float2 uvd = (float2(id.xy) * 2.0 * depthScale + depthOff) / depthSize;
+    float2 uvd = (float2(id.xy) * 2.0 * depthScale + depthOff + depthJitter) / depthSize;
     float d = depthTex.SampleLevel(linClamp, uvd, 0).x;
     const float4 c8 = c[0], c9 = c[1], c10 = c[2];
     // game: r1 = d - c8.ywxz; relative (mode 2) and linear (mode 1) near / far terms, clamped, selected by thresholds

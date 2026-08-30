@@ -205,7 +205,8 @@ static uint32_t g_frozenInjections = 0;
 // bytecode hash), the CoC constants and the depth copy are taken from the skipped pass, and an exact transcription of
 // the three passes runs on the DLSS output before the copy back (see dof_*.hlsl).
 static int g_cfgPostDof = 0;
-static float g_cfgDofStep = 2.0f, g_cfgDofRadius = 1.0f;
+static float g_cfgDofStep = 2.0f, g_cfgDofRadius = 1.0f; static int g_cfgDofMask = 1;   // DofMask=0: no overlay replay / mask (diagnostics)
+static int g_cfgDofJitterSign = 1;   // DofJitterSign: the depth copy is rendered with this frame's camera jitter while the DLSS output is de-jittered; +1 reads the depth at the jittered position (measured: blur-boundary wobble 7.7k -> vs 9.7k ppm without, 11.9k with -1), 0 = off
 static const uint64_t PS_DOF_COC = 0xbf2a546d733f4efcull, PS_DOF_GATHER = 0x9feb2d2e92bbc108ull, PS_DOF_COMPOSITE = 0x01978e62bca9c941ull;
 static float g_dofCb[10 * 4] = {}; static bool g_dofCbValid = false;   // the game's cb0[8..17] at this frame's CoC pass
 static float g_dofCbG[10 * 4] = {}; static bool g_dofCbGValid = false; // ... and at its spiral gather pass (each draw has its own constants)
@@ -804,7 +805,7 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
 // ---- DoF after DLSS (PostDof) --------------------------------------------------------------------------------------
 static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
 static ID3D12DescriptorHeap* g_dofHeap = nullptr; static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr; static uint32_t g_dofCbSlot = 0;
-struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask; };
+struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask, depthJitter[2], pad2[2]; };
 static bool dof_init()
 {
     if (g_dofInitTried) return g_dofReady;
@@ -867,6 +868,8 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     const float c17x = g_dofCbG[9 * 4];
     cb.stepUV[0] = g_cfgDofStep * c17x / (1280.0f * (kx > 0.05f ? kx : 1.0f)); cb.stepUV[1] = g_cfgDofStep * c17x / (720.0f * (ky > 0.05f ? ky : 1.0f));
     cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius;
+    // the projection jitter shifts the rendered (depth) image by (signX*jx, -signY*jy) render pixels; the depth copy has render-grid texels
+    cb.depthJitter[0] = g_cfgJitter ? float(g_cfgDofJitterSign) * g_cfgJitterSignX * g_jitterX : 0.0f; cb.depthJitter[1] = g_cfgJitter ? float(g_cfgDofJitterSign) * -g_cfgJitterSignY * g_jitterY : 0.0f;
     cb.debugView = g_cfgDebugMode == 10 ? 1.0f : (g_cfgDebugMode == 11 ? 2.0f : (g_cfgDebugMode == 12 ? 3.0f : 0.0f));   // DoF layer views
     const uint32_t cbIdx = g_dofCbSlot++ % 4;
     memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
@@ -888,7 +891,7 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(4)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(5));
     g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(6)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(7));
     // pass 3: [blur srv, overlay mask srv (or the CoC texture when there is no mask layer), out uav, out uav]
-    const bool haveMask = g_dofMask.handle && g_dofMaskRtv.handle;
+    const bool haveMask = g_cfgDofMask && g_dofMask.handle && g_dofMaskRtv.handle;
     if (haveMask) {
         if (!g_dofMaskCleared) {   // no overlay this frame: an empty mask
             if (g_dofMaskState != resource_usage::render_target) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::render_target); g_dofMaskState = resource_usage::render_target; }
@@ -1952,7 +1955,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
         dof_not_skipped:
             if (g_cfgPostDof && g_dofSkipFrame && !g_dofCombineSeen && da.count <= 4 && s.rt_w == g_dlssW && objmv::pso_ps_hash(s.pso) == PS_DOF_COMBINE) g_dofCombineSeen = true;   // the DoF combine (3-vertex pass): overlays come after it
-            if (g_cfgPostDof && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
+            if (g_cfgPostDof && g_cfgDofMask && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
                 && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && g_dlssW && g_dofReady) {
                 {
                     // quads / strips drawn into a scene-sized (non-final) texture after the DoF combine whose primary input is
@@ -2396,6 +2399,8 @@ static void reload_config()
         if (pd != g_cfgPostDof) { g_cfgPostDof = pd; logmsg("PostDof -> %d (%s)", pd, pd ? "the game's DoF draws are skipped and the DoF re-applied on the DLSS output" : "the game's DoF stays in its post chain"); }
         char v[32]; GetPrivateProfileStringA("DLSS", "DofStep", "2.0", v, sizeof(v), g_iniPath); g_cfgDofStep = (float)atof(v);
         GetPrivateProfileStringA("DLSS", "DofRadius", "1.0", v, sizeof(v), g_iniPath); g_cfgDofRadius = (float)atof(v);
+        g_cfgDofMask = GetPrivateProfileIntA("DLSS", "DofMask", 1, g_iniPath);
+        g_cfgDofJitterSign = GetPrivateProfileIntA("DLSS", "DofJitterSign", 1, g_iniPath);
     }
     {   // DumpShaders=1: write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (post-pass identification)
         static int last = -1; const int dump = GetPrivateProfileIntA("DLSS", "DumpShaders", 0, g_iniPath);

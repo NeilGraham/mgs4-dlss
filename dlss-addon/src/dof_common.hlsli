@@ -15,5 +15,7 @@ cbuffer CB : register(b0)
     float2 depthOff;     // the CoC pass's c12.xy: depth uv = (2 * pixel + depthOff) / depthSize
     float  debugView;    // 0 = normal, 1 = blurred layer only, 2 = coverage (grey), 3 = overlay mask
     float  hasMask;      // t1 of the composite = the overlay mask layer (title cards / captions drawn after the game DoF stay sharp)
+    float2 depthJitter;  // this frame's camera jitter in depth texels (the depth copy is jittered, the DLSS output is not)
+    float2 pad2;
 };
 SamplerState linClamp : register(s0);

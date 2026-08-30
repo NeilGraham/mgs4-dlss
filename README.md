@@ -77,6 +77,8 @@ PrePost=auto             ; DLAA insertion: auto = on the final image when a DLSS
 PostDof=0                ; 1 = skip the game's depth-of-field draws and re-apply the same DoF on the DLSS / NR output (see "Depth of field after NR")
 DofStep=2.0              ; PostDof tuning: spiral step scale (2.0 = the game's blur size at the full grid)
 DofRadius=1.0            ; PostDof tuning: multiplier on the game's circle of confusion
+DofJitterSign=1          ; PostDof: read the depth at the frame's camera-jitter offset (the depth copy is jittered, the DLSS output is not); 0 = off
+DofMask=1                ; PostDof: keep title cards / captions drawn after the game's DoF sharp (0 = diagnostics)
 DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
 FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
 FGTargetFps=120
