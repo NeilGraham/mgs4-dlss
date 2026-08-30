@@ -168,6 +168,9 @@ static uint32_t g_bbW = 0, g_bbH = 0;
 static std::unordered_set<uint64_t> g_backbuffers;
 static uint32_t g_sceneDrawsThisFrame = 0;
 static bool g_injectedThisFrame = false;
+static bool g_windowInjectedThisFrame = false;   // DLSS ran on a 3D window's own target this frame (Codec caller)
+static uint32_t g_windowInjections = 0;
+static uint64_t g_winPostRt = 0;                 // where the window target's first reader draws (its post-process target)
 static bool g_finalPreHudThisFrame = false;   // DLSS ran on the final texture before its first HUD draw (composite mode + HUD)
 static uint32_t g_finalPreHudInjections = 0;
 static bool g_skipThisDraw = false;           // DebugMode=7 in that mode: the HUD draws are dropped (HUD-less view)
@@ -213,7 +216,8 @@ static char g_nrAddonName[64] = "";          // which one
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
 // into a private depth buffer; the MV pass turns that into DLSS's bias-current-colour mask (and optionally zero motion).
 static int g_cfgDynMask = 0;
-static int g_cfgUiMask = 1;                  // UI layer -> DLSS bias-current-colour mask + zero vectors on the HUD
+static int g_cfgUiMask = 1;
+static int g_cfgWindowScene = 1;             // DLSS on a 3D window's own target (Codec caller, pause-menu model)                  // UI layer -> DLSS bias-current-colour mask + zero vectors on the HUD
 static int g_cfgDynZeroMV = 1;
 static resource g_dynDepth = { 0 }; static resource_view g_dynDsv = { 0 };
 static resource_usage g_dynState = resource_usage::depth_stencil_write;
@@ -251,6 +255,8 @@ static bool g_sceneVpValid = false;
 static viewport g_sceneVpFrame = {}; static bool g_sceneVpFrameValid = false;   // most common viewport of this frame's depth draws into the scene target
 static viewport g_winVpFrame = {}; static bool g_winVpFrameValid = false;       // the same for 'window' viewports (smaller than half the frame or at an offset): Codec / pause 3D windows
 static std::unordered_map<uint64_t, std::pair<uint32_t, viewport>> g_winVpHist;
+static uint64_t g_winGeoRt = 0, g_winGeoRtLast = 0; static uint32_t g_winGeoDraws = 0;   // RT receiving depth-tested draws at a window viewport (Codec caller scene)
+static std::unordered_map<uint64_t, uint32_t> g_winGeoDrawsPerRt;
 static uint32_t g_depthOnDrawsThisFrame = 0, g_depthOnDrawsLast = 0;      // depth-tested draws with a depth buffer (0 = no 3D scene: Codec)
 static bool g_windowMode = false; static viewport g_windowVp = {};            // this frame's DLSS pass: the 3D scene is a window of a frozen screen
 static float jitter_ref_w() { if (!g_sceneVpFrameValid && g_winVpFrameValid && g_winVpFrame.width > 0) return g_winVpFrame.width; const uint32_t w = g_scaling ? g_renderW : g_internalW; return float(w); }
@@ -1240,7 +1246,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fi.cmd = native;
         fi.depth = reinterpret_cast<ID3D12Resource*>(dlssDepth.handle); fi.depthFormat = depthStretched ? DXGI_FORMAT_R32_FLOAT : static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = depthStretched ? (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         fi.mv = reinterpret_cast<ID3D12Resource*>(g_mv.handle); fi.mvState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-        if (g_finalPreHudThisFrame && !upscale && g_cfgDebugMode != 5) {
+        if (g_windowInjectedThisFrame) {
+            // the DLSS output here is the 3D window's own target, not a HUD-less frame: hand DLSS-G the replayed UI layer only
+            if (g_ui.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && g_uiDrawsThisFrame > 0) { fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true; }
+        } else if (g_finalPreHudThisFrame && !upscale && g_cfgDebugMode != 5) {
             fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             if (g_ui.handle && (g_cfgFgMode != 0 || g_cfgUiMask)) { fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true; }
             static bool once = false; if (!once) { once = true; logmsg("FG: HUD-less = DLSS output (pre-HUD insertion on the final texture); UI layer tagged valid-until-present"); }
@@ -1314,7 +1323,13 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         const resource_usage from[3] = { resource_usage::shader_resource_non_pixel, resource_usage::shader_resource_non_pixel, resource_usage::unordered_access };
         const resource_usage to[3] = { resource_usage::copy_dest, resource_usage::depth_stencil_write, resource_usage::copy_source };
         cmd->barrier(3, res, from, to);
-        if (!NVSDK_NGX_FAILED(r)) cmd->copy_resource(g_out, color);
+        if (!NVSDK_NGX_FAILED(r)) {
+            if (g_windowMode && g_windowVp.width > 0) {   // only the 3D window belongs to us; the rest of that target is the game's
+                const subresource_box box = { (uint32_t)g_windowVp.x, (uint32_t)g_windowVp.y, 0,
+                                              (uint32_t)(g_windowVp.x + g_windowVp.width + 0.5f), (uint32_t)(g_windowVp.y + g_windowVp.height + 0.5f), 1 };
+                cmd->copy_texture_region(g_out, 0, &box, color, 0, &box, filter_mode::min_mag_mip_point);
+            } else cmd->copy_resource(g_out, color);
+        }
         const resource res2[2] = { color, g_out };
         const resource_usage from2[2] = { resource_usage::copy_dest, resource_usage::copy_source };
         const resource_usage to2[2] = { colorState, resource_usage::unordered_access };
@@ -1587,6 +1602,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 } else if (depthTested && s.vp_valid && s.rt_w >= 640 && (g_dlssW == 0 || s.rt_w == g_dlssW) && s.vp.width >= s.rt_w * 0.2f && s.vp.height >= s.rt_h * 0.2f
                            && s.vp.width < s.rt_w - 1.0f && s.vp.x + s.vp.width <= s.rt_w + 1.0f && s.vp.y + s.vp.height <= s.rt_h + 1.0f) {
                     // a 3D window (Codec caller, pause-menu model): smaller than the frame or at an offset, blitted 1:1 to the final image
+                    { uint32_t& n = g_winGeoDrawsPerRt[s.rt.handle]; if (++n > g_winGeoDraws) { g_winGeoDraws = n; g_winGeoRt = s.rt.handle; } }
                     auto& e = g_winVpHist[(uint64_t)(uint32_t)(s.vp.x + 0.5f) << 48 | (uint64_t)(uint32_t)(s.vp.y + 0.5f) << 32 | (uint32_t)(s.vp.width + 0.5f) << 16 | (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) e.second = s.vp;
                     if (!g_winVpFrameValid || e.first > g_winVpHist[(uint64_t)(uint32_t)(g_winVpFrame.x + 0.5f) << 48 | (uint64_t)(uint32_t)(g_winVpFrame.y + 0.5f) << 32 | (uint32_t)(g_winVpFrame.width + 0.5f) << 16 | (uint32_t)(g_winVpFrame.height + 0.5f)].first) { g_winVpFrame = e.second; g_winVpFrameValid = true; }
@@ -1644,7 +1660,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // HUD candidates: depth-off draws into a final texture. The gate is the scene write into that texture
             // (g_finalSceneWritten / g_finalSceneRt below), not the in-frame geometry-target heuristics: those compare
             // against last frame's draw counts and fail on frames where the count swings (rolling, fast turns).
-            const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
+            const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame || g_windowInjectedThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
                 && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
             const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && !g_cfgPrePost;
             if (uiCandidate) {
@@ -1653,7 +1669,9 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 if (tracing()) {
                     std::string texs;
                     for (int p = 1; p < 5; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { char b[48]; snprintf(b, sizeof(b), " r%d[%d]=%ux%u", p, i, d.texture.width, d.texture.height); texs += b; } } }
-                    logmsg("f%u ui-cand rt=%p done=%u/%u count=%u pso=%p vp=%.0fx%.0f%s", g_frame, (void*)s.rt.handle, done, g_geoDrawsLast, da.count, (void*)s.pso, s.vp.width, s.vp.height, texs.c_str());
+                    int winSlot = -1, winParam = -1;
+                    for (int p = 1; p < 5 && winSlot < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle && (r.handle == g_winGeoRt || r.handle == g_winGeoRtLast)) { winSlot = i; winParam = p; break; } }
+                    logmsg("f%u ui-cand rt=%p done=%u/%u count=%u pso=%p vp=(%.0f,%.0f %.0fx%.0f) winRt=%p winSrc=r%d[%d]%s", g_frame, (void*)s.rt.handle, done, g_geoDrawsLast, da.count, (void*)s.pso, s.vp.x, s.vp.y, s.vp.width, s.vp.height, (void*)g_winGeoRt, winParam, winSlot, texs.c_str());
                 }
                 {
                     // Post-process passes into the final texture are fullscreen triangles/quads (<= 4 vertices) that sample a
@@ -1687,7 +1705,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     if (preScene) { post = true; g_uiPreSceneThisFrame++; }
                     if (tracing()) logmsg("f%u    -> %s (fullVp %d, big %d, slot0big %d, sceneRt %p)", g_frame, preScene ? "pre-scene" : (post ? "post" : "HUD"), (int)fullVp, (int)big, (int)slot0big, (void*)g_finalSceneRt);
                     if (post) g_uiPostSkippedThisFrame++;
-                    else if (!g_injectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2) {
+                    else if (!g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2) {
                         // Composite mode with a HUD: run DLSS on the final texture now, before its first HUD draw. DLSS (and
                         // any NGX post-processing add-on evaluating inline) then never sees the HUD, the HUD is drawn by the
                         // game on top of the DLSS output, and the DLSS output is the HUD-less colour for frame generation.
@@ -1703,6 +1721,12 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     else {
                         g_hudDrawsThisFrame++;
                         if (g_cfgDebugMode == 7 && g_finalPreHudThisFrame) g_skipThisDraw = true;   // HUD-less view: the HUD stays out of the image
+                        else if (g_cfgDebugMode == 7 && g_windowInjectedThisFrame) {
+                            // window mode: keep whatever carries the 3D window into the frame (that is the DLSS output), drop the panels
+                            bool carriesWindow = false;
+                            for (int p = 1; p < 5 && !carriesWindow; ++p) if (s.table_set[p]) for (int i = 0; i < 8 && !carriesWindow; ++i) { resource rr = resolve_descriptor(dev, s.tables[p], i); if (rr.handle && (rr.handle == g_winGeoRt || rr.handle == g_winPostRt)) carriesWindow = true; }
+                            if (!carriesWindow) g_skipThisDraw = true;
+                        }
                         t_reentrant = true;
                         if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
                         if (!g_uiClearedThisFrame) {
@@ -1734,6 +1758,23 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
                 drawsSince++;
                 if (!refs.empty()) logmsg("f%u    draw into %p (depth %d, pso %p) samples the 3D target via%s", g_frame, (void*)s.rt.handle, (int)depthOn, (void*)s.pso, refs.c_str());
+            }
+            // A 3D window (Codec caller, pause-menu model) renders into its own target at a window viewport and is then
+            // post-processed (the Codec's CRT/scanline pass) and blitted into the frame. Run DLSS on that target at its
+            // first reader: the caller's scene gets DLAA and Neural Rendering, while the CRT overlay and every panel
+            // around the window are drawn afterwards and stay out of DLSS entirely.
+            if (g_cfgWindowScene && !g_injectedThisFrame && g_cfgEnabled && !g_scaling && g_cfgDebugMode != 2
+                && g_winGeoRt && g_winGeoDraws >= 20 && g_winVpFrameValid && !g_sceneVpFrameValid
+                && s.rt.handle != g_winGeoRt && is_live(g_winGeoRt)) {
+                int idx = -1, param = -1;
+                for (int p = 1; p < 5 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_winGeoRt) { idx = i; param = p; break; } }
+                if (idx >= 0) {
+                    static bool once = false; if (!once) { once = true; logmsg("window insertion: DLSS on the 3D window target %p (%u depth draws, window %.0f,%.0f %.0fx%.0f) at its first reader (r%d[%d], into %s)", (void*)g_winGeoRt, g_winGeoDraws, g_winVpFrame.x, g_winVpFrame.y, g_winVpFrame.width, g_winVpFrame.height, param, idx, desc_str(dev, s.rt).c_str()); }
+                    t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(0, nullptr, resource_view{ 0 }); t_reentrant = false;
+                    g_windowInjectedThisFrame = true; g_injectedThisFrame = true; g_windowInjections++; g_winPostRt = s.rt.handle;
+                    run_dlss(cmd, &s, resource{ g_winGeoRt }, resource_usage::shader_resource_pixel, 0);
+                    t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(s.rtv_count, s.rtvs, s.dsv); t_reentrant = false;
+                }
             }
             if (g_cfgPrePost && !g_scaling && !g_injectedThisFrame && g_cfgEnabled && g_geoRt && is_live(g_geoRt)) {
                 auto itd = g_depthDrawsPerRt.find(g_geoRt);
@@ -1849,6 +1890,7 @@ static void reload_config()
     g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
+    g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
@@ -1870,6 +1912,7 @@ static void reload_config()
     }
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
+    g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     {
@@ -1912,7 +1955,7 @@ static void frame_rollover()
     if (dumping() && !g_blockHist.empty()) report_blocks();
     g_viewEvents = 0; g_copyEvents = 0;
     if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
-    g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_featureCreatedThisFrame = false;
+    g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
@@ -1945,6 +1988,7 @@ static void frame_rollover()
         } else if (!g_sceneVpValid && stable >= 20) { g_sceneVp = pending; g_sceneVpValid = true; }
     }
     g_sceneVpFrameValid = false; g_vpHist.clear(); g_winVpFrameValid = false; g_winVpHist.clear();
+    g_winGeoRtLast = g_winGeoRt; g_winGeoRt = 0; g_winGeoDraws = 0; g_winGeoDrawsPerRt.clear();
     g_skinnedDrawsLast = g_skinnedDrawsThisFrame; g_skinnedDrawsThisFrame = 0;
     g_depthDrawsIntoFinalLast = g_depthDrawsIntoFinal; g_depthDrawsIntoFinal = 0;
     { uint32_t best = 0; for (auto& kv : g_depthDrawsPerRt) if (kv.second > best) best = kv.second; g_geoDrawsLast = best; g_depthDrawsPerRt.clear(); g_curGeoRt = 0; g_geoRt = 0; }
@@ -1960,7 +2004,8 @@ static void frame_rollover()
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_finalPreHudInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
-        { const objmv::Stats& os = objmv::stats(); logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
+        { const objmv::Stats& os = objmv::stats(); logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
+        logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
         g_camDeltaRotMax = g_camDeltaPosMax = 0; g_vpChanges = 0;

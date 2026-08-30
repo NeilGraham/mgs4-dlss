@@ -80,6 +80,7 @@ Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
+WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
 UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-colour mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
 ```
 
@@ -227,6 +228,29 @@ and the quad's scene copy faded into the UI layer whenever the camera moved.)
 `UIMask=1` (live) is the fallback for the composite insertion: where the replayed UI layer holds bright HUD detail,
 DLSS's bias-current-colour mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
 is active (the HUD is not in DLSS's input there).
+
+### 3D windows: the Codec caller (`WindowScene`, on by default)
+
+A Codec call renders no world at all - the previous frame simply stays in the final texture - and the caller's scene
+is rendered **with depth into its own render target** at a window viewport (1866x1032 at 987,564 on this setup),
+then post-processed (that is where the CRT/scanline look is applied) and blitted into the codec frame; ~400 panel
+quads follow. The pause menu is different: the live world still renders at the full viewport, with the Snake model in
+a 960x552 window.
+
+With `WindowScene=1` the add-on runs DLSS on that window target **at its first reader**, i.e. after the caller's scene
+is finished and before the game's own post-process. The consequences are exactly what a Codec call needs:
+
+- the caller's face and room go through DLAA and, with `renodx-dlss5` loaded, DLSS 5 Neural Rendering;
+- the CRT overlay is applied by the game *to the DLSS output*, so it is never part of DLSS's input, and neither are
+  the frame, the text or any panel - they are drawn afterwards and classified HUD;
+- the DLSS result is copied back only into the window rectangle, and the camera vectors are computed relative to that
+  rectangle and forced to zero outside it, so nothing can bleed out of the window into the frozen background.
+
+Verified in the Act 2 Codec cutscene `s02a10l_D2` (Campbell/Rosemary): the magenta path test (`DebugMode=1`) marks
+exactly (1680,296) 1864x1024 - the caller's box on screen - 99 % filled with none outside; the motion-vector view
+(`DebugMode=5`) shows the field only inside that box with the character silhouettes on it, in every pan direction;
+DLSS and NR evaluate on every frame of the call. In gameplay the insertion never fires (a full-frame 3D viewport is
+present), and the pause menu keeps the normal path for the same reason.
 
 ### Known limitations
 
