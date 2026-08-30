@@ -209,6 +209,11 @@ static resource g_keep = { 0 }; static resource_usage g_keepState = resource_usa
 static uint64_t g_keepSeed = 0; static bool g_keepValid = false; static uint32_t g_keepRedirects = 0;
 static bool g_freshWrite = false;                // this frame the final texture received a scene write from a live source (geometry target, video)
 static uint32_t g_frozenPassFrames = 0;
+// Discontinuities in what DLSS sees: after a pass-through frame, or when the insertion switches between the final
+// texture and a 3D window's target, the history holds something else entirely (the Codec caller's first frame came out
+// warped: stale history reprojected with meaningless vectors). The next evaluation resets.
+static bool g_forceReset = false; static int g_lastEvalWindow = -1; static uint32_t g_discontResets = 0;
+static uint32_t g_fgCutFrames = 0;   // evaluations after a discontinuity during which DLSS-G is told 'cut' (no interpolation)
 static int g_cfgTraceFreeze = 0; static uint32_t g_freezeTracedAt = 0;
 // Freeze trace (TraceFreeze=1): the full-size draw / copy chain of the last frames is kept in a ring and written to the
 // log when the world stops rendering, followed by the next non-empty frames. (The game stalls for a few empty frames
@@ -1248,7 +1253,11 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // DRS=1: DLSS evaluates the whole texture (the sub-rect content at its native scale, garbage outside it that the
     // composite never samples), so NGX post-processing add-ons see a full-size contract; DRS=2 = sub-rect evaluation.
     ep.InRenderSubrectDimensions = (g_cfgDRS == 2) ? NVSDK_NGX_Dimensions{ subW, subH } : NVSDK_NGX_Dimensions{ cd.texture.width, cd.texture.height };
-    ep.InReset = (g_frame <= g_createdFrame + 1 || (mvReset && g_cfgMotionVectors)) ? 1 : 0;
+    const bool discont = g_forceReset || (g_lastEvalWindow >= 0 && g_lastEvalWindow != (int)g_windowMode);
+    if (discont && !frozenPass) { g_discontResets++; if (g_discontResets <= 50) logmsg("RESET f%u: %s -> DLSS history cleared", g_frame, g_forceReset ? "first evaluation after frozen pass-through frames" : "insertion moved between the final texture and a 3D window"); }
+    if (frozenPass) g_forceReset = true; else { g_forceReset = false; g_lastEvalWindow = (int)g_windowMode; }
+    if (discont && !frozenPass) g_fgCutFrames = 8;
+    ep.InReset = (g_frame <= g_createdFrame + 1 || (mvReset && g_cfgMotionVectors) || (discont && !frozenPass)) ? 1 : 0;
     ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f;
     ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
@@ -1305,8 +1314,26 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fi.depth = reinterpret_cast<ID3D12Resource*>(dlssDepth.handle); fi.depthFormat = depthStretched ? DXGI_FORMAT_R32_FLOAT : static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = depthStretched ? (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         fi.mv = reinterpret_cast<ID3D12Resource*>(g_mv.handle); fi.mvState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         if (g_windowInjectedThisFrame) {
-            // the DLSS output here is the 3D window's own target, not a HUD-less frame: hand DLSS-G the replayed UI layer only
-            if (g_ui.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && g_uiDrawsThisFrame > 0) { fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true; }
+            // The DLSS output here is the 3D window's own target, not a HUD-less frame, and the Codec's panels are drawn
+            // after this point. Without a HUD-less image DLSS-G warps those panels on generated frames whenever they move
+            // (the call start collapses them: torn copies of the panel lines flashed across the screen). So the HUD-less
+            // image is the final texture right before its first panel draw - the pre-HUD capture taken there - tagged
+            // valid until present, seeded now with the frame as it is (in case no panel is drawn), plus the UI layer.
+            if (g_preHud.handle && restore && restore->rt.handle && restore->rt_w == cd.texture.width && restore->rt_h == cd.texture.height && is_live(restore->rt.handle)) {
+                if (g_preHudState != resource_usage::copy_dest) { cmd->barrier(g_preHud, g_preHudState, resource_usage::copy_dest); g_preHudState = resource_usage::copy_dest; }
+                cmd->barrier(restore->rt, resource_usage::render_target, resource_usage::copy_source);
+                cmd->copy_resource(restore->rt, g_preHud);
+                cmd->barrier(restore->rt, resource_usage::copy_source, resource_usage::render_target);
+                fi.hudless = reinterpret_cast<ID3D12Resource*>(g_preHud.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_COPY_DEST; fi.hudlessUntilPresent = true;
+                static bool once = false; if (!once) { once = true; logmsg("FG (3D window): HUD-less = the final texture before its first panel draw (pre-HUD capture, valid until present); UI layer tagged"); }
+            }
+            if (g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask)) {
+                if (!g_uiClearedThisFrame) {   // nothing replayed yet this frame: start from an empty layer (the first panel draw clears it again, cheaply)
+                    if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
+                    const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero);
+                }
+                fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true;
+            }
         } else if (g_finalPreHudThisFrame && !upscale && g_cfgDebugMode != 5) {
             fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
             if (g_ui.handle && (g_cfgFgMode != 0 || g_cfgUiMask)) { fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true; }
@@ -1336,7 +1363,12 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fi.texW = cd.texture.width; fi.texH = cd.texture.height; fi.hudlessW = outW; fi.hudlessH = outH;
         fi.hudlessSubrect = false;   // full grid: the HUD-less image, depth and vectors all cover the whole texture
         fi.vpX = (int32_t)g_gameVp[0]; fi.vpY = (int32_t)g_gameVp[1]; fi.vpW = (uint32_t)g_gameVp[2]; fi.vpH = (uint32_t)g_gameVp[3];
-        fg::CameraInput ci = { g_frameVP, g_havePrevVP ? g_prevVP : g_frameVP, ep.InJitterOffsetX, ep.InJitterOffsetY, ep.InReset != 0, mvW, mvH };
+        // Frozen screens (pass-through frames) and the first frames after a transition are cuts for frame generation:
+        // interpolating a still image gains nothing, and interpolating across the Codec's panel collapse / window
+        // appearance tears the UI (the NVIDIA app's FG preset override disables DLSS-G's UI recomposition).
+        const bool fgCut = ep.InReset != 0 || frozenPass || g_fgCutFrames > 0;
+        if (g_fgCutFrames > 0 && !frozenPass) g_fgCutFrames--;
+        fg::CameraInput ci = { g_frameVP, g_havePrevVP ? g_prevVP : g_frameVP, ep.InJitterOffsetX, ep.InJitterOffsetY, fgCut, mvW, mvH };
         fg::frame_inputs(g_frame, fi, ci);
     }
 

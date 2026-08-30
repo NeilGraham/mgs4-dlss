@@ -40,6 +40,7 @@ namespace fg {
         uint32_t hudlessW, hudlessH;                      // real size of the HUD-less / UI textures (0 = renderW/H)
         bool hudlessSubrect;                              // HUD-less content occupies the renderW x renderH sub-rect of its texture
         bool uiUntilPresent;                              // the UI layer is written after this call (tag it valid until present)
+        bool hudlessUntilPresent;                         // the HUD-less image is written after this call (tag it valid until present)
         uint32_t bbW, bbH;                                // backbuffer size
         int32_t vpX, vpY; uint32_t vpW, vpH;              // game image rectangle inside the backbuffer (subrect), 0 size = full
     };

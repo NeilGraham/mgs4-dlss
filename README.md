@@ -291,6 +291,19 @@ game's seed blit (the full-viewport draw that samples the seed) to point at that
 rewrite the upscaling modes use for the composite - so the frozen background is the live frame, pixel for pixel. The
 kept copy is invalidated as soon as the game writes into the seed again without the add-on's insertion.
 
+### Frame generation on frozen screens and at Codec transitions
+
+DLSS-G interpolates between consecutive game frames; on a frozen screen that gains nothing, and across the Codec's
+transitions (the panel collapse when a call starts, the caller window appearing) it produced single torn frames -
+displaced copies of the panel lines and of the caller window flashing across the centre. Note that an NVIDIA-app
+frame-generation preset override disables DLSS-G's UI recomposition ("Preset A selected, disabling UIR" in sl.log),
+so the UI-layer / HUD-less tags cannot protect moving UI in that configuration. The add-on therefore reports a cut
+(`reset`) to DLSS-G on every frozen pass-through frame and for the first 8 evaluations after a transition (a
+pass-through frame ending, the insertion moving between the final texture and a 3D window), and also forces a DLSS
+history reset on the first evaluation after such a transition (the caller's first frame used to come out warped from
+seconds-old history). In window mode it now also tags a HUD-less image (the pre-HUD capture, valid until present) and
+the UI layer for DLSS-G, which helps where UI recomposition is available.
+
 ### Known limitations
 
 - Alpha-tested surfaces (hair cards) get object vectors over their transparent texels too (the velocity pass has no alpha test); not visible in practice.
