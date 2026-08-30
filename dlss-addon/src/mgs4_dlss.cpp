@@ -1219,7 +1219,14 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // are depth-tested quads and its Snake model brings a camera matrix, yet the background is the recycled seed.
     // Without the seed state (e.g. a blocking dialog that stops the world some other way) a frame with no camera / no
     // depth-tested draws and no fresh write is treated the same.
-    if (g_freshWrite || (g_haveFrameVP && g_depthOnDrawsThisFrame >= 400)) g_frozen = false;
+    // Live-scene safety net (scenes that never write the final texture from a geometry target): many depth-tested draws
+    // with a camera INTO A GEOMETRY TARGET. The pause menu's panels are hundreds of depth-tested quads too, but they go
+    // into the final texture, and clearing the frozen state on them reset the history one frame before the unpause.
+    const bool geoIsFinal = !g_curGeoRt || g_curGeoRt == g_finalRt[0] || g_curGeoRt == g_finalRt[1] || g_curGeoRt == color.handle;
+    if (g_frozen && (g_freshWrite || (!g_windowMode && g_haveFrameVP && g_depthOnDrawsThisFrame >= 400 && !geoIsFinal))) {
+        g_frozen = false;
+        static uint32_t nlog = 0; if (nlog++ < 40) logmsg("frozen state cleared at frame %u: %s (scene write from %s, geo target %p, finals %p/%p, colour %p, depth-tested %u, window %d)", g_frame, g_freshWrite ? "fresh scene write" : "live scene into a geometry target", desc_str(dev, resource{ g_finalSceneSrc }).c_str(), (void*)g_curGeoRt, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)color.handle, g_depthOnDrawsThisFrame, (int)g_windowMode);
+    }
     const bool frozenPass = g_cfgFrozenBg && !g_windowMode && !upscale && g_cfgDRS != 2 && !g_freshWrite && (g_frozen || !g_haveFrameVP || g_depthOnDrawsThisFrame == 0);
     { static bool was = false; if (frozenPass != was) { was = frozenPass; logmsg("frozen screen pass-through %s at frame %u (frozen %d, fresh write %d, scene write %d from %p, camera %d, depth-tested draws %u, window %d)", frozenPass ? "ON" : "off", g_frame, (int)g_frozen, (int)g_freshWrite, (int)g_finalSceneWritten, (void*)g_finalSceneSrc, (int)g_haveFrameVP, g_depthOnDrawsThisFrame, (int)g_windowMode); } }
     const bool discont = g_forceReset || (g_lastEvalWindow >= 0 && g_lastEvalWindow != (int)g_windowMode);
@@ -1536,7 +1543,7 @@ static void on_destroy_resource(device*, resource res)
     // forget every cross-frame reference to it (level transitions destroy and recreate the render targets)
     if (g_prevBusiestRt == res.handle) g_prevBusiestRt = 0;
     if (g_prevBusiestRt2 == res.handle) g_prevBusiestRt2 = 0;
-    if (g_finalRt[0] == res.handle) { g_finalRt[0] = 0; g_frozen = false; }
+    if (g_finalRt[0] == res.handle) { g_finalRt[0] = 0; if (g_frozen) logmsg("frozen state cleared: final texture %p destroyed", (void*)res.handle); g_frozen = false; }
     if (g_keepSeed == res.handle) { g_keepSeed = 0; g_keepValid = false; }
     if (g_finalRt[1] == res.handle) g_finalRt[1] = 0;
     if (g_geoRt == res.handle) g_geoRt = 0;
@@ -1827,7 +1834,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 int idx = -1, param = -1; bool fromFinal = false;
                 for (int p = 1; p < 3 && idx < 0; ++p) if (s.table_set[p]) for (int i = 0; i < 4; ++i) {
                     resource r = resolve_descriptor(dev, s.tables[p], i);
-                    if (r.handle && (r.handle == g_finalSceneRt || r.handle == g_finalRt[0] || r.handle == g_finalRt[1])) { fromFinal = true; if (r.handle == g_finalSceneRt && g_finalSceneWritten) { idx = i; param = p; break; } }
+                    if (r.handle && (r.handle == g_finalSceneRt || r.handle == g_finalRt[0] || r.handle == g_finalRt[1] || g_seedTex.count(r.handle))) { fromFinal = true; if (r.handle == g_finalSceneRt && g_finalSceneWritten) { idx = i; param = p; break; } }
                 }
                 if (fromFinal) g_seedTex.insert(s.rt.handle);   // a capture of the frozen image (the pause / Codec seed, the frosted-panel source)
                 if (idx >= 0 && g_cfgFrozenBg && !g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2
@@ -1872,6 +1879,9 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // 2048x4096 and the like - large, but not frame-shaped)
                     auto sceneSized = [&](const resource_desc& d) {
                         if (d.type != resource_type::texture_2d || d.texture.width * 2 < g_dlssW || d.texture.height * 2 < g_dlssH) return false;
+                        // a depth texture (the port's depth copies / fog passes sample it full-screen) is not scene colour: the
+                        // pause menu's closing frame samples it into the final texture and looked like a fresh scene write
+                        switch (d.texture.format) { case format::r24_g8_typeless: case format::d24_unorm_s8_uint: case format::r32_typeless: case format::d32_float: case format::r16_typeless: case format::d16_unorm: case format::r32_g8_typeless: case format::d32_float_s8_uint: return false; default: break; }
                         const float a = float(d.texture.width) / float(d.texture.height), fa = float(g_dlssW) / float(g_dlssH);
                         return fabsf(a - fa) < 0.2f;
                     };

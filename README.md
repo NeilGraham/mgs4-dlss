@@ -300,7 +300,10 @@ and, when the first evaluation after a frozen screen sees the same camera (the c
 the history: no reset, motion computed relative to that last live frame rather than to the pause menu's model camera,
 and only the rectangle the 3D window (the Snake model) occupied meanwhile is excluded for that one frame (its history
 belongs to the model, not the world). Log: `RESUME f…: same camera as before the freeze -> DLSS history kept`. A
-different camera still resets as before.
+different camera still resets as before. Two details that mattered: the frozen state is only cleared by a colour scene
+write from a geometry target (the pause menu's closing frame samples the *depth* texture full-screen into the final
+texture, which looked like fresh content and reset the history one frame early), and the pause menu's own hundreds of
+depth-tested panel quads never count as a live scene.
 
 ### Frame generation on frozen screens and at Codec transitions
 
