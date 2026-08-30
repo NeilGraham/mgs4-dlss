@@ -1971,7 +1971,12 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         const float kx = s.vp_valid ? s.vp.width * 2.0f / float(s.rt_w) : 1.0f, ky = s.vp_valid ? s.vp.height * 2.0f / float(s.rt_h) : 1.0f;
                         const bool subRect = !s.vp_valid || kx < 0.999f || ky < 0.999f;
                         g_dofKx = (s.vp_valid && kx > 0.05f) ? (kx > 1.0f ? 1.0f : kx) : 1.0f; g_dofKy = (s.vp_valid && ky > 0.05f) ? (ky > 1.0f ? 1.0f : ky) : 1.0f;
-                        static float lastKx = 1.0f, lastKy = 1.0f; const bool kStable = kx == lastKx && ky == lastKy; lastKx = kx; lastKy = ky;
+                        static float lastKx = 1.0f, lastKy = 1.0f; bool kStable = kx == lastKx && ky == lastKy; lastKx = kx; lastKy = ky;
+                        // the frame before a detected step: the scene already rendered at the new size while the post chain still runs at the old one
+                        if (kStable && g_sceneVpFrameValid && s.vp_valid && (fabsf(g_sceneVpFrame.width - kx * float(s.rt_w)) > 2.0f || fabsf(g_sceneVpFrame.height - ky * float(s.rt_h)) > 2.0f)) {
+                            kStable = false;
+                            static uint32_t nm = 0; if (nm++ < 20) logmsg("PostDof: f%u scene viewport %.0fx%.0f disagrees with the post chain (k %.3f -> %.0fx%.0f) - the game's DoF for this frame", g_frame, g_sceneVpFrame.width, g_sceneVpFrame.height, kx, kx * float(s.rt_w), ky * float(s.rt_h));
+                        }
                         g_dofSkipFrame = s.vp_valid && kStable && (!subRect || g_cfgDofSubRect != 0);   // a resolution-step frame keeps the game's DoF: parts of its chain can disagree about the scale on that frame
                         if (!kStable) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
                         if (subRect) {
