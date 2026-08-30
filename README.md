@@ -198,26 +198,32 @@ wrong for this port's composite and breaks NR's coverage.
 The sub-rect is detected per frame from the viewport most depth-tested draws into the frame's geometry target use
 (at least half the target); the 20-frame hysteresis copy is only a fallback before the first scene draw of a frame.
 
-### HUD (`UIMask`, on by default)
+### HUD: DLSS before the HUD, on the final texture
 
-The port draws its HUD into the final texture **before** the composite, so with DLAA on the final image (the DLSS 5 NR
-configuration) the HUD is inside the image DLSS reprojects, and under camera motion it ghosted opposite to the
-rotation. The add-on already replays the HUD draws into a UI layer for frame generation; with `UIMask=1` that layer
-also feeds DLSS: every pixel where the layer holds bright HUD detail (text, bars, icons) is set in DLSS's
-bias-current-colour mask and gets a zero motion vector, so DLSS takes it from the current frame. Dim translucent panel
-backgrounds keep their camera vectors and normal accumulation (a uniform tint cannot visibly ghost, while masking it
-would strip the anti-aliasing from the scene behind it). The UI layer is now built whether or not frame generation is
-on, so `DebugMode=6` (UI layer) and `7` (HUD-less) work in every configuration.
+The port draws its HUD into the final texture **before** the composite. In the DLSS 5 NR configuration (DLAA on the
+final image) that used to put the HUD inside the image DLSS reprojected - HUD ghosting opposite to camera turns - and
+the HUD-less colour for frame generation had to be patched together from a pre-HUD capture (raw, no DLAA/NR under
+the HUD elements: visible rectangles and blur/flicker around the HUD in generated frames).
+
+Since v1.0.1 the add-on runs DLSS at the **first HUD draw of the frame, on the final texture**: the scene has been
+upscaled/tonemapped into it, the HUD has not been drawn yet. DLSS and the inline NR add-on never see the HUD, the
+game then draws the HUD on top of the DLSS output, and that output *is* the HUD-less colour for DLSS-G (no patching);
+the replayed UI layer is tagged valid-until-present. Frames without a HUD (cutscenes, menus) fall back to the
+composite insertion as before. `DebugMode=7` drops the HUD draws in this mode (true HUD-less view); `DebugMode=6`
+shows the UI layer of the previous frame (it is replayed after the insertion); the magenta test (`DebugMode=1`) is
+skipped at this insertion point.
 
 HUD draws are told apart from the post-process passes into the same texture by shape: HUD elements are drawn with
-the full viewport, post passes are the <= 4-vertex fullscreen draws that sample a scene-sized input, and anything
-drawn with the scene's (dynamic-resolution) viewport is scene-space whatever its vertex count (tints, vignettes, the
-game's upscale). Nothing counts as HUD until the final texture has received this frame's scene (the fullscreen pass
-sampling a scene-sized input), so the pre-HUD capture behind the HUD-less image is never taken from a texture still
-holding the previous frame or the pre-upscale sub-rect. The earlier "samples anything scene-sized" test mis-filed
-about a third of the HUD draws every frame - descriptor slots a HUD shader does not use carry stale scene-sized
-textures - which is what made the UI layer (and the DLSS-G UI recomposition) flicker; a scene-space tint quad
-classified as HUD made the HUD-less view shrink with the dynamic resolution and flash during camera turns.
+the full viewport after the fullscreen pass that writes the scene into the final texture; anything drawn with the
+scene's (dynamic-resolution) viewport is scene-space whatever its vertex count, and <= 4-vertex fullscreen draws
+that sample a scene-sized input are post passes. Nothing counts as HUD until that scene write has happened. (The
+earlier "samples anything scene-sized" test mis-filed about a third of the HUD draws - descriptor slots a HUD shader
+does not use carry stale scene-sized textures - which made the UI layer flicker; a scene-space tint quad
+classified as HUD made the HUD-less view shrink with the dynamic resolution and flash during camera turns.)
+
+`UIMask=1` (live) is the fallback for the composite insertion: where the replayed UI layer holds bright HUD detail,
+DLSS's bias-current-colour mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
+is active (the HUD is not in DLSS's input there).
 
 ### Known limitations
 

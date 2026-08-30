@@ -583,7 +583,7 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
     sl::Resource hudRes(sl::ResourceType::eTex2d, in.hudless, in.hudlessState);
     if (in.hudless) { hudRes.width = in.hudlessW ? in.hudlessW : in.renderW; hudRes.height = in.hudlessH ? in.hudlessH : in.renderH; hudRes.nativeFormat = in.hudlessFormat; tags[n++] = sl::ResourceTag(&hudRes, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eOnlyValidNow, in.hudlessSubrect ? &full : nullptr); }
     sl::Resource uiRes(sl::ResourceType::eTex2d, in.ui, in.uiState);
-    if (in.ui) { uiRes.width = in.hudlessW ? in.hudlessW : in.renderW; uiRes.height = in.hudlessH ? in.hudlessH : in.renderH; uiRes.nativeFormat = in.uiFormat; tags[n++] = sl::ResourceTag(&uiRes, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eOnlyValidNow, &full); }
+    if (in.ui) { uiRes.width = in.hudlessW ? in.hudlessW : in.renderW; uiRes.height = in.hudlessH ? in.hudlessH : in.renderH; uiRes.nativeFormat = in.uiFormat; tags[n++] = sl::ResourceTag(&uiRes, sl::kBufferTypeUIColorAndAlpha, in.uiUntilPresent ? sl::ResourceLifecycle::eValidUntilPresent : sl::ResourceLifecycle::eOnlyValidNow, &full); }
     sl::Extent bbExt{ (uint32_t)(in.vpY < 0 ? 0 : in.vpY), (uint32_t)(in.vpX < 0 ? 0 : in.vpX), in.vpW, in.vpH };
     if (in.vpW && in.vpH && (in.vpW != in.bbW || in.vpH != in.bbH)) tags[n++] = sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &bbExt);   // FG only on the game image rectangle
     r = p_slSetTagForFrame(*g_token, kViewport, tags, n, in.cmd);

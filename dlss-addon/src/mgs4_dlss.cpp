@@ -168,6 +168,10 @@ static uint32_t g_bbW = 0, g_bbH = 0;
 static std::unordered_set<uint64_t> g_backbuffers;
 static uint32_t g_sceneDrawsThisFrame = 0;
 static bool g_injectedThisFrame = false;
+static bool g_finalPreHudThisFrame = false;   // DLSS ran on the final texture before its first HUD draw (composite mode + HUD)
+static uint32_t g_finalPreHudInjections = 0;
+static bool g_skipThisDraw = false;           // DebugMode=7 in that mode: the HUD draws are dropped (HUD-less view)
+
 static std::unordered_map<uint64_t, uint32_t> g_drawsPerRt;
 static std::unordered_map<uint64_t, uint32_t> g_drawsPerDs;
 static std::unordered_map<uint64_t, uint64_t> g_dsForRt;
@@ -1210,7 +1214,11 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         fi.cmd = native;
         fi.depth = reinterpret_cast<ID3D12Resource*>(dlssDepth.handle); fi.depthFormat = depthStretched ? DXGI_FORMAT_R32_FLOAT : static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = depthStretched ? (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         fi.mv = reinterpret_cast<ID3D12Resource*>(g_mv.handle); fi.mvState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-        if (g_cfgPrePost && !upscale && g_cfgDebugMode != 5) { fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
+        if (g_finalPreHudThisFrame && !upscale && g_cfgDebugMode != 5) {
+            fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if (g_ui.handle && (g_cfgFgMode != 0 || g_cfgUiMask)) { fi.ui = reinterpret_cast<ID3D12Resource*>(g_ui.handle); fi.uiFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.uiState = D3D12_RESOURCE_STATE_RENDER_TARGET; fi.uiUntilPresent = true; }
+            static bool once = false; if (!once) { once = true; logmsg("FG: HUD-less = DLSS output (pre-HUD insertion on the final texture); UI layer tagged valid-until-present"); }
+        } else if (g_cfgPrePost && !upscale && g_cfgDebugMode != 5) { fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
         else if (!g_cfgPrePost && !upscale && !drsActive && g_cfgDebugMode != 5 && g_ui.handle && g_uiDrawsThisFrame > 0) {
             // composite mode: the image DLSS-G sees has the HUD baked in; hand it the replayed HUD layer as UI colour+alpha
             // so it re-composites the HUD on generated frames instead of warping it with the scene
@@ -1286,7 +1294,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         const resource_usage to2[2] = { colorState, resource_usage::unordered_access };
         cmd->barrier(2, res2, from2, to2); g_outState = resource_usage::unordered_access;
     }
-    if (g_cfgDebugMode == 1) {
+    if (g_cfgDebugMode == 1 && !g_finalPreHudThisFrame) {   // (the magenta test clears the game's bound final texture; skipped at the pre-HUD insertion)
         resource target = upscale ? g_out : color;
         resource_usage tstate = upscale ? g_outState : colorState;
         resource_view rtv = { 0 };
@@ -1595,7 +1603,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
             // final texture once the 3D scene is in; post-process passes into it are told apart by sampling a scene-sized
             // input (half the frame size or more), HUD draws only sample atlases.
-            const bool uiCandidate = !g_injectedThisFrame && !depthOn && g_geoRt
+            const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame) && !depthOn && g_geoRt
                 && (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) && s.rt_w == g_dlssW && s.rt_h == g_dlssH;
             const bool uiReplay = uiCandidate && g_ui.handle && g_uiRtv.handle && (g_cfgFgMode != 0 || g_cfgUiMask) && !g_cfgPrePost;
             if (uiCandidate) {
@@ -1628,14 +1636,27 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     if (post && big) g_finalSceneWritten = true;
                     if (!post && !g_finalSceneWritten) { post = true; g_uiPreSceneThisFrame++; }
                     if (post) g_uiPostSkippedThisFrame++;
+                    else if (!g_injectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2) {
+                        // Composite mode with a HUD: run DLSS on the final texture now, before its first HUD draw. DLSS (and
+                        // any NGX post-processing add-on evaluating inline) then never sees the HUD, the HUD is drawn by the
+                        // game on top of the DLSS output, and the DLSS output is the HUD-less colour for frame generation.
+                        static bool once = false; if (!once) { once = true; logmsg("pre-HUD insertion (final): DLSS on the final texture %s before its first HUD draw (composite skipped)", desc_str(dev, s.rt).c_str()); }
+                        t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(0, nullptr, resource_view{ 0 }); t_reentrant = false;
+                        g_finalPreHudThisFrame = true;
+                        run_dlss(cmd, &s, s.rt, resource_usage::render_target, 0);
+                        t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(s.rtv_count, s.rtvs, s.dsv); t_reentrant = false;
+                        g_injectedThisFrame = true; g_finalPreHudInjections++;
+                    }
+                    if (post) {}
                     else if (!uiReplay) g_hudDrawsThisFrame++;   // classification only
                     else {
                         g_hudDrawsThisFrame++;
+                        if (g_cfgDebugMode == 7 && g_finalPreHudThisFrame) g_skipThisDraw = true;   // HUD-less view: the HUD stays out of the image
                         t_reentrant = true;
                         if (g_uiState != resource_usage::render_target) { cmd->barrier(g_ui, g_uiState, resource_usage::render_target); g_uiState = resource_usage::render_target; }
                         if (!g_uiClearedThisFrame) {
                             const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_uiRtv, zero); g_uiClearedThisFrame = true;
-                            if (g_preHud.handle) {   // the final texture right before its first HUD draw = post-processed scene without HUD
+                            if (g_preHud.handle && !g_finalPreHudThisFrame) {   // the final texture right before its first HUD draw = post-processed scene without HUD
                                 if (g_preHudState != resource_usage::copy_dest) { cmd->barrier(g_preHud, g_preHudState, resource_usage::copy_dest); g_preHudState = resource_usage::copy_dest; }
                                 cmd->barrier(s.rt, resource_usage::render_target, resource_usage::copy_source);
                                 cmd->copy_resource(s.rt, g_preHud);
@@ -1749,8 +1770,8 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     if (!g_scaling || !is_scaled(color)) remember_internal_res(cd.texture.width, cd.texture.height);   // game's real render size (changed in-game?)
     run_dlss(cmd, &s, color, resource_usage::shader_resource_pixel, srvCpu);
 }
-static bool on_draw(command_list* cmd, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) { handle_draw(cmd, draw_args{ false, vc, ic, fv, fi, 0 }); return false; }
-static bool on_draw_indexed(command_list* cmd, uint32_t ic, uint32_t inst, uint32_t fi, int32_t vo, uint32_t finst) { handle_draw(cmd, draw_args{ true, ic, inst, fi, finst, vo }); return false; }
+static bool on_draw(command_list* cmd, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) { g_skipThisDraw = false; handle_draw(cmd, draw_args{ false, vc, ic, fv, fi, 0 }); const bool skip = g_skipThisDraw; g_skipThisDraw = false; return skip; }
+static bool on_draw_indexed(command_list* cmd, uint32_t ic, uint32_t inst, uint32_t fi, int32_t vo, uint32_t finst) { g_skipThisDraw = false; handle_draw(cmd, draw_args{ true, ic, inst, fi, finst, vo }); const bool skip = g_skipThisDraw; g_skipThisDraw = false; return skip; }
 
 static uint32_t g_ppMissFrames = 0;   // frames where the geometry target was finished but no draw sampled it (pre-post could not insert)
 static void handle_copy(command_list* cmd, resource src, resource dst, const char* what)
@@ -1840,7 +1861,7 @@ static void frame_rollover()
     if (dumping() && !g_blockHist.empty()) report_blocks();
     g_viewEvents = 0; g_copyEvents = 0;
     if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
-    g_injectedThisFrame = false; g_featureCreatedThisFrame = false;
+    g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
@@ -1884,8 +1905,8 @@ static void frame_rollover()
     static uint32_t lastLogged = 0;
     if (g_frame > 600 && (g_frame - lastLogged) >= 600) {
         lastLogged = g_frame; g_missLogBudget = 3;
-        logmsg("jitter (this frame): calls %u, no-cbv %u, dup-region %u, map-fail %u, patched %u, no-matrix %u; VP found=%d (votes %zu); MV dispatches %u, resets %u, cam delta now rot %.3f pos %.1f, max in window rot %.3f pos %.1f, VP changed in %u frames; insertion pre-post %u / composite %u",
-               g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_compositeInjections);
+        logmsg("jitter (this frame): calls %u, no-cbv %u, dup-region %u, map-fail %u, patched %u, no-matrix %u; VP found=%d (votes %zu); MV dispatches %u, resets %u, cam delta now rot %.3f pos %.1f, max in window rot %.3f pos %.1f, VP changed in %u frames; insertion pre-post %u / final-pre-HUD %u / composite %u",
+               g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_finalPreHudInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
