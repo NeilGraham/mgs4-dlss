@@ -231,6 +231,7 @@ static int g_cfgPreWarm = 1;
 static bool g_warmDone = false; static uint32_t g_warmEvals = 0, g_noSceneFrames = 0;
 static bool g_dofReady = false, g_dofInitTried = false;   // frames left to the game's DoF because the scene was a dynamic-resolution sub-rect   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
+static uint32_t g_lateSceneWrites = 0;   // scene writes into the final AFTER this frame's pre-HUD insertion: the insertion fired too early
 static resource g_dofCoc = { 0 }, g_dofBlur = { 0 }; static resource_usage g_dofCocState = resource_usage::unordered_access, g_dofBlurState = resource_usage::unordered_access;
 static uint32_t g_dofW = 0, g_dofH = 0;
 static bool g_prevFrameHadScene = false;       // the previous frame rendered a full-frame 3D scene
@@ -2459,6 +2460,10 @@ static void reload_config()
         g_cfgDofJitterSign = GetPrivateProfileIntA("DLSS", "DofJitterSign", 1, g_iniPath);
         g_cfgDofSubRect = GetPrivateProfileIntA("DLSS", "DofSubRect", 1, g_iniPath);
         g_cfgPreWarm = GetPrivateProfileIntA("DLSS", "PreWarm", 1, g_iniPath);
+        {   // TraceFrames=N (live): trace every full-frame draw for the next N frames (with TraceFreeze=1 the lines go to the log)
+            static int lastTf = 0; const int tf = GetPrivateProfileIntA("DLSS", "TraceFrames", 0, g_iniPath);
+            if (tf != lastTf) { lastTf = tf; if (tf > 0) { g_traceUntil = g_frame + (uint32_t)tf; logmsg("tracing the next %d frames (%u..%u)", tf, g_frame, g_traceUntil - 1); } }
+        }
     }
     {   // DumpShaders=1: write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (post-pass identification)
         static int last = -1; const int dump = GetPrivateProfileIntA("DLSS", "DumpShaders", 0, g_iniPath);
@@ -2572,7 +2577,7 @@ static void frame_rollover()
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
