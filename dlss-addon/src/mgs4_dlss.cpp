@@ -1895,6 +1895,7 @@ struct draw_args { bool indexed; uint32_t count, instances, first, first_instanc
 static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
 {
     if (g_scaling || g_bbW == 0 || g_bbH == 0) { g_warmDone = true; return; }   // only the DLAA layout is known in advance
+    if (!ngx_init(dev)) { logmsg("pre-warm: NGX init failed - giving up"); g_warmDone = true; return; }   // with Streamline, NGX is not initialised at device creation
     LARGE_INTEGER f, t0, t1; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
     const format fmt = g_dlssFmt != format::unknown ? g_dlssFmt : format::r8g8b8a8_unorm;
     if (!g_dlss) {
@@ -1938,7 +1939,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     }
     if (!s.rt.handle || g_bbW == 0) return;
     device* dev = cmd->get_device();
-    if (g_cfgPreWarm && !g_warmDone && g_cfgEnabled && g_noSceneFrames >= 30 && g_sceneDrawsThisFrame == 0 && g_depthOnDrawsThisFrame == 0 && !is_backbuffer(s.rt) && g_ngxParams)
+    if (g_cfgPreWarm && !g_warmDone && g_cfgEnabled && g_noSceneFrames >= 30 && g_sceneDrawsThisFrame == 0 && g_depthOnDrawsThisFrame == 0 && !is_backbuffer(s.rt))
         prewarm_step(dev, cmd, s);
     if (!is_backbuffer(s.rt)) {
         if (s.rt_w >= 640 && s.rt_h >= 360) {
@@ -1970,7 +1971,9 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         const float kx = s.vp_valid ? s.vp.width * 2.0f / float(s.rt_w) : 1.0f, ky = s.vp_valid ? s.vp.height * 2.0f / float(s.rt_h) : 1.0f;
                         const bool subRect = !s.vp_valid || kx < 0.999f || ky < 0.999f;
                         g_dofKx = (s.vp_valid && kx > 0.05f) ? (kx > 1.0f ? 1.0f : kx) : 1.0f; g_dofKy = (s.vp_valid && ky > 0.05f) ? (ky > 1.0f ? 1.0f : ky) : 1.0f;
-                        g_dofSkipFrame = s.vp_valid && (!subRect || g_cfgDofSubRect != 0);
+                        static float lastKx = 1.0f, lastKy = 1.0f; const bool kStable = kx == lastKx && ky == lastKy; lastKx = kx; lastKy = ky;
+                        g_dofSkipFrame = s.vp_valid && kStable && (!subRect || g_cfgDofSubRect != 0);   // a resolution-step frame keeps the game's DoF: parts of its chain can disagree about the scale on that frame
+                        if (!kStable) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
                         if (subRect) {
                             g_dofSubRectFrames++;
                             static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u -> k %.3f x %.3f) - %s", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_dofKx, g_dofKy, g_dofSkipFrame ? "handled at that scale" : "the game's DoF stays");
@@ -2003,7 +2006,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
         dof_not_skipped:
             if (g_cfgPostDof && g_dofSkipFrame && !g_dofCombineSeen && da.count <= 4 && s.rt_w == g_dlssW && objmv::pso_ps_hash(s.pso) == PS_DOF_COMBINE) g_dofCombineSeen = true;   // the DoF combine (3-vertex pass): overlays come after it
-            if (g_cfgPostDof && g_cfgDofMask && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
+            if (g_cfgPostDof && g_cfgDofMask && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && (s.topology == 4 || s.topology == 5) && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
                 && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && g_dlssW && g_dofReady) {
                 {
                     // quads / strips drawn into a scene-sized (non-final) texture after the DoF combine whose primary input is
