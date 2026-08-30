@@ -1,6 +1,6 @@
 # mgs4-dlss
 
-**v1.0.2 (2026-08-29)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
+**v1.1 (2026-08-30)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
 
 Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
 
@@ -256,7 +256,7 @@ present), and the pause menu keeps the normal path for the same reason.
 
 ### Frozen screens: the pause menu and Codec backgrounds (`FrozenBackground`, on by default)
 
-Behind the pause menu and the Codec the game shows a **still image of the world**, and until v1.0.2 that image was
+Behind the pause menu and the Codec the game shows a **still image of the world**, and until v1.1 that image was
 the raw (non-DLSS, non-NR) frame, which broke the illusion the moment you paused. The mechanism, from the freeze
 trace (`TraceFreeze=1`): on the last live frame the game draws its upscaled scene into the final texture, then a
 6-vertex draw **downsamples that final texture into a 1920x1080 seed texture**, and only then come the HUD draws -
