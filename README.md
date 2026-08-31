@@ -80,6 +80,10 @@ The list is `tools\scenes.csv` (102 cutscenes, 250 gameplay sections, 68 stage e
 should happen while it runs, press Launch. The panel shows the command line that does the same thing, so anything set
 up in the window can be pasted into a terminal or put in a shortcut.
 
+The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
+to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
+alone. The options below are greyed out while one of them is picked.
+
 What can be ticked (all of it also works from the command line):
 
 - **Skip the boot prompts** (`--advance`, on by default) — taps a button until the add-on log reports the first 3D
@@ -105,6 +109,23 @@ Escape, held anywhere, stops an attached run. The app writes `MGS4\logs\launcher
 three game-start shortcuts at the top level. They run `tools\mgs4_dlss.ps1` **by absolute path**, which is the one
 thing that can break them: move or re-clone the checkout and every shortcut points at a folder that is no longer
 there. Re-running `mgs4-dlss.bat --shortcuts` fixes them all.
+
+#### Two things that crash the game
+
+Both were found by launching them and reading `crash_dumps\` plus `logs\mgs4_dlss.log`; both are the port's or the
+add-on's, not the launcher's, but the launcher is where you meet them.
+
+- **`--stage s00title_1`** (the OTC attract intro) access-violates within seconds, *every* time — with the add-on
+  idle (`Enabled=0`) and frame generation off as well. It is a string in the executable rather than a bootable
+  stage. There used to be a "Title / OTC intro" entry for it; it is gone, and `--title` now says so.
+- **Frame generation on the main menu** loses the device. With `FrameGen` non-zero, sitting on MGS4's own menu ends
+  in `sl.dlss_g` failing `evaluateNGXFeature` with `0xbad00002` (invalid parameter) and Streamline unable to map a
+  buffer, then `DXGI_ERROR_DEVICE_REMOVED` (`0x887a0005`) and an access violation — two runs out of three, 20-50
+  seconds in. It needs *both* the add-on active and `FrameGen` non-zero: `Enabled=0` with `FrameGen=4` survives, and
+  so does `Enabled=1` with `FrameGen=0`. Scenes booted with `--stage` are unaffected, which is why this went
+  unnoticed. Streamline names the shape of it — "internal state is 'fullscreen' but swap chain is 'windowed'" — so
+  it is likely tied to the windowed swapchain the port has been booting with since 2026-08-31. The Play tab warns
+  when the Main menu entry is picked while `FrameGen` is on; `FrameGen=0` is the way to sit on the menu today.
 
 The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
 `--res_width` / `--res_height`, `--windowing`, `--screen_index`, `--lang`, `--region`, `--input_device`, `--rumble`,

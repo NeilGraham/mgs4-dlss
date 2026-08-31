@@ -85,8 +85,10 @@ function Read-Options([string[]]$argv) {
         elseif ($a -match '^--report$')                   { $o.Action = "report"; $took = $false }
         elseif ($a -match '^--stop$')                     { $o.Action = "stop"; $took = $false }
         elseif ($a -match '^--main$')                     { $o.Stage = "@main"; $took = $false }
-        elseif ($a -match '^--title$')                    { $o.Stage = "@title"; $took = $false }
         elseif ($a -match '^--collection$')               { $o.Stage = "@collection"; $took = $false }
+        elseif ($a -match '^--title$') {
+            throw "--title is gone: mgs4.exe --stage s00title_1 crashes the game on its own (verified with the add-on idle and frame generation off). Use --main."
+        }
         elseif ($a -match '^--advance$')                  { $o.Advance = $true; $took = $false }
         elseif ($a -match '^--no-advance$')               { $o.Advance = $false; $took = $false }
         elseif ($a -match '^--(mash-x|mash|flashbacks)$') { $o.MashX = $true; $took = $false }
@@ -134,7 +136,6 @@ MGS4 DLSS - start the game or one scene of it, set the add-on up, check the inst
   mgs4-dlss.bat                         open the window (Play / Settings / Install)
   mgs4-dlss.bat <stage id>              boot that scene and exit
   mgs4-dlss.bat --main                  MGS4's own main menu, past the Master Collection screen
-  mgs4-dlss.bat --title                 the OTC intro (stage s00title_1)
   mgs4-dlss.bat --collection            the Master Collection launcher
   mgs4-dlss.bat --list [text]           every launchable scene (filtered by id / name / act)
   mgs4-dlss.bat --install               the window, opened on the install check
@@ -203,10 +204,11 @@ function Get-SceneCatalogue {
         foreach ($p in $raw.PSObject.Properties) { if ($p.Value) { $labels[$p.Name] = $p.Value } }
     }
     $list = New-Object System.Collections.Generic.List[object]
+    # No "@title" here on purpose: `mgs4.exe --stage s00title_1` access-violates within seconds every time, with
+    # the add-on idle (Enabled=0) and frame generation off as well, so it is the port's own crash on a stage id that
+    # is a string in the exe rather than something bootable. Verified 2026-08-31; do not put it back untested.
     $list.Add([pscustomobject]@{ Id = "@main"; Kind = "start"; Act = "Start the game"; Name = "Main menu"
                                 Note = "MGS4's own menu, past the Master Collection screen (--skip-to-main-menu)" })
-    $list.Add([pscustomobject]@{ Id = "@title"; Kind = "start"; Act = "Start the game"; Name = "Title / OTC intro"
-                                Note = "the attract sequence the game boots into (stage s00title_1)" })
     $list.Add([pscustomobject]@{ Id = "@collection"; Kind = "start"; Act = "Start the game"; Name = "Master Collection launcher"
                                 Note = "the Unity front-end, where the display settings live" })
     if (Test-Mgs4Path $script:ScenesCsv) {
@@ -224,6 +226,9 @@ function Get-SceneCatalogue {
     $script:Catalogue = $list
     return $list
 }
+
+# The catalogue's "@" entries start the game rather than a scene.
+function Test-StartEntry([string]$id) { return $id -eq "" -or $id.StartsWith("@") }
 
 function Find-Scene([string]$id) {
     if (-not $id) { return $null }
@@ -450,7 +455,6 @@ function Get-LaunchCommand($opt, $gameDir) {
         return @{ Exe = (Join-Mgs4Path (Split-Path -Parent $gameDir) "Launcher\launcher.exe"); Args = @() }
     }
     if ($opt.Stage -eq "@main" -or $opt.Stage -eq "") { $cli += "--skip-to-main-menu" }
-    elseif ($opt.Stage -eq "@title") { $cli += @("--stage", "s00title_1") }
     else { $cli += @("--stage", $opt.Stage) }
     if ($opt.Width -gt 0 -and $opt.Height -gt 0) { $cli += @("--res_width", "$($opt.Width)", "--res_height", "$($opt.Height)") }
     if ($opt.Windowing) { $cli += @("--windowing", $opt.Windowing) }
@@ -554,6 +558,13 @@ function Invoke-SceneRun($opt, [scriptblock]$Say) {
         & $Say "attaching to the running game"
     }
     if ($opt.Stage -eq "@collection") { return 0 }
+
+    # A menu is not a scene: there are no boot prompts to press through, no first 3D frame to wait for, and tapping
+    # Cross on the main menu just starts a new game. Only an explicit key sequence makes sense here.
+    if ((Test-StartEntry $opt.Stage) -and -not $opt.Keys) {
+        if ($opt.Advance -or $opt.MashX -or $opt.EndOnGameplay) { & $Say "menu entry: leaving the game alone (the run options are for scenes)" }
+        return 0
+    }
 
     $attached = $opt.Advance -or $opt.MashX -or $opt.EndOnGameplay -or $opt.Keys -or $opt.Hold -gt 0 -or $opt.MaxMinutes -gt 0
     if (-not $attached) { return 0 }
@@ -792,7 +803,6 @@ function New-Shortcuts($opt) {
 function Get-CliArgs($opt) {
     $a = @()
     if ($opt.Stage -eq "@main") { $a += "--main" }
-    elseif ($opt.Stage -eq "@title") { $a += "--title" }
     elseif ($opt.Stage -eq "@collection") { $a += "--collection" }
     else { $a += $opt.Stage }
     if (-not $opt.Advance) { $a += "--no-advance" }
@@ -1157,6 +1167,8 @@ $script:Xaml = @'
                          Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
               <TextBlock x:Name="PickSub" Text="Choose a scene on the left." FontSize="11"
                          Foreground="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+              <TextBlock x:Name="PickWarn" FontSize="11" Foreground="#F2C14E" Margin="0,7,0,0"
+                         TextWrapping="Wrap" Visibility="Collapsed"/>
             </StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,14,14,10">
@@ -1402,7 +1414,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $ui = @{}
     foreach ($n in @("GamePath", "Caption", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
-                     "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "OptAdvance", "OptMashX", "MashNote",
+                     "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "PickWarn", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
                      "Status", "ShortcutBtn", "ReloadBtn", "SaveBtn", "SettingsHost", "LockBanner", "LockText")) {
         $ui[$n] = $win.FindName($n)
@@ -1463,10 +1475,14 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $o.GameDirGiven = $opt.GameDirGiven
         $sel = $ui.SceneList.SelectedItem
         $o.Stage = $(if ($sel) { $sel.Id } else { "" })
-        $o.Advance = [bool]$ui.OptAdvance.IsChecked
-        $o.MashX = [bool]$ui.OptMashX.IsChecked
-        $o.EndOnGameplay = [bool]$ui.OptEnd.IsChecked
-        if ($ui.OptHold.IsChecked) { $o.Hold = [double]($ui.HoldSecs.Text -replace '[^\d.]', '') }
+        if (Test-StartEntry $o.Stage) {
+            $o.Advance = $false            # a menu has no boot prompts and no first 3D frame
+        } else {
+            $o.Advance = [bool]$ui.OptAdvance.IsChecked
+            $o.MashX = [bool]$ui.OptMashX.IsChecked
+            $o.EndOnGameplay = [bool]$ui.OptEnd.IsChecked
+            if ($ui.OptHold.IsChecked) { $o.Hold = [double]($ui.HoldSecs.Text -replace '[^\d.]', '') }
+        }
         if ($ui.OptRes.IsChecked) {
             $o.Width = [int]($ui.ResW.Text -replace '\D', '')
             $o.Height = [int]($ui.ResH.Text -replace '\D', '')
@@ -1481,11 +1497,31 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PickSub.Text = $sel.Sub
             $ui.LaunchBtn.IsEnabled = [bool]$gameDir
             $ui.CmdPreview.Text = Format-CliPreview (Get-CliArgs (& $collect))
+
+            # The run options drive a scene. On a menu there is nothing to press through, and tapping Cross would
+            # just start a new game, so they are switched off and greyed rather than quietly ignored.
+            $isStart = ($sel.Kind -eq "start")
+            foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = -not $isStart }
+            $warn = ""
+            if ($isStart) { $warn = "The run options below are for scenes; the game is started and left alone here." }
+            # Frame generation on the main menu loses the device, reproducibly, on this windowed swapchain.
+            if ($sel.Id -eq "@main" -and $gameDir) {
+                $fgm = Get-IniValue (Join-Mgs4Path $gameDir "mgs4_dlss.ini") "FrameGen"
+                if ($fgm -and $fgm -ne "0") {
+                    $warn = "Frame generation (FrameGen=$fgm) crashes the game on this menu: sl.dlss_g stops " +
+                            "evaluating and the device is lost within a minute. Set it to 0 on the Settings tab to " +
+                            "sit on the menu - scenes are unaffected."
+                }
+            }
+            $ui.PickWarn.Text = $warn
+            $ui.PickWarn.Visibility = $(if ($warn) { "Visible" } else { "Collapsed" })
         } else {
             $ui.PickTitle.Text = "Nothing picked"
             $ui.PickSub.Text = "Choose a scene on the left."
             $ui.LaunchBtn.IsEnabled = $false
-            $ui.CmdPreview.Text = "launcher.bat --list"
+            $ui.CmdPreview.Text = "mgs4-dlss.bat --list"
+            $ui.PickWarn.Visibility = "Collapsed"
+            foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = $true }
         }
         Save-Prefs ([pscustomobject]@{
             Stage = $(if ($sel) { $sel.Id } else { "" }); Kind = "$($ui.KindFilter.SelectedItem)"
@@ -1841,7 +1877,9 @@ $opt.GameDir = $gameDir
 # The window opens whether or not there is an install: with no game folder the Install tab is the one thing that can
 # still say something useful, so that is where it starts. Everything else needs the folder and says so.
 $startTab = switch ($opt.Action) { "install" { "install" } "settings" { "settings" } default { "play" } }
-$wantsWindow = ($opt.Action -in @("", "ui", "install")) -and -not $opt.Stage
+# --ui / --install always mean the window, with any scene named alongside them preselected in it. Only the
+# argument-less form is "window because nothing else was asked for".
+$wantsWindow = ($opt.Action -in @("ui", "install")) -or ($opt.Action -eq "" -and -not $opt.Stage)
 if ($opt.Action -eq "settings" -and -not $gameDir) { $wantsWindow = $false }
 if (-not $gameDir -and $wantsWindow) { $startTab = "install" }
 
