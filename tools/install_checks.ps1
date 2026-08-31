@@ -80,7 +80,6 @@ function Get-LastRun($game) {
             $r.Sl = $Matches[1]; $r.DlssG = $Matches[2]; $r.FgSupported = $Matches[3]
         }
         if ($line -match 'driver ([\d.]+) detected / ([\d.]+) required')                   { $r.Driver = $Matches[1]; $r.DriverMin = $Matches[2] }
-        if ($line -match 'DLSS-NR feature is not supported')                               { $r.NrUnsupported = $true }
         if ($line -match 'NGX EvaluateFeature ok \(#(\d+)\)')                              { $r.Evaluations = $Matches[1] }
         if ($line -match 'NGX CreateFeature DLSS \((.+?)\)')                               { $r.Feature = $Matches[1] }
     }
@@ -92,6 +91,13 @@ function Get-LastRun($game) {
         $names = @()
         foreach ($line in $reg) { if ($line -match 'Registered add-on "(.+?)" v(\S+)') { $names += $Matches[1] } }
         $r.ReShadeAddons = $names
+        # Whether Neural Rendering actually ran. RenoDX does NR through its own NGX hook (feature 18), not through
+        # Streamline, so this - not anything sl.dlss_nr says - is the signal.
+        foreach ($line in $rtext) {
+            if ($line -match 'signed DLSSNR ([\d.]+) D3D12 runtime initialized') { $r.NrRuntime = $Matches[1] }
+            if ($line -match 'feature 18 created .* for NR input (\S+) -> output (\S+)') { $r.NrFeature = $Matches[1] }
+            if ($line -match 'NGX feature create intercepted: feature=18') { $r.NrCreated = $true }
+        }
     }
     return $r
 }
@@ -193,38 +199,32 @@ function Invoke-InstallChecks {
         $rows += New-Row "info" "Game settings" "mgs4.savedsettings not found; run the game once" "unknown" $null
     }
 
+    # The add-on's own keys are the Settings tab's job; only the ones that are actually wrong belong here, so this
+    # does not become a second, read-only copy of that tab.
     $ini = Join-Mgs4Path $Game "mgs4_dlss.ini"
     if (Test-Mgs4Path $ini) {
         $en = Get-IniValue $ini "Enabled"
-        if ($en -eq "1") { $rows += New-Row "ok" "Add-on: Enabled" "DLSS is switched on in the ini" "1" $null }
-        else { $rows += New-Row "bad" "Add-on: Enabled" "the add-on loads but does nothing while this is 0" "$en" $null }
-
-        $mode = Get-IniValue $ini "Mode"; $res = Get-IniValue $ini "InternalRes"
-        $rows += New-Row "info" "Add-on: Mode" "InternalRes $res - must match the resolution the game renders at" "$mode" $null
-
-        $fgm = Get-IniValue $ini "FrameGen"; $fgt = Get-IniValue $ini "FGTargetFps"; $hz = Get-RefreshRate
-        if ($fgm -and $fgm -ne "0") {
-            $d = "frame generation on"
-            $st = "ok"
-            if ($hz -gt 0) {
-                $d = "display reports $hz Hz"
-                if ($hz -le 61) { $st = "warn"; $d = "display reports $hz Hz - frame generation cannot show extra frames at 60 Hz, set FrameGen=0" }
-                elseif ($fgt -and [int]$fgt -gt $hz) { $st = "warn"; $d = "target $fgt fps is above the display's $hz Hz" }
-            }
-            $rows += New-Row $st "Add-on: FrameGen" $d "$fgm, target $fgt" $null
-        } else {
-            $rows += New-Row "info" "Add-on: FrameGen" "off; the Streamline files are then not needed" "0" $null
+        if ($en -ne "1") {
+            $rows += New-Row "bad" "Add-on: Enabled" "the add-on loads but does nothing while this is 0 - Settings tab" "$en" $null
         }
 
-        $pd = Get-IniValue $ini "PostDof"
-        if ($pd -eq "1") { $rows += New-Row "ok" "Add-on: PostDof" "the game's depth of field is re-applied after DLSS / NR" "1" $null }
-        else { $rows += New-Row "info" "Add-on: PostDof" "off - the game's own DoF blurs the pre-DLSS image" "$pd" $null }
+        # FrameGen against the hardware, which is the one thing the Settings tab cannot tell you.
+        $fgm = Get-IniValue $ini "FrameGen"; $fgt = Get-IniValue $ini "FGTargetFps"; $hz = Get-RefreshRate
+        if ($fgm -and $fgm -ne "0" -and $hz -gt 0) {
+            if ($hz -le 61) {
+                $rows += New-Row "warn" "Add-on: FrameGen" "the display reports $hz Hz - generated frames cannot be shown at 60 Hz, set FrameGen=0" "$fgm, target $fgt" $null
+            } elseif ($fgt -and [int]$fgt -gt $hz) {
+                $rows += New-Row "warn" "Add-on: FrameGen" "target $fgt fps is above the display's $hz Hz" "$fgm, target $fgt" $null
+            }
+        }
 
+        $diags = @()
         foreach ($diag in @("DebugMode", "Probe", "TraceFrames", "TraceFreeze", "DumpShaders")) {
             $v = Get-IniValue $ini $diag
-            if ($v -and $v -ne "0") {
-                $rows += New-Row "warn" "Add-on: $diag" "a diagnostic is on - it costs frames, set it to 0 for normal play" $v $null
-            }
+            if ($v -and $v -ne "0") { $diags += "$diag=$v" }
+        }
+        if ($diags.Count) {
+            $rows += New-Row "warn" "Add-on: diagnostics on" "these cost frames; set them to 0 for normal play - Settings tab" ($diags -join ", ") $null
         }
     }
 
@@ -235,9 +235,8 @@ function Invoke-InstallChecks {
             $rows += New-Row "bad" "ReShade: add-on disabled" "mgs4_dlss is in ReShade's DisabledAddons list" $dis $null
         }
         $up = Get-IniValue $rini "NREnableUpscaling"
-        if ($null -ne $up) {
-            if ($up -eq "0") { $rows += New-Row "ok" "RenoDX: NREnableUpscaling" "off, as it should be - this add-on already runs DLAA on the final image" "0" $null }
-            else { $rows += New-Row "warn" "RenoDX: NREnableUpscaling" "on, on top of this add-on's own DLAA - two upscalers in a row" $up $null }
+        if ($null -ne $up -and $up -ne "0") {
+            $rows += New-Row "warn" "RenoDX: NREnableUpscaling" "on, on top of this add-on's own DLAA - two upscalers in a row" $up $null
         }
     }
 
@@ -248,17 +247,15 @@ function Invoke-InstallChecks {
         if ($ss) { $api = Get-IniValue $ss "api" }
         if ($e -eq "1" -and $api -eq "dx12") {
             $rows += New-Row "warn" "D3D12 switch" "the ASI forces D3D12 while the game is already set to it - leave Enabled = 0" "Enabled = 1" $null
-        } elseif ($e -eq "1") {
-            $rows += New-Row "ok" "D3D12 switch" "forcing the D3D12 backend (the fallback path)" "Enabled = 1" $null
-        } else {
-            $rows += New-Row "info" "D3D12 switch" "off - the in-game DirectX 12 option is doing the job" "Enabled = 0" $null
         }
     }
     # Not part of the add-on, but the Play tab's "Keep pressing X" needs both halves of it.
     $vigem = Get-VigemState
     $rows += New-Row $vigem.Status "Virtual controller" $vigem.Detail $vigem.Value "https://github.com/nefarius/ViGEmBus/releases"
 
-    $sections += [pscustomobject]@{ Id = "settings"; Title = "Settings"; Blurb = "Read out of the game's own files - these decide whether the pieces above actually do anything."; Rows = $rows }
+    $sections += [pscustomobject]@{ Id = "settings"; Title = "Settings"
+        Blurb = "The ones the Settings tab does not cover - the game's own options, ReShade's, and anything that reads as wrong."
+        Rows = $rows }
 
     # ------------------------------------------------------------------ last run
     $rows = @()
@@ -287,12 +284,18 @@ function Invoke-InstallChecks {
             if ($run.DlssDll -eq "loaded") { $rows += New-Row "ok" "DLSS runtime" "nvngx_dlss.dll from the game folder" "loaded" $null }
             else { $rows += New-Row "ok" "DLSS runtime" "the local file was not used; the driver's _nvngx provided DLSS" "driver override" $null }
         }
-        if ($run.Nr) {
-            if ($run.Nr -eq "loaded") { $rows += New-Row "ok" "Neural Rendering add-on" "renodx-dlss5 was loaded in the process" "loaded" $null }
-            else { $rows += New-Row "info" "Neural Rendering add-on" "not present - DLAA runs before the HUD instead" "absent" $null }
+        # "it loaded" is only worth its own row when it did not go on to do anything; the NR row below says both.
+        if ($run.Nr -eq "loaded" -and -not ($run.NrRuntime -or $run.NrCreated)) {
+            $rows += New-Row "warn" "Neural Rendering add-on" "renodx-dlss5 loaded but no NR pass followed" "loaded" $null
+        } elseif ($run.Nr -eq "absent") {
+            $rows += New-Row "info" "Neural Rendering add-on" "not present - DLAA runs before the HUD instead" "absent" $null
         }
-        if ($run.NrUnsupported) {
-            $rows += New-Row "warn" "DLSS NR" "Streamline reported NR unsupported - check nvngx_dlssnr.dll and the driver" "unsupported" $null
+        if ($run.NrRuntime -or $run.NrCreated) {
+            $d = "RenoDX created its NR feature (NGX feature 18) after the DLAA one"
+            if ($run.NrFeature) { $d = "NR ran on the $($run.NrFeature) DLAA output (NGX feature 18)" }
+            $rows += New-Row "ok" "Neural Rendering" $d $(if ($run.NrRuntime) { "nvngx_dlssnr $($run.NrRuntime)" } else { "active" }) $null
+        } elseif ($run.Nr -eq "loaded") {
+            $rows += New-Row "warn" "Neural Rendering" "the add-on loaded but no NR feature was created - check nvngx_dlssnr.dll and the driver" "no NR pass" $null
         }
         if ($run.Insertion) { $rows += New-Row "ok" "Insertion point" "where DLAA runs in the frame" $run.Insertion $null }
         if ($run.Sl) {

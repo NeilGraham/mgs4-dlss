@@ -134,14 +134,24 @@ What it reports, beyond whether a file exists:
 
 - **Files**, grouped by the feature each one unlocks (required / DLSS 5 NR / frame generation / extras), with the
   version found next to the version this was verified against.
-- **Settings** read out of the game's own files — `api=dx12`, FXAA, the frame limiter, `Enabled`, `FrameGen` against
-  the display's actual refresh rate, whether ReShade has the add-on disabled, whether a diagnostic key was left on,
-  and whether the virtual controller the Play tab wants is there. A file being present is not the same as it being
-  switched on.
+- **Settings** that the Settings tab does not cover, plus anything that reads as wrong. The game's own options
+  (`api=dx12`, vsync, the frame limiter, FXAA), whether ReShade has the add-on disabled, whether the virtual
+  controller the Play tab wants is there — and `FrameGen` checked against the display's actual refresh rate, which
+  is the one add-on key a form cannot judge on its own. The add-on's own keys live on the Settings tab and only
+  appear here when they are a problem (`Enabled=0`, a diagnostic left on), so this is not a second read-only copy
+  of that tab.
 - **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialised, whether DLSS came from
-  the local DLL or the driver override, whether `renodx-dlss5` really loaded, the insertion point, the Streamline
+  the local DLL or the driver override, whether Neural Rendering actually ran, the insertion point, the Streamline
   and driver versions, and how many frames DLSS evaluated. This is the part a file list cannot tell you — a
   ReShade build **without** add-on support looks perfectly correct on disk and silently loads nothing.
+
+  Neural Rendering is read from RenoDX's own lines in `ReShade.log` (`signed DLSSNR ... runtime initialized`, then
+  `feature 18 created ... for NR input`), because that is where NR actually happens: RenoDX hooks NGX directly
+  (`EnableHooks=2: NGX hooks only, Streamline modules left unpatched`). Streamline's log carries a
+  `DLSS-NR feature is not supported` warning on every run, immediately followed by
+  `Ignoring plugin 'sl.dlss_nr' since it is was not requested by the host` — this add-on asks Streamline for
+  `DLSS_G`, `Reflex` and `PCL` only (`dlss-addon/src/fg.cpp`), so that warning is about a plugin nothing here uses
+  and says nothing about whether NR works.
 
 The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
 checks in `tools\install_checks.ps1` only render it.
