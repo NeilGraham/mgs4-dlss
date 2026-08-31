@@ -10,8 +10,6 @@
 #   mgs4-dlss.bat --shortcuts                    rebuild the desktop shortcut folder
 #   mgs4-dlss.bat --set FrameGen=0 --set Mode=Quality
 #
-# launcher.bat and check-install.bat are aliases that open the right tab; both spellings keep working.
-#
 # There is deliberately NO param() block: PowerShell then hands every argument through in $args verbatim, so the
 # --flag spellings above survive `powershell -File`. Run options are parsed by Read-Options below.
 #
@@ -140,13 +138,12 @@ MGS4 DLSS - start the game or one scene of it, set the add-on up, check the inst
   mgs4-dlss.bat --collection            the Master Collection launcher
   mgs4-dlss.bat --list [text]           every launchable scene (filtered by id / name / act)
   mgs4-dlss.bat --install               the window, opened on the install check
+                                        (the first run opens there anyway; later ones open on Play)
   mgs4-dlss.bat --report                the install check as text, for pasting into an issue
   mgs4-dlss.bat --shortcuts             rebuild "Desktop\MGS4 Shortcuts" against this checkout
   mgs4-dlss.bat --settings              print mgs4_dlss.ini the way the window shows it
   mgs4-dlss.bat --set Key=Value [...]   write those keys into mgs4_dlss.ini
   mgs4-dlss.bat --stop                  close a running game
-
-launcher.bat and check-install.bat are aliases for the Play and Install tabs.
 
 Run options (any of them keeps this attached until the scene is done):
   --advance / --no-advance   press through the auto-save notice and "press any button" until the
@@ -235,14 +232,15 @@ function Get-SceneCatalogue {
     # is a string in the exe rather than something bootable. Verified 2026-08-31; do not put it back untested.
     Add-Entry @{ Id = "@main"; Kind = "start"; ActKey = "start"; Rank = 0; Name = "Main menu"
                  Description = "MGS4's own menu, past the Master Collection screen (--skip-to-main-menu)."
-                 Hidden = $false; Alts = @() }
+                 Hidden = $false; Alts = @(); SortAs = "" }
     Add-Entry @{ Id = "@collection"; Kind = "start"; ActKey = "start"; Rank = 20; Name = "Master Collection launcher"
                  Description = "The Unity front-end, where the display settings live."
-                 Hidden = $false; Alts = @() }
+                 Hidden = $false; Alts = @(); SortAs = "" }
 
-    # Everything in s10/s20/s30/s99 whose id ends in _1 or _2 crashes or comes up black (checked one by one). The
-    # _D<n> cutscenes of the same stages are fine - "_D2" does not end in "_2" for this test.
-    $brokenRe = '^s(10|20|30|99)a.*_[12]$'
+    # Ids that crash or come up black, checked one by one:
+    #   anything in s10/s20/s30/s99 ending in _1 or _2   ("_D2" does not match: the digit must follow the underscore)
+    #   anything at all ending in _0                     ("_00" does not match, and those are fine)
+    $brokenRe = '(^s(10|20|30|99)a.*_[12]$)|(_0$)'
 
     $aliasOf = @{}
     if (Test-Mgs4Path $script:ScenesCsv) {
@@ -263,9 +261,11 @@ function Get-SceneCatalogue {
             if ($o -and $o.description) { $desc = $o.description }
             $hidden = ($id -match $brokenRe)
             if ($o -and $null -ne $o.hidden) { $hidden = [bool]$o.hidden }
+            $sortAs = ""
+            if ($o -and $o.sortAs) { $sortAs = $o.sortAs }
 
             Add-Entry @{ Id = $id; Kind = $kind; ActKey = $act; Rank = $rank; Name = $name
-                         Description = $desc; Hidden = $hidden; Alts = @() }
+                         Description = $desc; Hidden = $hidden; Alts = @(); SortAs = $sortAs }
         }
     }
 
@@ -275,7 +275,7 @@ function Get-SceneCatalogue {
         $primary = $list | Where-Object { $_.Id -eq $aliasOf[$id] } | Select-Object -First 1
         if ($primary) { $primary.Alts = @($primary.Alts) + $id }
         else { Add-Entry @{ Id = $id; Kind = "cutscene"; ActKey = (ActKeyFor $id); Rank = 0
-                            Name = ""; Description = ""; Hidden = $false; Alts = @() } }
+                            Name = ""; Description = ""; Hidden = $false; Alts = @(); SortAs = "" } }
     }
 
     foreach ($e in $list) {
@@ -291,10 +291,29 @@ function Get-SceneCatalogue {
             }) -Force
     }
 
+    # Story order inside an act: the stage first, then its cutscenes, then its numbered sections. Sorting on the id
+    # alone puts "_00" before "_D1" because a digit sorts before a letter, which is backwards - the demo of a stage
+    # plays before the gameplay it introduces.
+    foreach ($e in $list) {
+        $prefix = $e.Id; $cat = 0; $num = 0
+        if ($e.Id -match '^([^_]+)_(.*)$') {
+            $prefix = $Matches[1]
+            $suffix = $Matches[2]
+            if ($suffix -match '^D(\d*)$') { $cat = 1; $num = $(if ($Matches[1]) { [int]$Matches[1] } else { -1 }) }
+            else { $cat = 2 }
+        }
+        if ($e.SortAs) { $prefix = $e.SortAs; $cat = 0; $num = 0 }
+        $e | Add-Member -NotePropertyName SortPrefix -NotePropertyValue $prefix -Force
+        $e | Add-Member -NotePropertyName SortCat -NotePropertyValue $cat -Force
+        $e | Add-Member -NotePropertyName SortNum -NotePropertyValue $num -Force
+    }
     $order = @{}
     for ($i = 0; $i -lt $script:ActOrder.Count; $i++) { $order[$script:ActOrder[$i]] = $i }
     $script:Catalogue = @($list | Sort-Object @{ Expression = { $order[$_.ActKey] } },
                                               @{ Expression = { $_.Rank } },
+                                              @{ Expression = { $_.SortPrefix } },
+                                              @{ Expression = { $_.SortCat } },
+                                              @{ Expression = { $_.SortNum } },
                                               @{ Expression = { $_.Id } })
     return $script:Catalogue
 }
@@ -839,7 +858,7 @@ Notes
 - These shortcuts are generated: re-run "mgs4-dlss.bat --shortcuts" after moving the checkout, and they will point at
   the new place. That is the whole reason a shortcut can stop working - it holds an absolute path.
 - More options (keep tapping X for the flashback prompts, close the game when gameplay starts) are in the launcher
-  window: launcher.bat
+  window: mgs4-dlss.bat
 '@
 
 function New-Shortcuts($opt) {
@@ -919,6 +938,13 @@ function Read-Prefs {
         try { return (Get-Content -LiteralPath $script:PrefsPath -Raw -Encoding UTF8 | ConvertFrom-Json) } catch {}
     }
     return $null
+}
+
+# No preferences file yet, or one from before this marker existed, means nobody has opened the window here: the
+# install check is the first thing worth seeing. Every run after that opens on Play.
+function Test-FirstRun {
+    $p = Read-Prefs
+    return -not ($p -and $p.Seen)
 }
 
 function Save-Prefs($o) {
@@ -1723,7 +1749,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             Advance = [bool]$ui.OptAdvance.IsChecked; MashX = [bool]$ui.OptMashX.IsChecked
             EndOnGameplay = [bool]$ui.OptEnd.IsChecked; Hold = [bool]$ui.OptHold.IsChecked
             HoldSecs = $ui.HoldSecs.Text; Res = [bool]$ui.OptRes.IsChecked
-            ResW = $ui.ResW.Text; ResH = $ui.ResH.Text
+            ResW = $ui.ResW.Text; ResH = $ui.ResH.Text; Seen = $true
         })
     }.GetNewClosure()
 
@@ -2079,6 +2105,7 @@ $opt.GameDir = $gameDir
 # The window opens whether or not there is an install: with no game folder the Install tab is the one thing that can
 # still say something useful, so that is where it starts. Everything else needs the folder and says so.
 $startTab = switch ($opt.Action) { "install" { "install" } "settings" { "settings" } default { "play" } }
+if ($opt.Action -eq "" -and (Test-FirstRun)) { $startTab = "install" }
 # --ui / --install always mean the window, with any scene named alongside them preselected in it. Only the
 # argument-less form is "window because nothing else was asked for".
 $wantsWindow = ($opt.Action -in @("ui", "install")) -or ($opt.Action -eq "" -and -not $opt.Stage)

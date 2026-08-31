@@ -68,10 +68,12 @@ mgs4-dlss.bat --set FrameGen=0        :: write ini keys without opening anything
 mgs4-dlss.bat --help                  :: every option
 ```
 
-**`launcher.bat`** and **`check-install.bat`** are aliases that open it on the Play and Install tabs; both spellings,
-and `check-install.bat --report` / `-GameDir "D:\..."`, keep working. The window opens even when no MGS4 install can
-be found — it starts on Install and says which folder it looked in, which is the one case where a tool that needs the
-game folder still has to be useful.
+`mgs4-dlss.bat` is the only entry point; Play, Settings and Install are tabs of the one window. The **first** run
+opens on Install, because the first thing anyone needs to know is whether the pieces are in place; after that it
+opens on Play. `--install` and `--settings` override that at any time.
+
+The window opens even when no MGS4 install can be found — it starts on Install and says which folder it looked in,
+which is the one case where a tool that needs the game folder still has to be useful.
 
 ### Play
 
@@ -96,8 +98,15 @@ exists; only booting it says what it is, so everything in that file was checked 
   `s10a40l_D2`, `s20a00l` and `s20a00l_D1`, `s20a00l_D3` and `s20a10l`, `s30a00l` and `s30a00l_D`, `s30a10l` and
   `s30a00l_D2`. The panel offers both ids so you can boot either, in case they differ in something not visible at
   the first frame.
+- **Inside a stage, the cutscenes come before the gameplay**: `s01a10l`, then `s01a10l_D1` and `_D2`, then
+  `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
+  backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
+  than after `_D1`.
 - **Ids that crash or come up black** are out of the list and out of the shortcut folder: everything in `s10`, `s20`,
-  `s30` and `s99` whose id ends in `_1` or `_2`. The "Known broken" filter shows them if you want them anyway.
+  `s30` and `s99` whose id ends in `_1` or `_2`, and anything at all ending in `_0` (`_00` is a different thing and
+  is fine). The "Known broken" filter shows them if you want them anyway.
+- `s00a00l` and `s00a00l_D` are the cemetery scene, which plays inside Act 1 rather than with the rest of `s00`, so
+  they sit in Act 1 after the `s01a00l` entries (`sortAs` in the data file puts them there).
 
 The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
 to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
@@ -561,7 +570,7 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
-mgs4-dlss.bat          the app: Play / Settings / Install (launcher.bat and check-install.bat alias it)
+mgs4-dlss.bat          the app, and the only entry point: Play / Settings / Install
 config.example.ini     machine-local paths; copy to config.ini (git-ignored)
 d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)

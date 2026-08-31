@@ -10,6 +10,7 @@
     "  name        overrides labels.json",
     "  description one sentence about what you actually see",
     "  sameAs      this id starts the same scene as that one; the list folds them into one entry you can pick from",
+    "  sortAs      sort as if the id were this, for a scene that belongs somewhere the id does not put it",
     "  hidden      out of the list unless the 'Known broken' filter is chosen"
   ],
 
@@ -109,8 +110,10 @@
     },
 
     "s00a00l": {
-      "description": "The cemetery: Snake and Otacon at Big Boss's grave."
+      "act": "act1", "sortAs": "s01a00m",
+      "description": "The cemetery: Snake and Otacon at Big Boss's grave. Plays after the s01a00l scenes."
     },
+    "s00a00l_D": { "sameAs": "s00a00l" },
     "s01a00l": {
       "description": "The Act 1 opening street, handing over to HUD gameplay after the intro."
     },

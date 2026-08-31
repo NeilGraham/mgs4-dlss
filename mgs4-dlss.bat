@@ -1,5 +1,6 @@
 @echo off
 :: MGS4 DLSS: start the game or any single scene in it, set the add-on up, and check the install.
+:: This is the only entry point - Play, Settings and Install are tabs of the one window.
 :: Double-click it, or run it from a terminal.
 ::
 ::   mgs4-dlss.bat                       the window (Play / Settings / Install)
@@ -10,8 +11,6 @@
 ::   mgs4-dlss.bat --report              the install check as text, for pasting into an issue
 ::   mgs4-dlss.bat --shortcuts           rebuild "Desktop\MGS4 Shortcuts" against this checkout
 ::   mgs4-dlss.bat --help                every option
-::
-:: launcher.bat and check-install.bat open the same program on the Play and Install tabs.
 ::
 :: -ExecutionPolicy Bypass is what lets this run straight out of an unzipped release, without the user having to
 :: unblock the files first. Arguments go through untouched: mgs4_dlss.ps1 has no param() block, so PowerShell hands
