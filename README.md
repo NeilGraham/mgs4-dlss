@@ -63,7 +63,7 @@ mgs4-dlss.bat --main                  :: MGS4's own menu, past the Master Collec
 mgs4-dlss.bat --list naomi            :: what can be launched
 mgs4-dlss.bat --install               :: the window, opened on the install check
 mgs4-dlss.bat --report                :: the install check as text, for pasting into an issue
-mgs4-dlss.bat --shortcuts             :: rebuild "Desktop\MGS4 Shortcuts" against this checkout
+mgs4-dlss.bat <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
 mgs4-dlss.bat --set FrameGen=0        :: write ini keys without opening anything
 mgs4-dlss.bat --help                  :: every option
 ```
@@ -98,11 +98,16 @@ exists; only booting it says what it is, so everything in that file was checked 
   `s10a40l_D2`, `s20a00l` and `s20a00l_D1`, `s20a00l_D3` and `s20a10l`, `s30a00l` and `s30a00l_D`, `s30a10l` and
   `s30a00l_D2`. The panel offers both ids so you can boot either, in case they differ in something not visible at
   the first frame.
+- **Starting the game** is `s10a10l` - the normal boot with the Master Collection launcher skipped: pre-menu
+  credits, PRESS START, then the menu. `--main` (`mgs4.exe --skip-to-main-menu`) drops straight onto the menu
+  selection with the credits and PRESS START already gone, which is quick for testing but is not how the game
+  starts, and it loses the device on most launches with frame generation on - so it is hidden with the rest of the
+  known-broken ids, and the panel says so when you pick it.
 - **Inside a stage, the cutscenes come before the gameplay**: `s01a10l`, then `s01a10l_D1` and `_D2`, then
   `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
   backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
   than after `_D1`.
-- **Ids that crash or come up black** are out of the list and out of the shortcut folder: every one ending in a
+- **Ids that crash or come up black** are out of the list: every one ending in a
   single digit — `_0`, `_1`, ... `_9`, 102 of them. The two-digit sections (`_00`, `_11`) are the ones that work,
   and `_D2` is a cutscene rather than a section: the digit has to be the whole suffix after the underscore for the
   test to fire. The "Known broken" filter shows them if you want them anyway, and searching for one by id still
@@ -134,28 +139,16 @@ What can be ticked (all of it also works from the command line):
 
 Escape, held anywhere, stops an attached run. The app writes `MGS4\logs\launcher.log`.
 
-**Desktop shortcuts** writes `Desktop\MGS4 Shortcuts\` — one `.lnk` per scene under `cutscene`, `gameplay`,
-`stage entry` and `notable`, named `<stage id> - <act> - <scene name>` so each folder sorts in story order, plus the
-three game-start shortcuts at the top level. They run `tools\mgs4_dlss.ps1` **by absolute path**, which is the one
-thing that can break them: move or re-clone the checkout and every shortcut points at a folder that is no longer
-there. Re-running `mgs4-dlss.bat --shortcuts` fixes them all.
+**Create shortcut** saves the scene you have picked, *with the options you have ticked*, as a `.lnk` wherever you
+choose - so "the Naomi lab cutscene, tapping X the whole way, closing when gameplay starts" becomes one
+double-click. The same thing from a terminal:
 
-#### Two things that crash the game
+```bat
+mgs4-dlss.bat s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
+```
 
-Both were found by launching them and reading `crash_dumps\` plus `logs\mgs4_dlss.log`; both are the port's or the
-add-on's, not the launcher's, but the launcher is where you meet them.
-
-- **`--stage s00title_1`** (the OTC attract intro) access-violates within seconds, *every* time — with the add-on
-  idle (`Enabled=0`) and frame generation off as well. It is a string in the executable rather than a bootable
-  stage. There used to be a "Title / OTC intro" entry for it; it is gone, and `--title` now says so.
-- **Frame generation on the main menu** loses the device. With `FrameGen` non-zero, sitting on MGS4's own menu ends
-  in `sl.dlss_g` failing `evaluateNGXFeature` with `0xbad00002` (invalid parameter) and Streamline unable to map a
-  buffer, then `DXGI_ERROR_DEVICE_REMOVED` (`0x887a0005`) and an access violation — most launches, 20-50 seconds
-  in, though not every one: it is a race, and it occasionally survives. It needs *both* the add-on active and `FrameGen` non-zero: `Enabled=0` with `FrameGen=4` survives, and
-  so does `Enabled=1` with `FrameGen=0`. Scenes booted with `--stage` are unaffected, which is why this went
-  unnoticed. Streamline names the shape of it — "internal state is 'fullscreen' but swap chain is 'windowed'" — so
-  it is likely tied to the windowed swapchain the port has been booting with since 2026-08-31. The Play tab warns
-  when the Main menu entry is picked while `FrameGen` is on; `FrameGen=0` is the way to sit on the menu today.
+The shortcut runs `tools\mgs4_dlss.ps1` **by absolute path**, which is the one thing that can break it: move or
+re-clone the checkout and it points at a folder that is no longer there. Make a new one rather than editing it.
 
 The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
 `--res_width` / `--res_height`, `--windowing`, `--screen_index`, `--lang`, `--region`, `--input_device`, `--rumble`,

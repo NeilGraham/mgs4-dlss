@@ -7,7 +7,7 @@
 #   mgs4-dlss.bat --list naomi                   what can be launched
 #   mgs4-dlss.bat --install                      the window, on the install check
 #   mgs4-dlss.bat --report                       the install check as text, for pasting into an issue
-#   mgs4-dlss.bat --shortcuts                    rebuild the desktop shortcut folder
+#   mgs4-dlss.bat s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
 #   mgs4-dlss.bat --set FrameGen=0 --set Mode=Quality
 #
 # There is deliberately NO param() block: PowerShell then hands every argument through in $args verbatim, so the
@@ -61,7 +61,7 @@ function New-Options {
         Quiet         = $false
         Filter        = ""
         Sets          = @()
-        DesktopDir    = ""
+        ShortcutPath  = ""          # --shortcut <file>: write a .lnk for this scene instead of launching it
     }
 }
 
@@ -78,7 +78,6 @@ function Read-Options([string[]]$argv) {
         if     ($a -match '^(--help|-h|/\?)$')            { $o.Action = "help"; $took = $false }
         elseif ($a -match '^--(ui|window)$')              { $o.Action = "ui"; $took = $false }
         elseif ($a -match '^--list$')                     { $o.Action = "list"; $took = $false }
-        elseif ($a -match '^--shortcuts$')                { $o.Action = "shortcuts"; $took = $false }
         elseif ($a -match '^--(show-settings|settings)$') { $o.Action = "settings"; $took = $false }
         elseif ($a -match '^--(install|check|check-install)$') { $o.Action = "install"; $took = $false }
         elseif ($a -match '^--report$')                   { $o.Action = "report"; $took = $false }
@@ -111,7 +110,7 @@ function Read-Options([string[]]$argv) {
             elseif ($a -match '^--press-key$')     { $o.PressKey = $value }
             elseif ($a -match '^--settle$')        { $o.Settle = [double]$value }
             elseif ($a -match '^--?-?game-?dir$')  { $o.GameDir = $value; $o.GameDirGiven = $true }
-            elseif ($a -match '^--desktop-dir$')   { $o.DesktopDir = $value }
+            elseif ($a -match '^--shortcut$')      { $o.Action = "shortcut"; $o.ShortcutPath = $value }
             elseif ($a -match '^--res$') {
                 if ($value -match '^(\d+)\s*[xX]\s*(\d+)$') { $o.Width = [int]$Matches[1]; $o.Height = [int]$Matches[2] }
                 else { throw "--res wants WIDTHxHEIGHT, got $value" }
@@ -140,7 +139,7 @@ MGS4 DLSS - start the game or one scene of it, set the add-on up, check the inst
   mgs4-dlss.bat --install               the window, opened on the install check
                                         (the first run opens there anyway; later ones open on Play)
   mgs4-dlss.bat --report                the install check as text, for pasting into an issue
-  mgs4-dlss.bat --shortcuts             rebuild "Desktop\MGS4 Shortcuts" against this checkout
+  mgs4-dlss.bat <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
   mgs4-dlss.bat --settings              print mgs4_dlss.ini the way the window shows it
   mgs4-dlss.bat --set Key=Value [...]   write those keys into mgs4_dlss.ini
   mgs4-dlss.bat --stop                  close a running game
@@ -230,9 +229,12 @@ function Get-SceneCatalogue {
     # No "@title" here on purpose: `mgs4.exe --stage s00title_1` access-violates within seconds every time, with
     # the add-on idle (Enabled=0) and frame generation off as well, so it is the port's own crash on a stage id that
     # is a string in the exe rather than something bootable. Verified 2026-08-31; do not put it back untested.
-    Add-Entry @{ Id = "@main"; Kind = "start"; ActKey = "start"; Rank = 0; Name = "Main menu"
-                 Description = "MGS4's own menu, past the Master Collection screen (--skip-to-main-menu)."
-                 Hidden = $false; Alts = @(); SortAs = "" }
+    # Hidden: --skip-to-main-menu lands on the menu selection with the pre-menu credits and PRESS START already
+    # gone, which is not how the game starts, and it loses the device on most launches with frame generation on.
+    # Kept as a fast way in for testing; s10a10l is the honest "start the game".
+    Add-Entry @{ Id = "@main"; Kind = "start"; ActKey = "start"; Rank = 10; Name = "Main menu, skipping the intro"
+                 Description = "Drops straight onto the menu selection, past the pre-menu credits and PRESS START. Quick for testing, but it crashes on most launches with frame generation on - use 'Start the game' to play."
+                 Hidden = $true; Alts = @(); SortAs = "" }
     Add-Entry @{ Id = "@collection"; Kind = "start"; ActKey = "start"; Rank = 20; Name = "Master Collection launcher"
                  Description = "The Unity front-end, where the display settings live."
                  Hidden = $false; Alts = @(); SortAs = "" }
@@ -820,6 +822,7 @@ function Set-SettingsFromCli($gameDir, $sets) {
 
 # ---------------------------------------------------------------------------------------------- shortcuts
 
+# A sensible default file name for a scene's shortcut: "<id> - <act> - <name>", minus what Windows will not take.
 function Get-ShortcutName($scene) {
     $name = $scene.Id
     if ($scene.ActTitle -and $scene.Kind -ne "start") { $name += " - " + $scene.ActTitle }
@@ -828,85 +831,31 @@ function Get-ShortcutName($scene) {
     return $name
 }
 
-$script:ShortcutReadme = @'
-MGS4 scene shortcuts
-====================
+# One .lnk for one scene, wherever the caller wants it, carrying the run options it was made with. The shortcut
+# holds this script's absolute path, so moving the checkout breaks it - make a new one rather than editing it.
+function New-SceneShortcut($opt, [string]$path) {
+    if (-not $opt.Stage) { throw "no scene to make a shortcut for" }
+    if (-not $path) { throw "no file name for the shortcut" }
+    if (-not $path.ToLower().EndsWith(".lnk")) { $path += ".lnk" }
+    $dir = Split-Path -Parent $path
+    if ($dir -and -not (Test-Mgs4Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
 
-Every launchable scene in Metal Gear Solid 4 (Master Collection Vol. 2), one shortcut each, plus the two ways of
-starting the game itself. Each shortcut runs tools\launcher.ps1 out of the mgs4-dlss checkout named below: it starts
-the game with --stage <id>, brings the window to the foreground and presses through the auto-save / "press any
-button" prompts until the first 3D frame. The DLSS add-on is active as usual, so the scene boots with DLAA /
-DLSS 5 Neural Rendering / frame generation exactly as mgs4_dlss.ini has it.
-
-Folders
--------
-  cutscene          the in-engine cutscenes (stage ids ending in _D<n>)
-  mission briefing  the Nomad briefings between the acts
-  gameplay          the playable segments
-  stage entry       the bare stage ids: each act's stage from its own beginning
-  notable           duplicates of the scenes that have a curated name
-
-Names are "<stage id> - <act> - <scene name>", so each folder sorts in story order. Scene names come from
-tools\labels.json and tools\scene_info.json; scenes without one show just the id and the act. Stage ids that
-crash or come up black are left out, and where two ids start the same scene only one shortcut is written - the
-launcher window offers the other.
-
-Notes
------
-- The game is restarted by the shortcut, so anything already running is closed first.
-- A scene may need a few seconds of black screen while the stage loads.
-- These shortcuts are generated: re-run "mgs4-dlss.bat --shortcuts" after moving the checkout, and they will point at
-  the new place. That is the whole reason a shortcut can stop working - it holds an absolute path.
-- More options (keep tapping X for the flashback prompts, close the game when gameplay starts) are in the launcher
-  window: mgs4-dlss.bat
-'@
-
-function New-Shortcuts($opt) {
-    $root = $opt.DesktopDir
-    if (-not $root) { $root = Join-Path ([Environment]::GetFolderPath("Desktop")) "MGS4 Shortcuts" }
     $scriptPath = Join-Path $PSScriptRoot "mgs4_dlss.ps1"
-    $gameDir = $opt.GameDir
-    if (-not $gameDir) { $gameDir = Get-Mgs4GameDir }
+    $scene = Find-Scene $opt.Stage
+    $cli = @(Get-CliArgs $opt | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })
 
     $shell = New-Object -ComObject WScript.Shell
-    $folders = @{ "cutscene" = "cutscene"; "briefing" = "mission briefing"; "gameplay" = "gameplay"
-                  "stage-entry" = "stage entry"; "start" = "" }
-    $removed = 0
-    # "greatest" is what the folder used to be called; its shortcuts point at a path that no longer exists.
-    foreach ($f in (@($folders.Values | Where-Object { $_ }) + @("notable", "greatest", ""))) {
-        $dir = if ($f) { Join-Path $root $f } else { $root }
-        if (Test-Mgs4Path $dir) {
-            $old = @(Get-ChildItem -LiteralPath $dir -Filter *.lnk -File -ErrorAction SilentlyContinue)
-            $removed += $old.Count
-            $old | Remove-Item -Force -ErrorAction SilentlyContinue
-        }
-        if ($f -eq "greatest") {
-            if ((Test-Mgs4Path $dir) -and -not (Get-ChildItem -LiteralPath $dir -Force)) { Remove-Item -LiteralPath $dir -Force }
-            continue
-        }
-        New-Item -ItemType Directory -Force $dir | Out-Null
+    $lnk = $shell.CreateShortcut($path)
+    $lnk.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $lnk.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File "' + $scriptPath + '" ' + ($cli -join " ")
+    if ($opt.GameDir) {
+        $lnk.WorkingDirectory = $opt.GameDir
+        $lnk.IconLocation = (Join-Mgs4Path $opt.GameDir "mgs4.exe") + ",0"
     }
-
-    $made = 0
-    foreach ($scene in (Get-SceneCatalogue)) {
-        if ($scene.Hidden) { continue }        # these crash or come up black; a shortcut to one is a trap
-        $sub = $folders[$scene.Kind]
-        $dirs = @($(if ($sub) { Join-Path $root $sub } else { $root }))
-        if ($scene.Name -and $scene.Kind -ne "start") { $dirs += (Join-Path $root "notable") }
-        foreach ($dir in $dirs) {
-            $lnk = $shell.CreateShortcut((Join-Path $dir ((Get-ShortcutName $scene) + ".lnk")))
-            $lnk.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-            $lnk.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File "' + $scriptPath + '" ' + $scene.Id
-            $lnk.WorkingDirectory = $gameDir
-            $lnk.IconLocation = (Join-Mgs4Path $gameDir "mgs4.exe") + ",0"
-            $lnk.Description = "$($scene.Id) - " + $(if ($scene.Description) { $scene.Description } else { $scene.Note })
-            $lnk.Save()
-            $made++
-        }
-    }
-    Set-Content -LiteralPath (Join-Path $root "README.txt") -Encoding UTF8 `
-        -Value ($script:ShortcutReadme + "`r`nGenerated " + (Get-Date -Format "yyyy-MM-dd HH:mm") + " from " + $scriptPath + "`r`n")
-    return @{ Root = $root; Made = $made; Removed = $removed }
+    $lnk.Description = $opt.Stage + $(if ($scene -and $scene.Description) { " - " + $scene.Description }
+                                     elseif ($scene -and $scene.Note) { " - " + $scene.Note } else { "" })
+    $lnk.Save()
+    return $path
 }
 
 # ---------------------------------------------------------------------------------------------- the window
@@ -1330,6 +1279,7 @@ $script:Xaml = @'
             <StackPanel>
               <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="16,11"/>
               <Button x:Name="StopBtn" Content="Close the game" Style="{StaticResource Flat}" Margin="0,8,0,0"/>
+              <Button x:Name="ShortcutBtn" Content="Create shortcut" Style="{StaticResource Flat}" Margin="0,8,0,0"/>
             </StackPanel>
           </Border>
         </Grid>
@@ -1364,7 +1314,6 @@ $script:Xaml = @'
         <TextBlock x:Name="Status" Grid.Column="0" VerticalAlignment="Center" FontSize="11"
                    Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
-          <Button x:Name="ShortcutBtn" Content="Desktop shortcuts" Style="{StaticResource Flat}" Margin="0,0,10,0"/>
           <Button x:Name="CopyBtn" Content="Copy report" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
           <Button x:Name="RecheckBtn" Content="Re-check  (F5)" Style="{StaticResource Primary}" Visibility="Collapsed"/>
           <Button x:Name="ReloadBtn" Content="Reload" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
@@ -1885,6 +1834,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.StopBtn.IsEnabled = $running -or $busy
         $ui.SaveBtn.IsEnabled = (-not $running) -and [bool]$gameDir
             $ui.LaunchBtn.IsEnabled = [bool]$gameDir -and [bool]$ui.SceneList.SelectedItem
+        $ui.ShortcutBtn.IsEnabled = [bool]$ui.SceneList.SelectedItem -and -not $ui.SceneList.SelectedItem.IsHeader
         if ($ui.SettingsView.Visibility -eq [System.Windows.Visibility]::Visible) {
             if (-not $gameDir) {
                 $ui.LockText.Text = "No MGS4 install found, so there is no mgs4_dlss.ini to read or write. The Install tab says what was looked for."
@@ -1942,21 +1892,23 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     }.GetNewClosure())
 
     $ui.ShortcutBtn.Add_Click({
-        $root = Join-Path ([Environment]::GetFolderPath("Desktop")) "MGS4 Shortcuts"
-        $answer = [System.Windows.MessageBox]::Show(
-            "Rebuild the shortcut folder?`n`n$root`n`nEvery .lnk in it is replaced by one per scene, pointing at this checkout. Nothing else in the folder is touched.",
-            "MGS4 DLSS", [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Question)
-        if ($answer -ne [System.Windows.MessageBoxResult]::OK) { return }
-        $this.IsEnabled = $false
-        $ui.Status.Text = "writing shortcuts..."
         try {
-            $r = New-Shortcuts $opt
-            $ui.Status.Text = "$($r.Made) shortcuts in $($r.Root) (replaced $($r.Removed))"
-            Start-Process $r.Root
+            $o = & $collect
+            if (-not $o.Stage) { $ui.Status.Text = "pick a scene first"; return }
+            $scene = Find-Scene $o.Stage
+            $dlg = New-Object Microsoft.Win32.SaveFileDialog
+            $dlg.Title = "Save a shortcut for $($o.Stage)"
+            $dlg.Filter = "Shortcut (*.lnk)|*.lnk"
+            $dlg.DefaultExt = ".lnk"
+            $dlg.AddExtension = $true
+            $dlg.FileName = $(if ($scene) { Get-ShortcutName $scene } else { $o.Stage })
+            $dlg.InitialDirectory = [Environment]::GetFolderPath("Desktop")
+            if ($dlg.ShowDialog() -ne $true) { return }
+            $written = New-SceneShortcut $o $dlg.FileName
+            $ui.Status.Text = "shortcut written: $written"
         } catch {
-            $ui.Status.Text = "shortcuts failed: $($_.Exception.Message)"
+            $ui.Status.Text = "could not write the shortcut: $($_.Exception.Message)"
         }
-        $this.IsEnabled = $true
     }.GetNewClosure())
 
     $ui.SaveBtn.Add_Click($saveSettings)
@@ -2004,7 +1956,6 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.PlayView.Visibility = & $vis ($tab -eq "play")
         $ui.SettingsView.Visibility = & $vis ($tab -eq "settings")
         $ui.InstallView.Visibility = & $vis ($tab -eq "install")
-        $ui.ShortcutBtn.Visibility = & $vis ($tab -eq "play")
         $ui.SaveBtn.Visibility = & $vis ($tab -eq "settings")
         $ui.ReloadBtn.Visibility = & $vis ($tab -eq "settings")
         $ui.CopyBtn.Visibility = & $vis ($tab -eq "install")
@@ -2123,9 +2074,10 @@ switch ($opt.Action) {
     "settings"  { Write-SettingsReport $gameDir; exit 0 }
     "set"       { exit (Set-SettingsFromCli $gameDir $opt.Sets) }
     "stop"      { Stop-Game; Write-Host "closed mgs4.exe"; exit 0 }
-    "shortcuts" {
-        $r = New-Shortcuts $opt
-        Write-Host "$($r.Made) shortcuts written to $($r.Root) (replaced $($r.Removed))"
+    "shortcut"  {
+        if (-not $opt.Stage) { Write-Host "--shortcut needs a scene: mgs4-dlss.bat <id> --shortcut <file>" -ForegroundColor Red; exit 2 }
+        $written = New-SceneShortcut $opt $opt.ShortcutPath
+        Write-Host "shortcut written: $written"
         exit 0
     }
 }

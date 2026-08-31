@@ -8,8 +8,7 @@ The stage table in `mgs4.exe` holds **420 entries**, and the naming already clas
 | gameplay | 250 | `<stage>_<n>` | a gameplay section |
 | stage entry | 68 | `<stage>` | boots the stage at its start |
 
-Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command) - what `mgs4-dlss.bat` lists
-and what the desktop shortcut folder is generated from. The 20 unnumbered `<stage>_D` cutscenes were added to it
+Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command) - what `mgs4-dlss.bat` lists. The 20 unnumbered `<stage>_D` cutscenes were added to it
 later, pulled out of the executable's own strings.
 
 The act column there is the one the stage id implies. **`tools/scene_info.json`** carries the corrections that only

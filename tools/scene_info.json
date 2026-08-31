@@ -27,9 +27,9 @@
 
   "scenes": {
     "s10a10l": {
-      "act": "start", "kind": "start", "rank": 10,
-      "name": "Game start, before the pre-menu credits",
-      "description": "Boots the game from ahead of the credits that play before the main menu."
+      "act": "start", "kind": "start", "rank": 0,
+      "name": "Start the game",
+      "description": "The normal boot with the Master Collection launcher skipped: pre-menu credits, PRESS START, then the menu. This is the one for just playing."
     },
 
     "s10a20l": {
