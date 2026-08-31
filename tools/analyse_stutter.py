@@ -12,6 +12,9 @@ Prints a per-second timeline of the worst stretches, the overall effective frame
 """
 import argparse, os, re, subprocess, sys, datetime, collections
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
+
 FRAME_RE = re.compile(r"pts_time:([\d.]+)")
 VAL_RE = re.compile(r"lavfi\.signalstats\.YAVG=([\d.]+)")
 # A repeated frame is not bit-identical in the recording - AV1 re-encodes it - so it shows up as a very small but
@@ -22,7 +25,7 @@ DUP_LIMIT = 0.005
 
 def frame_diffs(path):
     """[(t, diff)] for every frame, using a small greyscale difference so it is quick on 4K."""
-    cmd = ["ffmpeg", "-v", "error", "-i", path, "-vf",
+    cmd = [paths.FFMPEG, "-v", "error", "-i", path, "-vf",
            "scale=480:270,format=gray,tblend=all_mode=difference,signalstats,"
            "metadata=print:key=lavfi.signalstats.YAVG:file=-", "-f", "null", "-"]
     out = subprocess.run(cmd, capture_output=True, text=True).stdout
@@ -61,7 +64,7 @@ def file_start_time(path):
                     return d.replace(hour=h, minute=m, second=s2, microsecond=0)
         except Exception:
             pass
-    dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+    dur = subprocess.run([paths.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
                          capture_output=True, text=True).stdout.strip()
     end = datetime.datetime.fromtimestamp(os.path.getmtime(path))
     try:
@@ -92,12 +95,12 @@ def addon_events(log_path, start, seconds):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
-    ap.add_argument("--log", default=r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4\logs\mgs4_dlss.log")
+    ap.add_argument("--log", default=paths.ADDON_LOG)
     ap.add_argument("--csv", default="")
     ap.add_argument("--worst", type=int, default=15)
     args = ap.parse_args()
 
-    path = args.file if os.path.isabs(args.file) else os.path.join(r"D:\mgs4-dlss5", args.file)
+    path = args.file if os.path.isabs(args.file) else os.path.join(paths.OUT_DIR, args.file)
     diffs = frame_diffs(path)
     if not diffs:
         print("no frames read"); return

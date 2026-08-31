@@ -9,8 +9,9 @@ import argparse, os, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import obs_control as obsc
+import paths
 
-GAME_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4"
+GAME_DIR = paths.GAME_DIR
 
 def main():
     ap = argparse.ArgumentParser()
@@ -18,6 +19,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=150.0)
     ap.add_argument("--keep-game", action="store_true")
     a = ap.parse_args()
+    paths.require_game()
 
     cl = obsc.client()
     st = obsc.status(cl)

@@ -47,11 +47,13 @@ The shipped ini is the configuration v1.0 was verified with: DLAA preset K at 38
 
 ### Build / install (from source)
 
-Requirements: MSVC Build Tools (the `build.bat` calls `vcvars64.bat` from VS 18 BuildTools — adjust the path if yours differs), ReShade 6.8 installed as `MGS4\dxgi.dll`, the D3D12 switch above, and `nvngx_dlss.dll` in `MGS4\` (copy `third_party/DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll` or let the NVIDIA app override supply it).
+Requirements: MSVC Build Tools, ReShade 6.8 installed as `MGS4\dxgi.dll`, the D3D12 switch above, and `nvngx_dlss.dll` in `MGS4\` (copy `third_party/DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll` or let the NVIDIA app override supply it). `build.bat` finds the MSVC environment through `vswhere` and `fxc.exe` in the newest Windows 10 SDK; `MGS4_VCVARS` / `MGS4_FXC` in `config.ini` override that. The install script copies to whatever game folder is configured — see [Paths](#paths-configini).
 
 ```bat
 dlss-addon\build.bat                       :: -> build\mgs4_dlss.addon64
-copy build\mgs4_dlss.addon64 "<game>\MGS4\"
+```
+```sh
+sh dlss-addon/install.sh                    # -> <game>\MGS4\ (keeps an existing mgs4_dlss.ini)
 ```
 
 `MGS4\mgs4_dlss.ini` (the release configuration):
@@ -366,7 +368,7 @@ Requirements: mingw-w64 `gcc` on PATH (Git Bash), [Ultimate ASI Loader](https://
 
 ```sh
 sh d3d12-switch/build.sh      # -> build/MGS4_D3D12.asi
-sh d3d12-switch/install.sh    # copies asi + ini to MGS4/scripts/ (override with MGS4_DIR=...)
+sh d3d12-switch/install.sh    # copies asi + ini to MGS4/scripts/ (game folder: see Paths below)
 ```
 
 Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: `MGS4/logs/MGS4_D3D12.log`.
@@ -374,13 +376,38 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
+config.example.ini     machine-local paths; copy to config.ini (git-ignored)
 d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
-dlss-addon/            src/mgs4_dlss.cpp, build.bat, mgs4_dlss.ini (sample)
+dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
+tools/paths.py|ps1|sh  where the game / the output folder live on this machine
 third_party/minhook/   MinHook (BSD-2), vendored
 third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
 docs/                  reverse-engineering notes and the DLSS plan
 ```
+
+## Paths (`config.ini`)
+
+The checkout can live anywhere; nothing in it assumes a path. Every script asks `tools/paths.py` (Python),
+`tools/paths.ps1` (PowerShell) or `tools/paths.sh` (Git Bash) for the machine's paths, and all three resolve each
+value the same way: **environment variable > `config.ini` in the repo root > auto-detection**.
+
+| key | what | detected as |
+| --- | --- | --- |
+| `MGS4_DIR` | the folder holding `mgs4.exe` (the install root also works) | the Steam library folder that has app 2492670, on any drive |
+| `MGS4_OUT` | recordings, gold clips, screenshots, analysis output | `<repo>\work` |
+| `MGS4_FFMPEG` / `MGS4_FFPROBE` | video tools used by the capture / analysis scripts | PATH |
+| `MGS4_PYTHON` | interpreter the detached gold worker starts | PATH |
+| `MGS4_VCVARS` / `MGS4_FXC` | MSVC environment and shader compiler for `build.bat` | `vswhere`, newest Windows 10 SDK |
+
+```
+copy config.example.ini config.ini    :: then edit; every key is optional
+python tools\paths.py                 :: what resolved to what, and where each value came from
+```
+
+A second install (a different drive, a different machine, a copy of the game) needs only `MGS4_DIR` in `config.ini`
+or in the environment: `MGS4_DIR="D:\SteamLibrary\steamapps\common\METAL GEAR SOLID 4\MGS4" sh dlss-addon/install.sh`.
+The PowerShell scripts also still take `-GameDir` for a one-off run.
 
 ### Phase 2 (first step): character mask
 
@@ -473,14 +500,14 @@ ecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
 
 - boots each `<stage>_D<n>` entry in chronological order (`tools/scenes.csv`),
 - drives OBS over obs-websocket (`tools/obs_control.py`): a dedicated scene with a Game Capture source cropped to the
-  game's 16:9 image and fitted to a 3840x2160 / 60 fps canvas, NVENC **AV1** at CQP 22 into `D:\mgs4-dlss5`,
+  game's 16:9 image and fitted to a 3840x2160 / 60 fps canvas, NVENC **AV1** at CQP 22 into `MGS4_OUT`,
 - taps **Cross** on a virtual DualShock 4 (`tools/ds4.py`, ViGEmBus through ctypes - no installer) about once a second:
   it gets past the auto-save notice and "press any button" screens and triggers MGS4's in-cutscene **flashback**
   prompts. The game only accepts input while it is the foreground window, so `tools/winfocus.py` re-focuses it,
 - decides that a cutscene is over from the add-on's `SCENE-STATE` log (HUD appearing = gameplay) or from a static
   screen - the recording's byte rate separates a static continue/act-end screen from a prerecorded video playing
   inside the cutscene, so long Bink segments are not cut off,
-- checks the free space on `D:` after every recording and stops below the configured floor (default 100 GB).
+- checks the free space on the output drive after every recording and stops below the configured floor (default 100 GB).
 
 `tools/label_recordings.py` then pulls thumbnails out of the recordings, applies semantic names from `labels.json`
 (`23_act2-south-america_naomi-lab-rose-garden_s02a50l_D1.mkv`) and writes `index.csv` / `index.md`.

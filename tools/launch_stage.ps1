@@ -15,11 +15,14 @@ param(
     [double]$PressEvery = 0.5,
     [double]$PressFor = 60,
     [switch]$NoSceneDetect,        # keep pressing for the full PressFor instead of stopping at the first 3D frame
-    [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4",
+    [string]$GameDir = "",          # default: MGS4_DIR / config.ini / the Steam libraries (tools\paths.ps1)
     [switch]$NoRestart
 )
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\paths.ps1"
+if (-not $GameDir) { $GameDir = Get-Mgs4GameDir }
 $log = Join-Path $GameDir "logs\launch_stage.log"
+New-Item -ItemType Directory -Force (Split-Path -Parent $log) | Out-Null
 function Log($m) { $line = "[{0:HH:mm:ss.fff}] {1}" -f (Get-Date), $m; Write-Host $line; Add-Content -Path $log -Value $line -Encoding ASCII }
 Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;

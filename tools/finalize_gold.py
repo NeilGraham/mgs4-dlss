@@ -15,10 +15,11 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from screen_signals import classify        # noqa: E402
+import paths                               # noqa: E402
 
-GOLD = r"D:\mgs4-dlss5\gold"
-FF = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
-FP = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe"
+GOLD = paths.GOLD
+FF = paths.FFMPEG
+FP = paths.FFPROBE
 W, H = 320, 180
 
 

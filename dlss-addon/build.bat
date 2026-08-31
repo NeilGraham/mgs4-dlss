@@ -1,9 +1,33 @@
 @echo off
-setlocal
+:: Builds mgs4_dlss.addon64 into ..\build. The MSVC environment and fxc.exe are located automatically (vswhere and
+:: the newest Windows 10 SDK); MGS4_VCVARS / MGS4_FXC, from the environment or ..\config.ini, override that.
+setlocal enabledelayedexpansion
 cd /d "%~dp0"
-call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1 || (echo vcvars64 not found & exit /b 1)
+
+set "CFG=%~dp0..\config.ini"
+if exist "%CFG%" for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b /i "MGS4_VCVARS MGS4_FXC" "%CFG%"`) do (
+    if /i "%%a"=="MGS4_VCVARS" if not defined MGS4_VCVARS set "MGS4_VCVARS=%%~b"
+    if /i "%%a"=="MGS4_FXC" if not defined MGS4_FXC set "MGS4_FXC=%%~b"
+)
+
+if not defined MGS4_VCVARS (
+    set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+    if exist "!VSWHERE!" for /f "usebackq delims=" %%i in (`""!VSWHERE!" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath" 2^>nul`) do (
+        if exist "%%i\VC\Auxiliary\Build\vcvars64.bat" set "MGS4_VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
+    )
+)
+if not defined MGS4_VCVARS (echo vcvars64.bat not found - set MGS4_VCVARS in "%CFG%" or in the environment & exit /b 1)
+call "%MGS4_VCVARS%" >nul 2>&1 || (echo "%MGS4_VCVARS%" failed & exit /b 1)
 if not exist ..\build mkdir ..\build
-set FXC="C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe"
+
+:: fxc.exe: the SDK the MSVC environment just selected, else the newest Windows 10 SDK installed
+if not defined MGS4_FXC if defined WindowsSdkVerBinPath if exist "%WindowsSdkVerBinPath%x64\fxc.exe" set "MGS4_FXC=%WindowsSdkVerBinPath%x64\fxc.exe"
+if not defined MGS4_FXC for /f "delims=" %%d in ('dir /b /ad /o-n "%ProgramFiles(x86)%\Windows Kits\10\bin\10.*" 2^>nul') do (
+    if not defined MGS4_FXC if exist "%ProgramFiles(x86)%\Windows Kits\10\bin\%%d\x64\fxc.exe" set "MGS4_FXC=%ProgramFiles(x86)%\Windows Kits\10\bin\%%d\x64\fxc.exe"
+)
+if not defined MGS4_FXC (echo fxc.exe not found - set MGS4_FXC in "%CFG%" or in the environment & exit /b 1)
+set FXC="%MGS4_FXC%"
+
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\mv_cs.h /Vn g_mv_cs src\mv_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\mv_vis.h /Vn g_mv_vis src\mv_vis.hlsl || exit /b 1
 

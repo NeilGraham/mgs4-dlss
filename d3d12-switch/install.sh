@@ -1,7 +1,10 @@
 #!/bin/sh
 # Copy the built ASI + ini into the game's scripts folder (Ultimate ASI Loader picks it up).
+# The game folder comes from MGS4_DIR / config.ini / the Steam libraries (see tools/paths.sh).
 set -e
 cd "$(dirname "$0")"
-GAME="${MGS4_DIR:-/c/Program Files (x86)/Steam/steamapps/common/METAL GEAR SOLID 4/MGS4}"
-cp ../build/MGS4_D3D12.asi MGS4_D3D12.ini "$GAME/scripts/"
-echo "installed to $GAME/scripts/"
+. ../tools/paths.sh
+mgs4_require_game
+mkdir -p "$MGS4_DIR/scripts"
+cp ../build/MGS4_D3D12.asi MGS4_D3D12.ini "$MGS4_DIR/scripts/"
+echo "installed to $MGS4_DIR/scripts/"

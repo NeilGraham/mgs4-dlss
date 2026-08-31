@@ -12,7 +12,7 @@ End of a cutscene is decided from two signals:
 
   python record_cutscenes.py [--stages a,b,c] [--limit N] [--max-minutes 30] [--min-free-gb 100] [--dry-run]
 """
-import argparse, csv, json, os, re, subprocess, sys, time, shutil, ctypes
+import argparse, csv, json, os, re, subprocess, sys, time, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -21,11 +21,12 @@ from ds4 import DS4, CROSS                                       # noqa: E402
 import obs_control as obsc                                       # noqa: E402
 from letterbox import read_ppm                                   # noqa: E402
 from screen_signals import classify                              # noqa: E402
+import paths                                                     # noqa: E402
 
-GAME_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4"
-GAME_EXE = os.path.join(GAME_DIR, "mgs4.exe")
-ADDON_LOG = os.path.join(GAME_DIR, "logs", "mgs4_dlss.log")
-OUT_DIR = r"D:\mgs4-dlss5"
+GAME_DIR = paths.GAME_DIR
+GAME_EXE = paths.GAME_EXE
+ADDON_LOG = paths.ADDON_LOG
+OUT_DIR = paths.OUT_DIR
 STATE_RE = re.compile(r"SCENE-STATE (cutscene|gameplay|no-3d)")
 # heartbeat: SCENE-STATE-TICK <state> (frame N, scene draws X, HUD draws Y, post-skipped Z, ...)
 TICK_RE = re.compile(r"SCENE-STATE-TICK (cutscene|gameplay|no-3d) \(frame (\d+), scene draws (\d+), HUD draws (\d+)")
@@ -37,14 +38,13 @@ ACTS = {"00": "prologue", "01": "act1-middle-east", "02": "act2-south-america", 
 def log(msg):
     line = time.strftime("[%H:%M:%S] ") + msg
     print(line, flush=True)
-    with open(os.path.join(OUT_DIR, "recording.log"), "a", encoding="utf-8") as f:
+    with open(paths.out("recording.log"), "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
 
-def free_gb(drive="D:\\"):
-    free = ctypes.c_ulonglong(0)
-    ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(drive), None, None, ctypes.byref(free))
-    return free.value / (1024 ** 3)
+def free_gb():
+    """Free space where the recordings go."""
+    return paths.free_gb()
 
 
 def natural_key(entry):
@@ -319,6 +319,8 @@ def main():
     ap.add_argument("--height", type=int, default=2160)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    paths.require_game()
+    os.makedirs(OUT_DIR, exist_ok=True)
 
     os.makedirs(OUT_DIR, exist_ok=True)
     entries = [e.strip() for e in args.stages.split(",") if e.strip()] or cutscene_entries()
@@ -345,7 +347,7 @@ def main():
                 log(f"--- [{i:02d}] {stage} already recorded, skipping"); continue
             gb = free_gb()
             if gb < args.min_free_gb:
-                log(f"STOPPING: only {gb:.1f} GB free on D: (floor {args.min_free_gb} GB)")
+                log(f"STOPPING: only {gb:.1f} GB free on {os.path.splitdrive(OUT_DIR)[0]} (floor {args.min_free_gb} GB)")
                 break
             info = record_one(cl, pad, i, stage, args)
             if info.get("status") == "aborted" or info.get("end_reason") == "aborted":

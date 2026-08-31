@@ -6,8 +6,11 @@
   python obs_control.py start               - start recording
   python obs_control.py stop                - stop recording, print the output file
 """
-import sys, time, json
+import os, sys, time, json
 import obsws_python as obs
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
 
 HOST, PORT, PASSWORD = "localhost", 4455, "8TqvlFmdbuWku33O"
 SCENE = "MGS4 Capture"
@@ -161,7 +164,7 @@ def main():
         cl.set_current_program_scene(SCENE)
         fit_game(cl)
     elif cmd == "shot":
-        path = sys.argv[2] if len(sys.argv) > 2 else r"D:\mgs4-dlss5\shot.png"
+        path = sys.argv[2] if len(sys.argv) > 2 else paths.out("shot.png")
         width = int(sys.argv[3]) if len(sys.argv) > 3 else 1280
         cl.save_source_screenshot(CAPTURE, "png", path, width, int(width * 9 / 16), -1)
         print("saved", path)

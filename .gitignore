@@ -5,3 +5,6 @@ build/
 *.log
 *.png
 tools/ViGEmClient.dll
+config.ini
+work/
+__pycache__/

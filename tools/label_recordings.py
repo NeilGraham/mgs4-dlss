@@ -1,6 +1,6 @@
 """Semantic labelling helper for the recorded cutscenes.
 
-  python label_recordings.py thumbs          - pull 3 frames out of every recording into D:\\mgs4-dlss5\\thumbs
+  python label_recordings.py thumbs          - pull 3 frames out of every recording into <MGS4_OUT>\\thumbs
                                                (contact sheets to look at, one per recording)
   python label_recordings.py apply           - rename the recordings using labels.json:
                                                {"s02a50l_D1": "act2-naomi-in-the-lab", ...}
@@ -9,7 +9,10 @@
 """
 import csv, json, os, re, subprocess, sys
 
-OUT_DIR = r"D:\mgs4-dlss5"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
+
+OUT_DIR = paths.OUT_DIR
 THUMBS = os.path.join(OUT_DIR, "thumbs")
 RESULTS = os.path.join(OUT_DIR, "recordings.json")
 LABELS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "labels.json")
@@ -21,7 +24,7 @@ def load_results():
 
 def duration(path):
     try:
-        out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+        out = subprocess.run([paths.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
                              capture_output=True, text=True).stdout.strip()
         return float(out)
     except Exception:
@@ -41,7 +44,7 @@ def thumbs():
             dst = os.path.join(THUMBS, f"{r['index']:02d}_{r['stage']}_{int(frac*100)}.jpg")
             if os.path.exists(dst):
                 continue
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(round(d * frac, 1)), "-i", path,
+            subprocess.run([paths.FFMPEG, "-v", "error", "-y", "-ss", str(round(d * frac, 1)), "-i", path,
                             "-frames:v", "1", "-vf", "scale=960:-1", "-q:v", "4", dst], capture_output=True)
         print(f"{r['index']:02d} {r['stage']}: {d:.0f}s -> thumbs")
 

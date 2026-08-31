@@ -4,7 +4,7 @@ picked before spending time recording them.
   python scout.py                      - scout the default candidate list
   python scout.py s03a30l_D1,s04a10l_D1
 
-Frames land in D:\\mgs4-dlss5\\scout\\<stage>_a.jpg (about 12 s in) and _b.jpg (about 45 s in).
+Frames land in <MGS4_OUT>\\scout\\<stage>_a.jpg (about 12 s in) and _b.jpg (about 45 s in).
 """
 import os, sys, time, json, subprocess
 
@@ -15,8 +15,9 @@ from ds4 import DS4                                          # noqa: E402
 import obs_control as obsc                                   # noqa: E402
 from record_cutscenes import (GAME_DIR, GAME_EXE, ADDON_LOG, Tail, STATE_RE,  # noqa: E402
                               kill_game, start_game, log as rlog)
+import paths                                             # noqa: E402
 
-OUT = r"D:\mgs4-dlss5\scout"
+OUT = os.path.join(paths.OUT_DIR, "scout")
 
 # a spread over the whole game: faces, foliage, snow, interiors, action, briefings
 CANDIDATES = [

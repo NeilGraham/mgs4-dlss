@@ -1,7 +1,10 @@
 """Frame-pacing check of a recording: per second, duplicated frames (diff ~ 0) and doubled steps (a frame-to-frame
 change > 1.7x the second's median, below the cut threshold), plus totals. Usage: python pace_check.py <file> [ss] [t]"""
-import subprocess, sys, numpy as np
-FF = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+import os, subprocess, sys, numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
+
+FF = paths.FFMPEG
 W, H = 480, 270
 path = sys.argv[1]; ss = float(sys.argv[2]) if len(sys.argv) > 2 else 0.0; t = float(sys.argv[3]) if len(sys.argv) > 3 else 60.0
 raw = subprocess.run([FF, "-v", "error", "-ss", str(ss), "-t", str(t), "-i", path, "-vf", "fps=60,scale=%d:%d,format=gray" % (W, H), "-f", "rawvideo", "-"], capture_output=True).stdout

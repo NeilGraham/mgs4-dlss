@@ -10,7 +10,10 @@ change; writes the flagged frames (and one neighbour each side) as PNGs into --o
 import argparse, os, subprocess, sys
 import numpy as np
 
-FF = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
+
+FF = paths.FFMPEG
 W, H = 960, 540
 
 def main():

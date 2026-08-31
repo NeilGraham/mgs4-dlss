@@ -2,9 +2,13 @@
 tail: 8 frames over 2 s up to the end), written next to the clip as <name>.check.png, for a look at the cut points.
   python inspect_gold.py [--stages a,b] [--span 2.0]"""
 import json, os, subprocess, sys
-GOLD = r"D:\mgs4-dlss5\gold"
-FF = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
-FP = r"C:\Portable\ffmpeg-master-latest-win64-gpl-shared\bin\ffprobe.exe"
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths                                                     # noqa: E402
+
+GOLD = paths.GOLD
+FF = paths.FFMPEG
+FP = paths.FFPROBE
 args = sys.argv[1:]
 wanted = set(args[args.index("--stages") + 1].split(",")) if "--stages" in args else set()
 span = float(args[args.index("--span") + 1]) if "--span" in args else 2.0

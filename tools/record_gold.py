@@ -1,4 +1,4 @@
-"""Gold recordings of MGS4's in-engine cutscenes: 3840x2160, 60 fps, NVENC AV1, into D:\\mgs4-dlss5\\gold\\raw.
+"""Gold recordings of MGS4's in-engine cutscenes: 3840x2160, 60 fps, NVENC AV1, into <MGS4_OUT>\\gold\\raw.
 
 For each scene (the curated list below, story order) the game boots straight into the cutscene, OBS records from the
 boot prompts on, a virtual DualShock 4 taps Cross only until the add-on reports the cutscene (Cross during a scene
@@ -13,7 +13,7 @@ scene's start and end are stored with each raw clip; finalize_gold.py trims to t
 
   python record_gold.py [--stages a,b] [--limit N] [--cap-minutes 20] [--dry-run]
 """
-import argparse, json, os, re, subprocess, sys, time, shutil, ctypes
+import argparse, json, os, re, subprocess, sys, time, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -22,6 +22,7 @@ from ds4 import DS4                                              # noqa: E402
 import obs_control as obsc                                       # noqa: E402
 from letterbox import read_ppm                                   # noqa: E402
 from screen_signals import classify                              # noqa: E402
+import paths                                                     # noqa: E402
 PROBE_PATH = os.path.join(os.environ.get("TEMP", "."), "mgs4_gold_probe.ppm")
 
 
@@ -36,10 +37,10 @@ def hud_on_screen(cl):
     w, h, px = img
     return classify(px, w, h)[0] == "gameplay"
 
-GAME_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4"
-GAME_EXE = os.path.join(GAME_DIR, "mgs4.exe")
-ADDON_LOG = os.path.join(GAME_DIR, "logs", "mgs4_dlss.log")
-GOLD = r"D:\mgs4-dlss5\gold"
+GAME_DIR = paths.GAME_DIR
+GAME_EXE = paths.GAME_EXE
+ADDON_LOG = paths.ADDON_LOG
+GOLD = paths.GOLD
 RAW = os.path.join(GOLD, "raw")
 STATE_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\.(\d\d\d)\] SCENE-STATE (cutscene|gameplay|no-3d)")
 WINDOW_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\.(\d\d\d)\] scene window: on")
@@ -85,10 +86,9 @@ def log(msg):
         f.write(line + "\n")
 
 
-def free_gb(drive="D:\\"):
-    free = ctypes.c_ulonglong(0)
-    ctypes.windll.kernel32.GetDiskFreeSpaceExW(ctypes.c_wchar_p(drive), None, None, ctypes.byref(free))
-    return free.value / (1024 ** 3)
+def free_gb():
+    """Free space where the recordings go."""
+    return paths.free_gb()
 
 
 def log_time(m, base):
@@ -292,6 +292,7 @@ def main():
     ap.add_argument("--capture", default="game", choices=["game", "display"], help="OBS source: game capture (every presented frame, no overlays) or display capture")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+    paths.require_game()
     os.makedirs(RAW, exist_ok=True)
     wanted = [s.strip() for s in args.stages.split(",") if s.strip()]
     scenes = [(i, st, ti) for i, (st, ti) in enumerate(SCENES, 1) if not wanted or st in wanted]

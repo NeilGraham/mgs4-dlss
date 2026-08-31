@@ -12,10 +12,12 @@ param(
     [int]$Screens = 1,             # normal screenshots per stage (5 s apart)
     [switch]$MvVis,                # also capture the motion-vector visualiser (DebugMode 5)
     [switch]$ObjectMV,             # test with per-object motion vectors on (restored afterwards)
-    [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\METAL GEAR SOLID 4\MGS4",
+    [string]$GameDir = "",          # default: MGS4_DIR / config.ini / the Steam libraries (tools\paths.ps1)
     [switch]$KeepRunning           # leave the last stage running
 )
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\paths.ps1"
+if (-not $GameDir) { $GameDir = Get-Mgs4GameDir }
 $tools = Split-Path -Parent $MyInvocation.MyCommand.Path
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $out = Join-Path $GameDir "stage_tests\$stamp"; New-Item -ItemType Directory -Force $out | Out-Null

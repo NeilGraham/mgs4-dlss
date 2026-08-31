@@ -12,8 +12,9 @@ import json, os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from screen_signals import classify        # noqa: E402
+import paths                               # noqa: E402
 
-OUT_DIR = r"D:\mgs4-dlss5"
+OUT_DIR = paths.OUT_DIR
 PROBE_W, PROBE_H = 320, 180
 HOLD = 3               # seconds the same verdict must hold
 HEAD_SKIP = 15         # the recording starts at the boot prompts; ignore those
@@ -21,7 +22,7 @@ HEAD_SKIP = 15         # the recording starts at the boot prompts; ignore those
 
 def sample(path, fps=1):
     """Classify one frame a second; returns [(t, verdict)]."""
-    cmd = ["ffmpeg", "-v", "error", "-i", path, "-vf", f"fps={fps},scale={PROBE_W}:{PROBE_H}",
+    cmd = [paths.FFMPEG, "-v", "error", "-i", path, "-vf", f"fps={fps},scale={PROBE_W}:{PROBE_H}",
            "-pix_fmt", "rgb24", "-f", "rawvideo", "-"]
     frame_bytes = PROBE_W * PROBE_H * 3
     out = []
@@ -73,12 +74,12 @@ def main():
         if not os.path.exists(f):
             print("missing:", f); continue
         end, why, _ = find_end(f)
-        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f],
+        dur = float(subprocess.run([paths.FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f],
                                    capture_output=True, text=True).stdout.strip() or 0)
         print(f"{os.path.basename(f):48s} length {hms(dur):>6s}  end {hms(end) if end else '   -':>6s} ({why})")
         if trim and end and dur - end > 3:
             tmp = f + ".trim.mkv"
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", f, "-t", str(end), "-c", "copy", tmp],
+            subprocess.run([paths.FFMPEG, "-v", "error", "-y", "-i", f, "-t", str(end), "-c", "copy", tmp],
                            capture_output=True)
             if os.path.exists(tmp) and os.path.getsize(tmp) > 1_000_000:
                 os.replace(f, f + ".orig")
