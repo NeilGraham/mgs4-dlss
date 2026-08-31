@@ -237,10 +237,10 @@ function Get-SceneCatalogue {
                  Description = "The Unity front-end, where the display settings live."
                  Hidden = $false; Alts = @(); SortAs = "" }
 
-    # Ids that crash or come up black, checked one by one:
-    #   anything in s10/s20/s30/s99 ending in _1 or _2   ("_D2" does not match: the digit must follow the underscore)
-    #   anything at all ending in _0                     ("_00" does not match, and those are fine)
-    $brokenRe = '(^s(10|20|30|99)a.*_[12]$)|(_0$)'
+    # Ids that crash or come up black: every one whose id ends in a single digit - "_0", "_1", ... "_9". The
+    # two-digit sections ("_00", "_11") are the ones that work, and "_D2" is a cutscene, not a section: the digit
+    # has to be the whole suffix after the underscore for this to fire.
+    $brokenRe = '_\d$'
 
     $aliasOf = @{}
     if (Test-Mgs4Path $script:ScenesCsv) {

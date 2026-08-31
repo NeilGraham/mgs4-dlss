@@ -14,8 +14,8 @@ later, pulled out of the executable's own strings.
 
 The act column there is the one the stage id implies. **`tools/scene_info.json`** carries the corrections that only
 booting a scene can tell you: the `s10` / `s20` briefings belong to the act they lead into, `s30` and `s00` are the
-closing material, several ids start the same scene as another, and everything in `s10` / `s20` / `s30` / `s99` ending
-in `_1` or `_2` crashes or comes up black. `mgs4-dlss.bat` groups and hides on that basis.
+closing material, several ids start the same scene as another, and every id ending in a single digit
+(`_0` .. `_9`, 102 of them) crashes or comes up black - the two-digit sections (`_00`, `_11`) are the working ones. `mgs4-dlss.bat` groups and hides on that basis.
 
 **Prerecorded vs in-game.** Prerecorded cutscenes are Bink 2 videos in `common/BK2/BK2` and `ww/BK2/BK2`; their headers
 give exact frame counts and frame rates, so their lengths are known without running the game: **18 videos, 55 m 32 s

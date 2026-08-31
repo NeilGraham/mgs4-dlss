@@ -102,9 +102,11 @@ exists; only booting it says what it is, so everything in that file was checked 
   `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
   backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
   than after `_D1`.
-- **Ids that crash or come up black** are out of the list and out of the shortcut folder: everything in `s10`, `s20`,
-  `s30` and `s99` whose id ends in `_1` or `_2`, and anything at all ending in `_0` (`_00` is a different thing and
-  is fine). The "Known broken" filter shows them if you want them anyway.
+- **Ids that crash or come up black** are out of the list and out of the shortcut folder: every one ending in a
+  single digit — `_0`, `_1`, ... `_9`, 102 of them. The two-digit sections (`_00`, `_11`) are the ones that work,
+  and `_D2` is a cutscene rather than a section: the digit has to be the whole suffix after the underscore for the
+  test to fire. The "Known broken" filter shows them if you want them anyway, and searching for one by id still
+  finds it.
 - `s00a00l` and `s00a00l_D` are the cemetery scene, which plays inside Act 1 rather than with the rest of `s00`, so
   they sit in Act 1 after the `s01a00l` entries (`sortAs` in the data file puts them there).
 
