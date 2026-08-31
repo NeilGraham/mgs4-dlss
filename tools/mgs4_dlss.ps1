@@ -1,11 +1,16 @@
-# MGS4 DLSS launcher: start the game, or any single scene in it, with the automation the tests use.
+# MGS4 DLSS: the app for this add-on. Start the game or any single scene in it, set the add-on up, and check the
+# install - one window with three tabs, and the same things as a command line.
 #
-#   launcher.bat                                 the window
-#   launcher.bat s02a50l_D1                      boot that scene, no window
-#   launcher.bat --main                          straight to MGS4's main menu (past the collection screen)
-#   launcher.bat --list naomi                    what can be launched
-#   launcher.bat --shortcuts                     rebuild the desktop shortcut folder
-#   launcher.bat --set FrameGen=0 --set Mode=Quality
+#   mgs4-dlss.bat                                the window
+#   mgs4-dlss.bat s02a50l_D1                     boot that scene, no window
+#   mgs4-dlss.bat --main                         straight to MGS4's main menu (past the collection screen)
+#   mgs4-dlss.bat --list naomi                   what can be launched
+#   mgs4-dlss.bat --install                      the window, on the install check
+#   mgs4-dlss.bat --report                       the install check as text, for pasting into an issue
+#   mgs4-dlss.bat --shortcuts                    rebuild the desktop shortcut folder
+#   mgs4-dlss.bat --set FrameGen=0 --set Mode=Quality
+#
+# launcher.bat and check-install.bat are aliases that open the right tab; both spellings keep working.
 #
 # There is deliberately NO param() block: PowerShell then hands every argument through in $args verbatim, so the
 # --flag spellings above survive `powershell -File`. Run options are parsed by Read-Options below.
@@ -13,9 +18,10 @@
 # Everything the repo could already do to a scene lives here: the boot (`mgs4.exe --stage`), pressing through the
 # auto-save / "press any button" prompts until the first 3D frame (was tools\launch_stage.ps1), tapping Cross for the
 # in-cutscene flashback prompts and ending a scene when gameplay starts (was tools\record_cutscenes.py, without the
-# recording). tools\test_stages.ps1 and the desktop shortcuts drive this script.
+# recording). The install check itself is tools\install_checks.ps1; this renders it.
 $ErrorActionPreference = "Continue"
 . "$PSScriptRoot\paths.ps1"
+. "$PSScriptRoot\install_checks.ps1"
 
 $script:ScenesCsv = Join-Path $PSScriptRoot "scenes.csv"
 $script:LabelsJson = Join-Path $PSScriptRoot "labels.json"
@@ -26,10 +32,12 @@ $script:PrefsPath = Join-Path $env:LOCALAPPDATA "mgs4-dlss\launcher.json"
 
 function New-Options {
     return [ordered]@{
-        Action        = ""          # "" = launch, or list / shortcuts / settings / set / stop / ui / help
+        Action        = ""          # "" = launch, or ui / install / report / list / settings / set /
+                                    #      shortcuts / stop / help
         Stage         = ""          # a stage id, or one of the @-entries in the catalogue
         GameDir       = ""
         GameDirGiven  = $false      # true only when --game-dir was passed, so previews do not echo a detected path
+        GameDirBad    = ""          # a folder that was named but holds no mgs4.exe, kept for the Install tab
         Advance       = $true       # press through the boot prompts until the first 3D frame
         MashX         = $false      # keep tapping Cross so the flashback prompts fire
         Keys          = ""          # an explicit key sequence instead of pressing through the prompts
@@ -73,6 +81,8 @@ function Read-Options([string[]]$argv) {
         elseif ($a -match '^--list$')                     { $o.Action = "list"; $took = $false }
         elseif ($a -match '^--shortcuts$')                { $o.Action = "shortcuts"; $took = $false }
         elseif ($a -match '^--(show-settings|settings)$') { $o.Action = "settings"; $took = $false }
+        elseif ($a -match '^--(install|check|check-install)$') { $o.Action = "install"; $took = $false }
+        elseif ($a -match '^--report$')                   { $o.Action = "report"; $took = $false }
         elseif ($a -match '^--stop$')                     { $o.Action = "stop"; $took = $false }
         elseif ($a -match '^--main$')                     { $o.Stage = "@main"; $took = $false }
         elseif ($a -match '^--title$')                    { $o.Stage = "@title"; $took = $false }
@@ -119,20 +129,24 @@ function Read-Options([string[]]$argv) {
 }
 
 $script:HelpText = @'
-MGS4 DLSS launcher - start the game, or one scene of it, with the test automation.
+MGS4 DLSS - start the game or one scene of it, set the add-on up, check the install.
 
-  launcher.bat                          open the window
-  launcher.bat <stage id>               boot that scene and exit
-  launcher.bat --main                   MGS4's own main menu, past the Master Collection screen
-  launcher.bat --title                  the OTC intro (stage s00title_1)
-  launcher.bat --collection             the Master Collection launcher
-  launcher.bat --list [text]            every launchable scene (filtered by id / name / act)
-  launcher.bat --shortcuts              rebuild "Desktop\MGS4 Shortcuts" against this checkout
-  launcher.bat --settings               print mgs4_dlss.ini the way the window shows it
-  launcher.bat --set Key=Value [...]    write those keys into mgs4_dlss.ini
-  launcher.bat --stop                   close a running game
+  mgs4-dlss.bat                         open the window (Play / Settings / Install)
+  mgs4-dlss.bat <stage id>              boot that scene and exit
+  mgs4-dlss.bat --main                  MGS4's own main menu, past the Master Collection screen
+  mgs4-dlss.bat --title                 the OTC intro (stage s00title_1)
+  mgs4-dlss.bat --collection            the Master Collection launcher
+  mgs4-dlss.bat --list [text]           every launchable scene (filtered by id / name / act)
+  mgs4-dlss.bat --install               the window, opened on the install check
+  mgs4-dlss.bat --report                the install check as text, for pasting into an issue
+  mgs4-dlss.bat --shortcuts             rebuild "Desktop\MGS4 Shortcuts" against this checkout
+  mgs4-dlss.bat --settings              print mgs4_dlss.ini the way the window shows it
+  mgs4-dlss.bat --set Key=Value [...]   write those keys into mgs4_dlss.ini
+  mgs4-dlss.bat --stop                  close a running game
 
-Run options (any of them keeps the launcher attached until the scene is done):
+launcher.bat and check-install.bat are aliases for the Play and Install tabs.
+
+Run options (any of them keeps this attached until the scene is done):
   --advance / --no-advance   press through the auto-save notice and "press any button" until the
                              first 3D frame. On by default.
   --mash-x                   keep tapping Cross for the whole scene, so the flashback prompts in
@@ -277,13 +291,6 @@ $script:IniSpec = @(
     @{ Group = "Diagnostics"; Key = "DumpShaders"; Type = "bool"; Label = "Dump shaders"
        Help = "write every pipeline's bytecode to logs\shaders" }
 )
-
-function Get-Ini([string]$path, [string]$key) {
-    if (-not (Test-Mgs4Path $path)) { return $null }
-    $m = Select-String -LiteralPath $path -Pattern ("^\s*" + [regex]::Escape($key) + "\s*=\s*(.*?)\s*$") | Select-Object -First 1
-    if ($m) { return $m.Matches[0].Groups[1].Value }
-    return $null
-}
 
 # In place, keeping the order and the comments. The add-on owns this file while the game runs - its writes go through
 # the Windows profile API, whose cache will happily undo an outside edit - so every caller checks that first.
@@ -655,7 +662,7 @@ function Write-SceneList($filter) {
         $n++
     }
     Write-Host ""
-    Write-Host ("{0} {1}.  launcher.bat <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
+    Write-Host ("{0} {1}.  mgs4-dlss.bat <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
 }
 
 function Write-SettingsReport($gameDir) {
@@ -665,7 +672,7 @@ function Write-SettingsReport($gameDir) {
     $group = ""
     foreach ($s in $script:IniSpec) {
         if ($s.Group -ne $group) { $group = $s.Group; Write-Host ""; Write-Host "[$group]" }
-        $v = Get-Ini $ini $s.Key
+        $v = Get-IniValue $ini $s.Key
         if ($null -eq $v) { $v = "(unset)" }
         Write-Host ("  {0,-22} {1,-12} {2}" -f $s.Key, $v, $s.Label)
     }
@@ -726,7 +733,7 @@ Notes
 -----
 - The game is restarted by the shortcut, so anything already running is closed first.
 - A scene may need a few seconds of black screen while the stage loads.
-- These shortcuts are generated: re-run "launcher.bat --shortcuts" after moving the checkout, and they will point at
+- These shortcuts are generated: re-run "mgs4-dlss.bat --shortcuts" after moving the checkout, and they will point at
   the new place. That is the whole reason a shortcut can stop working - it holds an absolute path.
 - More options (keep tapping X for the flashback prompts, close the game when gameplay starts) are in the launcher
   window: launcher.bat
@@ -735,7 +742,7 @@ Notes
 function New-Shortcuts($opt) {
     $root = $opt.DesktopDir
     if (-not $root) { $root = Join-Path ([Environment]::GetFolderPath("Desktop")) "MGS4 Shortcuts" }
-    $scriptPath = Join-Path $PSScriptRoot "launcher.ps1"
+    $scriptPath = Join-Path $PSScriptRoot "mgs4_dlss.ps1"
     $gameDir = $opt.GameDir
     if (-not $gameDir) { $gameDir = Get-Mgs4GameDir }
 
@@ -800,7 +807,7 @@ function Get-CliArgs($opt) {
 
 # The same argument list as a line someone can paste into a terminal.
 function Format-CliPreview($cliArgs) {
-    return "launcher.bat " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
+    return "mgs4-dlss.bat " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
 }
 
 function Read-Prefs {
@@ -820,7 +827,7 @@ function Save-Prefs($o) {
 $script:Xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MGS4 DLSS - launcher" Height="880" Width="1180" MinHeight="560" MinWidth="920"
+        Title="MGS4 DLSS" Height="880" Width="1180" MinHeight="560" MinWidth="920"
         Background="#0F1116" WindowStartupLocation="CenterScreen" TextOptions.TextFormattingMode="Ideal">
   <Window.Resources>
     <SolidColorBrush x:Key="Card" Color="#171A21"/>
@@ -893,6 +900,13 @@ $script:Xaml = @'
       <Setter Property="Background" Value="#3A5BD9"/>
       <Setter Property="BorderBrush" Value="#4E6DE8"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="Link" TargetType="Button" BasedOn="{StaticResource Flat}">
+      <Setter Property="Background" Value="#1D2432"/>
+      <Setter Property="BorderBrush" Value="#31405E"/>
+      <Setter Property="Foreground" Value="#9FB6FF"/>
+      <Setter Property="Padding" Value="10,3"/>
+      <Setter Property="FontSize" Value="11"/>
     </Style>
     <Style x:Key="Nav" TargetType="RadioButton">
       <Setter Property="Foreground" Value="#858D9E"/>
@@ -1075,13 +1089,14 @@ $script:Xaml = @'
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0">
           <TextBlock Text="MGS4 DLSS" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
-          <TextBlock Text="launcher" FontSize="13" Foreground="{StaticResource Accent}" Margin="0,1,0,6"/>
+          <TextBlock x:Name="Caption" Text="start a scene" FontSize="13" Foreground="{StaticResource Accent}" Margin="0,1,0,6"/>
           <TextBlock x:Name="GamePath" FontSize="11" Foreground="{StaticResource Muted}" FontFamily="Consolas"
                      TextTrimming="CharacterEllipsis" MaxWidth="360"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
           <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="Settings" GroupName="nav"/>
+          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="Install" GroupName="nav"/>
         </StackPanel>
         <Border x:Name="Pill" Grid.Column="2" CornerRadius="8" Padding="16,9" Background="#161B2A" BorderBrush="#33436E"
                 BorderThickness="1" VerticalAlignment="Center" MinWidth="150">
@@ -1184,6 +1199,11 @@ $script:Xaml = @'
       </Border>
     </Grid>
 
+    <ScrollViewer x:Name="InstallView" Grid.Row="1" Margin="22,16,10,0" VerticalScrollBarVisibility="Auto"
+                  Padding="0,0,12,0" Visibility="Collapsed">
+      <StackPanel x:Name="InstallHost"/>
+    </ScrollViewer>
+
     <Grid x:Name="SettingsView" Grid.Row="1" Margin="22,16,22,0" Visibility="Collapsed">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/>
@@ -1208,6 +1228,8 @@ $script:Xaml = @'
                    Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
           <Button x:Name="ShortcutBtn" Content="Desktop shortcuts" Style="{StaticResource Flat}" Margin="0,0,10,0"/>
+          <Button x:Name="CopyBtn" Content="Copy report" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
+          <Button x:Name="RecheckBtn" Content="Re-check  (F5)" Style="{StaticResource Primary}" Visibility="Collapsed"/>
           <Button x:Name="ReloadBtn" Content="Reload" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
           <Button x:Name="SaveBtn" Content="Save settings" Style="{StaticResource Primary}" Visibility="Collapsed"/>
         </StackPanel>
@@ -1238,17 +1260,130 @@ function ConvertTo-Brush($hex) {
     return New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex))
 }
 
-function New-TextBlock($text, $size, $color, $bold) {
+function New-TextBlock($text, $size, $color, $bold, $mono) {
     $t = New-Object System.Windows.Controls.TextBlock
     $t.Text = [string]$text
     $t.FontSize = $size
     $t.Foreground = ConvertTo-Brush $color
     if ($bold) { $t.FontWeight = [System.Windows.FontWeights]::SemiBold }
+    if ($mono) { $t.FontFamily = New-Object System.Windows.Media.FontFamily "Consolas" }
     $t.TextWrapping = [System.Windows.TextWrapping]::Wrap
     return $t
 }
 
-function Show-LauncherWindow($opt, $gameDir) {
+# How a check result looks: glyph, text colour, and the pill colours behind it.
+$script:StatusStyle = @{
+    ok   = @{ Glyph = [char]0x2714; Fg = "#5FD38D"; Bg = "#152318"; Br = "#2C6B45" }
+    warn = @{ Glyph = [char]0x25B2; Fg = "#F2C14E"; Bg = "#251E10"; Br = "#7A6027" }
+    bad  = @{ Glyph = [char]0x2716; Fg = "#FF7B72"; Bg = "#2A1618"; Br = "#7E3B3B" }
+    info = @{ Glyph = [char]0x25CF; Fg = "#7C9CFF"; Bg = "#161B2A"; Br = "#33436E" }
+}
+
+function New-Card($title, $blurb, $tagKind, $tagLabel) {
+    $card = New-Object System.Windows.Controls.Border
+    $card.Background = ConvertTo-Brush "#171A21"
+    $card.BorderBrush = ConvertTo-Brush "#242935"
+    $card.BorderThickness = New-Object System.Windows.Thickness 1
+    $card.CornerRadius = New-Object System.Windows.CornerRadius 10
+    $card.Margin = New-Object System.Windows.Thickness 0, 0, 0, 14
+    $stack = New-Object System.Windows.Controls.StackPanel
+
+    $hdr = New-Object System.Windows.Controls.Border
+    $hdr.Background = ConvertTo-Brush "#1B1F29"
+    $hdr.BorderBrush = ConvertTo-Brush "#242935"
+    $hdr.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $hdr.CornerRadius = New-Object System.Windows.CornerRadius 10, 10, 0, 0
+    $hdr.Padding = New-Object System.Windows.Thickness 18, 13, 18, 13
+    $hg = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$hg.ColumnDefinitions.Add($cd)
+    }
+    $hs = New-Object System.Windows.Controls.StackPanel
+    [void]$hs.Children.Add((New-TextBlock $title 14 "#E7EAF0" $true $false))
+    if ($blurb) {
+        $b = New-TextBlock $blurb 11 "#858D9E" $false $false
+        $b.Margin = New-Object System.Windows.Thickness 0, 2, 12, 0
+        [void]$hs.Children.Add($b)
+    }
+    [void]$hg.Children.Add($hs)
+    if ($tagLabel) {
+        $st = $script:StatusStyle[$tagKind]
+        $tag = New-Object System.Windows.Controls.Border
+        $tag.Background = ConvertTo-Brush $st.Bg
+        $tag.BorderBrush = ConvertTo-Brush $st.Br
+        $tag.BorderThickness = New-Object System.Windows.Thickness 1
+        $tag.CornerRadius = New-Object System.Windows.CornerRadius 20
+        $tag.Padding = New-Object System.Windows.Thickness 12, 4, 12, 4
+        $tag.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $tag.Child = (New-TextBlock $tagLabel 11 $st.Fg $true $false)
+        [System.Windows.Controls.Grid]::SetColumn($tag, 1)
+        [void]$hg.Children.Add($tag)
+    }
+    $hdr.Child = $hg
+    [void]$stack.Children.Add($hdr)
+    $card.Child = $stack
+    return @{ Card = $card; Body = $stack }
+}
+
+# One row of the install check: glyph, name + detail, the value found, and a link to where a missing one comes from.
+function New-CheckRow($row, $first) {
+    $st = $script:StatusStyle[$row.Status]
+    $rb = New-Object System.Windows.Controls.Border
+    $rb.Padding = New-Object System.Windows.Thickness 18, 11, 18, 11
+    if (-not $first) {
+        $rb.BorderBrush = ConvertTo-Brush "#20242E"
+        $rb.BorderThickness = New-Object System.Windows.Thickness 0, 1, 0, 0
+    }
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("26", "*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $glyph = New-TextBlock $st.Glyph 13 $st.Fg $true $false
+    $glyph.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    [void]$g.Children.Add($glyph)
+
+    $mid = New-Object System.Windows.Controls.StackPanel
+    $mid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $mid.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$mid.Children.Add((New-TextBlock $row.Name 13 "#E7EAF0" $false $false))
+    if ($row.Detail) {
+        $d = New-TextBlock $row.Detail 11 "#858D9E" $false $false
+        $d.Margin = New-Object System.Windows.Thickness 0, 2, 0, 0
+        [void]$mid.Children.Add($d)
+    }
+    [System.Windows.Controls.Grid]::SetColumn($mid, 1)
+    [void]$g.Children.Add($mid)
+
+    $right = New-Object System.Windows.Controls.StackPanel
+    $right.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $right.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Right
+    $right.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $val = New-TextBlock $row.Value 11 $st.Fg $false $true
+    $val.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $val.TextWrapping = [System.Windows.TextWrapping]::NoWrap
+    [void]$right.Children.Add($val)
+    if ($row.Url -and $row.Status -ne "ok") {
+        $lb = New-Object System.Windows.Controls.Button
+        $lb.Content = "Get it  " + [char]0x2192
+        $lb.Style = $script:LinkStyle
+        $lb.Tag = $row.Url
+        $lb.Margin = New-Object System.Windows.Thickness 12, 0, 0, 0
+        $lb.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $lb.ToolTip = $row.Url
+        $lb.Add_Click({ Start-Process $this.Tag })
+        [void]$right.Children.Add($lb)
+    }
+    [System.Windows.Controls.Grid]::SetColumn($right, 2)
+    [void]$g.Children.Add($right)
+    $rb.Child = $g
+    return $rb
+}
+
+function Show-AppWindow($opt, $gameDir, $startTab) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$script:Xaml)))
@@ -1265,14 +1400,18 @@ function Show-LauncherWindow($opt, $gameDir) {
     })
 
     $ui = @{}
-    foreach ($n in @("GamePath", "NavPlay", "NavSettings", "Pill", "PillText", "PillNote", "PlayView", "SettingsView",
+    foreach ($n in @("GamePath", "Caption", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
+                     "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
                      "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
                      "Status", "ShortcutBtn", "ReloadBtn", "SaveBtn", "SettingsHost", "LockBanner", "LockText")) {
         $ui[$n] = $win.FindName($n)
     }
-    $ui.GamePath.Text = $gameDir
-    $ui.GamePath.ToolTip = $gameDir
+    $script:LinkStyle = $win.FindResource("Link")
+    $ui.GamePath.Text = $(if ($gameDir) { $gameDir }
+                          elseif ($opt.GameDirBad) { "no mgs4.exe in $($opt.GameDirBad) - see the Install tab" }
+                          else { "no MGS4 install found - see the Install tab" })
+    $ui.GamePath.ToolTip = $ui.GamePath.Text
     $ui.SceneList.ItemTemplate = [Windows.Markup.XamlReader]::Parse($script:ItemTemplateXaml)
 
     $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
@@ -1340,7 +1479,7 @@ function Show-LauncherWindow($opt, $gameDir) {
         if ($sel) {
             $ui.PickTitle.Text = $sel.Title
             $ui.PickSub.Text = $sel.Sub
-            $ui.LaunchBtn.IsEnabled = $true
+            $ui.LaunchBtn.IsEnabled = [bool]$gameDir
             $ui.CmdPreview.Text = Format-CliPreview (Get-CliArgs (& $collect))
         } else {
             $ui.PickTitle.Text = "Nothing picked"
@@ -1362,7 +1501,7 @@ function Show-LauncherWindow($opt, $gameDir) {
     # $script:... inside one of them is NOT this script's scope. Anything shared goes through these locals.
     $spec = $script:IniSpec
     $selfPath = $PSCommandPath          # $PSCommandPath is per-scope too, and would be empty inside a closure
-    $state = @{ Controls = @(); RunProc = $null }
+    $state = @{ Controls = @(); RunProc = $null; Sections = $null }
 
     $buildSettings = {
         $ui.SettingsHost.Children.Clear()
@@ -1389,7 +1528,7 @@ function Show-LauncherWindow($opt, $gameDir) {
 
             $first = $true
             foreach ($s in ($spec | Where-Object { $_.Group -eq $g })) {
-                $cur = Get-Ini $ini $s.Key
+                $cur = Get-IniValue $ini $s.Key
                 $row = New-Object System.Windows.Controls.Border
                 $row.Padding = New-Object System.Windows.Thickness 18, 11, 18, 11
                 if (-not $first) {
@@ -1492,9 +1631,13 @@ function Show-LauncherWindow($opt, $gameDir) {
             $ui.PillText.Foreground = ConvertTo-Brush "#7C9CFF"
         }
         $ui.StopBtn.IsEnabled = $running -or $busy
-        $ui.SaveBtn.IsEnabled = -not $running
+        $ui.SaveBtn.IsEnabled = (-not $running) -and [bool]$gameDir
+            $ui.LaunchBtn.IsEnabled = [bool]$gameDir -and [bool]$ui.SceneList.SelectedItem
         if ($ui.SettingsView.Visibility -eq [System.Windows.Visibility]::Visible) {
-            if ($running) {
+            if (-not $gameDir) {
+                $ui.LockText.Text = "No MGS4 install found, so there is no mgs4_dlss.ini to read or write. The Install tab says what was looked for."
+                $ui.LockBanner.Visibility = [System.Windows.Visibility]::Visible
+            } elseif ($running) {
                 $ui.LockText.Text = "The game is running. It rewrites mgs4_dlss.ini through the Windows profile API, whose cache would undo anything written from here - close the game to save. Most of these keys are read again every second by the add-on, and its own overlay (ReShade, Add-ons tab) can change them live."
                 $ui.LockBanner.Visibility = [System.Windows.Visibility]::Visible
             } else {
@@ -1544,7 +1687,7 @@ function Show-LauncherWindow($opt, $gameDir) {
         $root = Join-Path ([Environment]::GetFolderPath("Desktop")) "MGS4 Shortcuts"
         $answer = [System.Windows.MessageBox]::Show(
             "Rebuild the shortcut folder?`n`n$root`n`nEvery .lnk in it is replaced by one per scene, pointing at this checkout. Nothing else in the folder is touched.",
-            "MGS4 DLSS - launcher", [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Question)
+            "MGS4 DLSS", [System.Windows.MessageBoxButton]::OKCancel, [System.Windows.MessageBoxImage]::Question)
         if ($answer -ne [System.Windows.MessageBoxResult]::OK) { return }
         $this.IsEnabled = $false
         $ui.Status.Text = "writing shortcuts..."
@@ -1561,18 +1704,73 @@ function Show-LauncherWindow($opt, $gameDir) {
     $ui.SaveBtn.Add_Click($saveSettings)
     $ui.ReloadBtn.Add_Click({ & $buildSettings; $ui.Status.Text = "reloaded mgs4_dlss.ini" }.GetNewClosure())
 
+    # ------------------------------------------------------------------ install check
+    $buildInstall = {
+        $ui.InstallHost.Children.Clear()
+        if (-not $gameDir) {
+            $why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up."
+            if ($opt.GameDirBad) { $why = "There is no mgs4.exe in $($opt.GameDirBad)." }
+            $c = New-Card "No MGS4 install found" ($why + " Set MGS4_DIR in config.ini (copy config.example.ini), " +
+                 "or start this with --game-dir ""<path to the MGS4 folder>"".") "bad" "nothing to check"
+            [void]$ui.InstallHost.Children.Add($c.Card)
+            return
+        }
+        $sections = Invoke-InstallChecks -Game $gameDir
+        $state.Sections = $sections
+        $v = Get-Verdict $sections
+        $vc = New-Card ("Install: " + $v.Text) $v.Note $v.Kind $v.Text
+        [void]$ui.InstallHost.Children.Add($vc.Card)
+        foreach ($sec in $sections) {
+            $bad = @($sec.Rows | Where-Object { $_.Status -eq "bad" }).Count
+            $warn = @($sec.Rows | Where-Object { $_.Status -eq "warn" }).Count
+            $kind = "ok"; $label = "all good"
+            if ($warn -gt 0) { $kind = "warn"; $label = "$warn to look at" }
+            if ($bad -gt 0) { $kind = "bad"; $label = "$bad missing" }
+            if (@($sec.Rows).Count -eq 0) { $kind = "info"; $label = "nothing to check" }
+            $card = New-Card $sec.Title $sec.Blurb $kind $label
+            $first = $true
+            foreach ($row in $sec.Rows) {
+                [void]$card.Body.Children.Add((New-CheckRow $row $first))
+                $first = $false
+            }
+            [void]$ui.InstallHost.Children.Add($card.Card)
+        }
+        $ui.Status.Text = "checked at " + (Get-Date -Format "HH:mm:ss") + "  -  file list: tools\install_manifest.json"
+    }.GetNewClosure()
+
     $showView = {
-        $play = [bool]$ui.NavPlay.IsChecked
-        $ui.PlayView.Visibility = $(if ($play) { "Visible" } else { "Collapsed" })
-        $ui.SettingsView.Visibility = $(if ($play) { "Collapsed" } else { "Visible" })
-        $ui.SaveBtn.Visibility = $(if ($play) { "Collapsed" } else { "Visible" })
-        $ui.ReloadBtn.Visibility = $(if ($play) { "Collapsed" } else { "Visible" })
-        $ui.ShortcutBtn.Visibility = $(if ($play) { "Visible" } else { "Collapsed" })
-        if (-not $play) { & $buildSettings }
+        $tab = "play"
+        if ($ui.NavSettings.IsChecked) { $tab = "settings" }
+        elseif ($ui.NavInstall.IsChecked) { $tab = "install" }
+        $vis = { param($on) if ($on) { "Visible" } else { "Collapsed" } }
+        $ui.PlayView.Visibility = & $vis ($tab -eq "play")
+        $ui.SettingsView.Visibility = & $vis ($tab -eq "settings")
+        $ui.InstallView.Visibility = & $vis ($tab -eq "install")
+        $ui.ShortcutBtn.Visibility = & $vis ($tab -eq "play")
+        $ui.SaveBtn.Visibility = & $vis ($tab -eq "settings")
+        $ui.ReloadBtn.Visibility = & $vis ($tab -eq "settings")
+        $ui.CopyBtn.Visibility = & $vis ($tab -eq "install")
+        $ui.RecheckBtn.Visibility = & $vis ($tab -eq "install")
+        $ui.Caption.Text = switch ($tab) { "settings" { "add-on settings" } "install" { "install check" } default { "start a scene" } }
+        if ($tab -eq "settings") { & $buildSettings }
+        if ($tab -eq "install") { & $buildInstall }
         & $refreshState
     }.GetNewClosure()
     $ui.NavPlay.Add_Checked($showView)
     $ui.NavSettings.Add_Checked($showView)
+    $ui.NavInstall.Add_Checked($showView)
+
+    $ui.RecheckBtn.Add_Click($buildInstall)
+    $ui.CopyBtn.Add_Click({
+        if (-not $state.Sections) { return }
+        Set-Clipboard -Value (Format-TextReport $gameDir $state.Sections)
+        $this.Content = "Copied"
+        $t = New-Object System.Windows.Threading.DispatcherTimer
+        $t.Interval = [TimeSpan]::FromSeconds(1.6)
+        $b = $this
+        $t.Add_Tick({ $b.Content = "Copy report"; $t.Stop() })
+        $t.Start()
+    }.GetNewClosure())
 
     # ------------------------------------------------------------------ restore and go
     $prefs = Read-Prefs
@@ -1603,13 +1801,20 @@ function Show-LauncherWindow($opt, $gameDir) {
     & $refreshPreview
     & $refreshState
 
+    if ($startTab -eq "install") { $ui.NavInstall.IsChecked = $true }
+    elseif ($startTab -eq "settings") { $ui.NavSettings.IsChecked = $true }
+
     $timer = New-Object System.Windows.Threading.DispatcherTimer
     $timer.Interval = [TimeSpan]::FromSeconds(1.5)
     $timer.Add_Tick($refreshState)
     $timer.Start()
     $win.Add_Closed({ $timer.Stop() }.GetNewClosure())
     $win.Add_KeyDown({
-        if ($_.Key -eq [System.Windows.Input.Key]::F5) { if ($ui.NavSettings.IsChecked) { & $buildSettings } else { & $applyFilter } }
+        if ($_.Key -eq [System.Windows.Input.Key]::F5) {
+            if ($ui.NavSettings.IsChecked) { & $buildSettings }
+            elseif ($ui.NavInstall.IsChecked) { & $buildInstall }
+            else { & $applyFilter }
+        }
     }.GetNewClosure())
 
     [void]$win.ShowDialog()
@@ -1626,21 +1831,28 @@ $gameDir = $opt.GameDir
 if (-not $gameDir) {
     try { $gameDir = Get-Mgs4GameDir } catch { $gameDir = $null }
 }
-$needsGame = $opt.Action -ne "list"
-if ($needsGame -and -not $gameDir) {
-    $msg = "mgs4.exe was not found. Set MGS4_DIR in config.ini or pass --game-dir ""<path to MGS4>""."
-    if ($opt.Action -in @("", "ui") -and -not $opt.Stage) {
-        Add-Type -AssemblyName PresentationFramework
-        [void][System.Windows.MessageBox]::Show($msg, "MGS4 DLSS - launcher")
-    } else {
-        Write-Host $msg -ForegroundColor Red
-    }
-    exit 1
+# --game-dir can name a folder that holds no mgs4.exe; a non-empty string is not an install.
+if ($gameDir -and -not (Test-Mgs4Path (Join-Mgs4Path $gameDir "mgs4.exe"))) {
+    $opt.GameDirBad = $gameDir
+    $gameDir = $null
 }
 $opt.GameDir = $gameDir
 
+# The window opens whether or not there is an install: with no game folder the Install tab is the one thing that can
+# still say something useful, so that is where it starts. Everything else needs the folder and says so.
+$startTab = switch ($opt.Action) { "install" { "install" } "settings" { "settings" } default { "play" } }
+$wantsWindow = ($opt.Action -in @("", "ui", "install")) -and -not $opt.Stage
+if ($opt.Action -eq "settings" -and -not $gameDir) { $wantsWindow = $false }
+if (-not $gameDir -and $wantsWindow) { $startTab = "install" }
+
+if (-not $gameDir -and -not $wantsWindow -and $opt.Action -ne "list") {
+    Write-Host "mgs4.exe was not found. Set MGS4_DIR in config.ini or pass --game-dir ""<path to MGS4>""." -ForegroundColor Red
+    exit 1
+}
+
 switch ($opt.Action) {
     "list"      { Write-SceneList $opt.Filter; exit 0 }
+    "report"    { Write-Host (Format-TextReport $gameDir (Invoke-InstallChecks -Game $gameDir)); exit 0 }
     "settings"  { Write-SettingsReport $gameDir; exit 0 }
     "set"       { exit (Set-SettingsFromCli $gameDir $opt.Sets) }
     "stop"      { Stop-Game; Write-Host "closed mgs4.exe"; exit 0 }
@@ -1649,10 +1861,10 @@ switch ($opt.Action) {
         Write-Host "$($r.Made) shortcuts written to $($r.Root) (replaced $($r.Removed))"
         exit 0
     }
-    "ui"        { Show-LauncherWindow $opt $gameDir; exit 0 }
 }
 
-if (-not $opt.Stage) { Show-LauncherWindow $opt $gameDir; exit 0 }
+if ($wantsWindow) { Show-AppWindow $opt $gameDir $startTab; exit 0 }
+if (-not $opt.Stage) { Show-AppWindow $opt $gameDir $startTab; exit 0 }
 if (-not (Find-Scene $opt.Stage)) {
     Write-Host "unknown scene '$($opt.Stage)' - it is not in tools\scenes.csv. Launching it anyway; --list shows the known ones." -ForegroundColor Yellow
 }

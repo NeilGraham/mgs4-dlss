@@ -43,64 +43,42 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
 
-Run **`check-install.bat`** at any point to see which of those pieces are actually in place — see below.
+Run **`mgs4-dlss.bat`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
 
-### Checking the install (`check-install.bat`)
+## The app (`mgs4-dlss.bat`)
 
-Most of the files above cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and ReShade all have
-to be fetched from their own projects, so an install is assembled by hand and it is easy to end up one file short.
-`check-install.bat` opens a window listing every required and optional file, what version it is, and a link to where
-each missing one comes from. **Refresh** (or F5) re-runs every check with the window open, so it can be left up on a
-second monitor while files are dropped into the game folder.
+One window for the whole add-on, and the same things as a command line. It needs nothing installed — PowerShell
+ships with Windows and the `.bat` handles the execution policy — so it runs straight out of an unzipped release.
 
-```bat
-check-install.bat                     :: the window
-check-install.bat --report            :: the same findings as text, for pasting into an issue
-check-install.bat -GameDir "D:\..."   :: an install the Steam library search does not find
-```
-
-It needs nothing installed — PowerShell ships with Windows, and the `.bat` handles the execution policy, so it runs
-straight out of an unzipped release.
-
-What it reports, beyond whether a file exists:
-
-- **Files**, grouped by the feature each one unlocks (required / DLSS 5 NR / frame generation / extras), with the
-  version found next to the version this was verified against.
-- **Settings** read out of the game's own files — `api=dx12`, FXAA, the frame limiter, `Enabled`, `FrameGen` against
-  the display's actual refresh rate, whether ReShade has the add-on disabled, and whether a diagnostic key was left
-  on. A file being present is not the same as it being switched on.
-- **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialised, whether DLSS came from
-  the local DLL or the driver override, whether `renodx-dlss5` really loaded, the insertion point, the Streamline
-  and driver versions, and how many frames DLSS evaluated. This is the part a file list cannot tell you — a
-  ReShade build **without** add-on support looks perfectly correct on disk and silently loads nothing.
-
-The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
-script only renders it.
-
-The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
-
-### The launcher (`launcher.bat`)
-
-`check-install.bat` says whether the add-on is set up; **`launcher.bat`** is the other half — it starts the game.
-One window, and the same thing as a command line, covering every way this repo has of getting into a scene: the
-400-odd stage ids the port accepts, the two ways past the Master Collection screen, the key-pressing that gets a
-stage through its boot prompts, the Cross-tapping the cutscene flashbacks want, the "stop when gameplay starts"
-rule the cutscene recorder used, and the `mgs4_dlss.ini` keys.
+| tab | what it is for |
+| --- | --- |
+| **Play** | start the game, or any one of the 423 launchable scenes, with the automation the tests use |
+| **Settings** | `MGS4\mgs4_dlss.ini` as a form |
+| **Install** | which files are in place, what the settings say, what the add-on did on its last run |
 
 ```bat
-launcher.bat                          :: the window
-launcher.bat s02a50l_D1               :: boot that scene and exit
-launcher.bat --main                   :: MGS4's own menu, past the Master Collection screen
-launcher.bat --list naomi             :: what can be launched
-launcher.bat --shortcuts              :: rebuild "Desktop\MGS4 Shortcuts" against this checkout
-launcher.bat --set FrameGen=0         :: write ini keys without opening anything
-launcher.bat --help                   :: every option
+mgs4-dlss.bat                         :: the window
+mgs4-dlss.bat s02a50l_D1              :: boot that scene and exit
+mgs4-dlss.bat --main                  :: MGS4's own menu, past the Master Collection screen
+mgs4-dlss.bat --list naomi            :: what can be launched
+mgs4-dlss.bat --install               :: the window, opened on the install check
+mgs4-dlss.bat --report                :: the install check as text, for pasting into an issue
+mgs4-dlss.bat --shortcuts             :: rebuild "Desktop\MGS4 Shortcuts" against this checkout
+mgs4-dlss.bat --set FrameGen=0        :: write ini keys without opening anything
+mgs4-dlss.bat --help                  :: every option
 ```
 
-**Play** lists all 423 entries — `tools\scenes.csv` (102 cutscenes, 250 gameplay sections, 68 stage entries) with the
-names from `tools\labels.json`, filtered by a search box, plus three entries for starting the game itself. Pick one,
-tick what should happen while it runs, press Launch. The panel shows the command line that does the same thing, so
-anything set up in the window can be pasted into a terminal or put in a shortcut.
+**`launcher.bat`** and **`check-install.bat`** are aliases that open it on the Play and Install tabs; both spellings,
+and `check-install.bat --report` / `-GameDir "D:\..."`, keep working. The window opens even when no MGS4 install can
+be found — it starts on Install and says which folder it looked in, which is the one case where a tool that needs the
+game folder still has to be useful.
+
+### Play
+
+The list is `tools\scenes.csv` (102 cutscenes, 250 gameplay sections, 68 stage entries) with the names from
+`tools\labels.json`, filtered by a search box, plus three entries for starting the game itself. Pick one, tick what
+should happen while it runs, press Launch. The panel shows the command line that does the same thing, so anything set
+up in the window can be pasted into a terminal or put in a shortcut.
 
 What can be ticked (all of it also works from the command line):
 
@@ -110,7 +88,8 @@ What can be ticked (all of it also works from the command line):
   scene. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
   prompts but does not trigger them. It needs the [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver plus
   `ViGEmClient.dll` in `tools\` (both Nefarius, BSD-3; the DLL also ships inside the `vgamepad` PyPI package, or set
-  `VIGEM_CLIENT_DLL`) — the same pair `tools\ds4.py` uses. Without them the launcher says so and falls back to Enter.
+  `VIGEM_CLIENT_DLL`) — the same pair `tools\ds4.py` uses, and the Install tab reports whether both are there.
+  Without them the app says so and falls back to Enter.
 - **Close the game when gameplay starts** (`--end-on-gameplay`) — for cutscenes. The add-on's `SCENE-STATE` /
   `SCENE-STATE-TICK` lines say whether the frame is a cutscene, gameplay or no 3D at all; the HUD coming up (40+ HUD
   draws in one heartbeat, against the 4-5 a cutscene draws) or a sustained `gameplay` state ends the run, and a
@@ -119,25 +98,55 @@ What can be ticked (all of it also works from the command line):
 - **Close it after a fixed time** (`--hold N`), **render resolution** (`--res 3840x2160`, the port's
   `--res_width` / `--res_height`).
 
-Escape, held anywhere, stops an attached run. The launcher writes `MGS4\logs\launcher.log`.
-
-**Settings** is `MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image
-keys (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each with what it does and the key name.
-Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
-Windows profile API, whose cache will quietly undo an outside edit. (While the game *is* up, the same keys are live
-in ReShade's overlay, Add-ons tab.)
+Escape, held anywhere, stops an attached run. The app writes `MGS4\logs\launcher.log`.
 
 **Desktop shortcuts** writes `Desktop\MGS4 Shortcuts\` — one `.lnk` per scene under `cutscene`, `gameplay`,
 `stage entry` and `notable`, named `<stage id> - <act> - <scene name>` so each folder sorts in story order, plus the
-three game-start shortcuts at the top level. They run `tools\launcher.ps1` **by absolute path**, which is the one
+three game-start shortcuts at the top level. They run `tools\mgs4_dlss.ps1` **by absolute path**, which is the one
 thing that can break them: move or re-clone the checkout and every shortcut points at a folder that is no longer
-there. Re-running `launcher.bat --shortcuts` fixes them all.
+there. Re-running `mgs4-dlss.bat --shortcuts` fixes them all.
 
 The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
 `--res_width` / `--res_height`, `--windowing`, `--screen_index`, `--lang`, `--region`, `--input_device`, `--rumble`,
 `--next`, `--forcedlcon`. **`--skip-to-main-menu` is what a bare `mgs4.exe` used to do** — without it the port stops
 on the Master Collection screen first, so a plain "run the game" shortcut needs that argument. `--windowing` takes
 `windowed` / `full_borderless` but the port has been observed ignoring it.
+
+### Settings
+
+`MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image keys
+(`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each row naming its key and what it does.
+`mgs4-dlss.bat --settings` prints the same thing; `--set Key=Value` writes without opening a window.
+
+Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
+Windows profile API, whose cache will quietly undo an outside edit. While the game *is* up, the same keys are live in
+ReShade's overlay, Add-ons tab.
+
+### Install
+
+Most of the files this add-on needs cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and
+ReShade all have to be fetched from their own projects, so an install is assembled by hand and it is easy to end up
+one file short. The Install tab lists every required and optional file, what version it is, and a link to where each
+missing one comes from. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
+second monitor while files are dropped into the game folder, and **Copy report** puts the text form on the clipboard.
+
+What it reports, beyond whether a file exists:
+
+- **Files**, grouped by the feature each one unlocks (required / DLSS 5 NR / frame generation / extras), with the
+  version found next to the version this was verified against.
+- **Settings** read out of the game's own files — `api=dx12`, FXAA, the frame limiter, `Enabled`, `FrameGen` against
+  the display's actual refresh rate, whether ReShade has the add-on disabled, whether a diagnostic key was left on,
+  and whether the virtual controller the Play tab wants is there. A file being present is not the same as it being
+  switched on.
+- **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialised, whether DLSS came from
+  the local DLL or the driver override, whether `renodx-dlss5` really loaded, the insertion point, the Streamline
+  and driver versions, and how many frames DLSS evaluated. This is the part a file list cannot tell you — a
+  ReShade build **without** add-on support looks perfectly correct on disk and silently loads nothing.
+
+The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
+checks in `tools\install_checks.ps1` only render it.
+
+The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
 ### The setup this was verified on
 
@@ -502,12 +511,14 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
-check-install.bat      opens the install check below
+mgs4-dlss.bat          the app: Play / Settings / Install (launcher.bat and check-install.bat alias it)
 config.example.ini     machine-local paths; copy to config.ini (git-ignored)
 d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh  where the game / the output folder live on this machine
-tools/check_install.*  the install check (ps1) and its file list (install_manifest.json)
+tools/mgs4_dlss.ps1    the app itself; tools/install_checks.ps1 the checks behind its Install tab
+tools/install_manifest.json  the file list, verified versions and download links the checks render
+tools/scenes.csv       every launchable scene; tools/labels.json the curated names
 third_party/minhook/   MinHook (BSD-2), vendored
 third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
@@ -610,19 +621,19 @@ trace lists each full-frame draw with its `ps=` hash) - that is how the three pa
 
 ### Direct stage boot
 
-`mgs4.exe --stage <name>` skips the launcher and menus: `s00title_1` (OTC intro), `s00a00l` (cemetery opening),
+`mgs4.exe --stage <name>` skips the Master Collection screen and the menus: `s00title_1` (OTC intro), `s00a00l` (cemetery opening),
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
-`launcher.bat` (see [The launcher](#the-launcher-launcherbat)) does this and the rest of it — a scene list, the
+`mgs4-dlss.bat` (see [The app](#the-app-mgs4-dlssbat)) does this and the rest of it — a scene list, the
 Cross tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
 and `tools\test_stages.ps1` call. `tools\launch_stage.ps1` is still there as a shim over it, so existing shortcuts
 and notes keep working:
 
 ```bat
-launcher.bat s00a00l                                 :: boot it, press through the prompts, exit
-launcher.bat s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
-launcher.bat s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
+mgs4-dlss.bat s00a00l                                 :: boot it, press through the prompts, exit
+mgs4-dlss.bat s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
+mgs4-dlss.bat s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
 ```
 
 Keys go through `keybd_event` with the window forced to the foreground — this port ignores scan-code `SendInput`
