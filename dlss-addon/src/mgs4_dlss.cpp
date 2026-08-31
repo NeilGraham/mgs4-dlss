@@ -2185,7 +2185,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // quads / strips drawn into a scene-sized (non-final) texture after the DoF combine whose primary input is
                     // not the scene itself: title cards and captions. Fullscreen post passes (3/4 vertices, scene input) are not.
                     bool slot0scene = false;
-                    if (s.table_set[1]) { resource r0 = resolve_descriptor(dev, s.tables[1], 0); if (r0.handle && is_live(r0.handle)) { resource_desc d0 = dev->get_resource_desc(r0); slot0scene = d0.type == resource_type::texture_2d && d0.texture.width * 2 >= g_dlssW && d0.texture.height * 2 >= g_dlssH && fabsf(float(d0.texture.width) / float(d0.texture.height) - float(g_dlssW) / float(g_dlssH)) < 0.2f; } }
+                    if (s.table_set[1]) { resource r0 = resolve_descriptor(dev, s.tables[1], 0); if (r0.handle && is_live(r0.handle)) { resource_desc d0 = dev->get_resource_desc(r0); slot0scene = d0.type == resource_type::texture_2d && d0.texture.width * 2 >= g_dlssW && d0.texture.height * 2 >= g_dlssH /* any aspect: the 2048x2048 previous-shot capture drawn by the WIPE transitions is scene content, not a caption */; } }
                     if (!slot0scene) {
                         const resource_desc rd = dev->get_resource_desc(s.rt);
                         if (g_dofMask.handle && (g_dofMaskFmt != rd.texture.format)) { if (g_dofMaskRtv.handle) dev->destroy_resource_view(g_dofMaskRtv); dev->destroy_resource(g_dofMask); g_dofMask = { 0 }; g_dofMaskRtv = { 0 }; }
