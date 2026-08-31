@@ -40,10 +40,35 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 2. ReShade 6.8 **with add-on support** installed for `MGS4\mgs4.exe` (it becomes `MGS4\dxgi.dll`).
 3. Copy `mgs4_dlss.addon64` and `mgs4_dlss.ini` from the release into `MGS4\` (next to `mgs4.exe`). `nvngx_dlss.dll` comes from the NVIDIA app's DLSS override or the [DLSS SDK](https://github.com/NVIDIA/DLSS) (`lib/Windows_x86_64/rel/`).
 4. Optional, DLSS 5 Neural Rendering: put `renodx-dlss5.addon64` next to the add-on; it is auto-detected and the add-on then runs DLAA on the final image so NR works at full strength.
-5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — e.g. 120 Hz with `FrameGen=4` + `FGTargetFps=120`, which is what the shipped ini uses; on a 60 Hz output set `FrameGen=0`.
+5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
 
-The shipped ini is the configuration v1.0 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, dynamic frame generation to 120 fps.
+The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
+
+### The setup this was verified on
+
+The add-on and the ASI come out of this repo, but the rest of the stack lives in the game folder and is worth
+recording, because "DLSS 5 NR is on" is not one setting. Versions the v1.1.1 numbers were taken with:
+
+| component | file in `MGS4\` | version |
+| --- | --- | --- |
+| ReShade with add-on support | `dxgi.dll` | 6.8.0 |
+| Ultimate ASI Loader | `winmm.dll` | 9.7.4 |
+| DLSS / DLSS-G / DLSS NR | `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` | 310.8.0 |
+| Streamline | `sl.interposer.dll` and the other `sl.*.dll` | 2.13.0 |
+| DLSS 5 Neural Rendering add-on | `renodx-dlss5.addon64` | - |
+| frame limiter | `scripts\MGSFPSUnlock.asi` + `MGSFPSUnlock.ini` (`TargetFrameRate = 60`) | - |
+
+Settings that are not files this repo installs:
+
+- **Game** (`mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`): `api=dx12`, `vsync=false`, `fpsLimiter=60`,
+  `enableFXAA=false`, quality settings at 3.
+- **RenoDX DLSS 5 NR**, in `MGS4\ReShade.ini` under `[RenoDX.DLSS5]` — the NR look the screenshots were taken with:
+  `NeuralUplift=1`, `NRIntensity=2`, `NRStyle=2`, `NRLocalTone=1`, `NRSkinStructure=-1`, `NREnableUpscaling=0`
+  (upscaling off: this add-on already runs DLAA on the final image, so NR only denoises / uplifts it).
+- **`steam_appid.txt`** containing `2492670` next to `mgs4.exe`, so `--stage` boots do not bounce through Steam.
+- **`scripts\MGS4_D3D12.ini`**: `Enabled = 0` when the native D3D12 option below is used — the ASI is the fallback
+  for builds without it, and running both is pointless (see "Native Direct3D 12 option").
 
 ### Build / install (from source)
 
@@ -76,24 +101,30 @@ DynamicZeroMV=0          ; character mask options (superseded by ObjectMV, kept 
 DynamicMaskProps=0
 DynamicMask=0
 PrePost=auto             ; DLAA insertion: auto = on the final image when a DLSS post-processing add-on (DLSS 5 NR) is loaded, else before post/HUD
-PostDof=0                ; 1 = skip the game's depth-of-field draws and re-apply the same DoF on the DLSS / NR output (see "Depth of field after NR")
+
+PostDof=1                ; 1 = skip the game's depth-of-field draws and re-apply the same DoF on the DLSS / NR output (see "Depth of field after NR")
 DofStep=2.0              ; PostDof tuning: spiral step scale (2.0 = the game's blur size at the full grid)
 DofRadius=1.0            ; PostDof tuning: multiplier on the game's circle of confusion
 DofJitterSign=1          ; PostDof: read the depth at the frame's camera-jitter offset (the depth copy is jittered, the DLSS output is not); 0 = off
 DofMask=1                ; PostDof: keep title cards / captions drawn after the game's DoF sharp (0 = diagnostics)
 DofSubRect=1             ; PostDof also on dynamic-resolution frames (exact per-frame scale from the CoC pass viewport); 0 = leave those frames to the game's DoF
+DofStepFreeze=0          ; 1 = on a resolution-step frame hold the previous DLSS output for one frame instead of showing the game's own frame
 PreWarm=1                ; create the DLSS feature (+ the NR add-on's) and run warm-up evaluations on no-3D frames (title / loading screens) so the setup stall is not in the first cutscene frames
-DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
+
 FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
-FGTargetFps=120
+FGTargetFps=240          ; match your display's refresh rate; the game itself runs at 60
 Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
 FrozenBackground=1       ; live: pause menu / Codec: run DLSS before the game captures the still background it shows behind those screens
-TraceFreeze=0            ; diagnostics: log the full-size draw chain around the moment the world stops rendering
 UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-colour mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
+
+TraceFreeze=0            ; diagnostics: log the full-size draw chain around the moment the world stops rendering
+TraceFrames=0            ; diagnostics: N = trace every full-frame draw for the next N frames (live)
+Probe=0                  ; diagnostics: sample the pipeline before / after the insertion and after the post chain
+DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
@@ -514,7 +545,7 @@ ecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
 
 ### Stage rotation for testing
 
-`tools	est_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `MGS4\stage_tests\<timestamp>\`.
+`tools	est_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `<MGS4_OUT>\stage_tests\<timestamp>\` (`-OutDir` overrides).
 
 ### Robustness
 
