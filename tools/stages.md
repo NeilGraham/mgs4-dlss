@@ -1,14 +1,16 @@
 # Stage ids for `mgs4.exe --stage <id>`
 
-The stage table in `mgs4.exe` holds **400 entries**, and the naming already classifies them (no play-through needed):
+The stage table in `mgs4.exe` holds **420 entries**, and the naming already classifies them (no play-through needed):
 
 | kind | count | pattern | meaning |
 |---|---|---|---|
-| cutscene | 82 | `<stage>_D<n>` | "demo" = a cutscene of that stage |
+| cutscene | 102 | `<stage>_D` / `<stage>_D<n>` | "demo" = a cutscene of that stage |
 | gameplay | 250 | `<stage>_<n>` | a gameplay section |
 | stage entry | 68 | `<stage>` | boots the stage at its start |
 
-Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command).
+Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command) - what `launcher.bat` lists
+and what the desktop shortcut folder is generated from. The 20 unnumbered `<stage>_D` cutscenes were added to it
+later, pulled out of the executable's own strings.
 
 **Prerecorded vs in-game.** Prerecorded cutscenes are Bink 2 videos in `common/BK2/BK2` and `ww/BK2/BK2`; their headers
 give exact frame counts and frame rates, so their lengths are known without running the game: **18 videos, 55 m 32 s
@@ -32,3 +34,4 @@ by decoding the demo scripts inside `stage/stage_data_compressed.*.pak` (VPAK, c
 | other | `s10a20l_D1/_D2`, `s10a30l_D1/_D2`, `s10a40l_D/_D2`, `s20a00l_D1..D3`, `s30a00l_D..D4` | interludes / mission briefings |
 
 Rotation runs: `tools\test_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1,s04a10l_D1" -MvVis`.
+Single scenes: `launcher.bat s02a50l_D1`, or the window: `launcher.bat`.

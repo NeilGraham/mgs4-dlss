@@ -1,7 +1,9 @@
 stage_entry,kind,act,launch_command
 s00a00l,stage-entry,Prologue,mgs4.exe --stage s00a00l
 s00a00l_0,gameplay,Prologue,mgs4.exe --stage s00a00l_0
+s00a00l_D,cutscene,Prologue,mgs4.exe --stage s00a00l_D
 s00a10l,stage-entry,Prologue,mgs4.exe --stage s00a10l
+s00a10l_D,cutscene,Prologue,mgs4.exe --stage s00a10l_D
 s00a10l_D2,cutscene,Prologue,mgs4.exe --stage s00a10l_D2
 s00a10l_D3,cutscene,Prologue,mgs4.exe --stage s00a10l_D3
 s00a10l_D4,cutscene,Prologue,mgs4.exe --stage s00a10l_D4
@@ -20,7 +22,9 @@ s01a00l_05,gameplay,Act 1 Middle East,mgs4.exe --stage s01a00l_05
 s01a00l_06,gameplay,Act 1 Middle East,mgs4.exe --stage s01a00l_06
 s01a00l_08,gameplay,Act 1 Middle East,mgs4.exe --stage s01a00l_08
 s01a00l_1,gameplay,Act 1 Middle East,mgs4.exe --stage s01a00l_1
+s01a00l_D,cutscene,Act 1 Middle East,mgs4.exe --stage s01a00l_D
 s01a05l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a05l
+s01a05l_D,cutscene,Act 1 Middle East,mgs4.exe --stage s01a05l_D
 s01a10l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a10l
 s01a10l_0,gameplay,Act 1 Middle East,mgs4.exe --stage s01a10l_0
 s01a10l_01,gameplay,Act 1 Middle East,mgs4.exe --stage s01a10l_01
@@ -42,6 +46,7 @@ s01a20l_04,gameplay,Act 1 Middle East,mgs4.exe --stage s01a20l_04
 s01a20l_05,gameplay,Act 1 Middle East,mgs4.exe --stage s01a20l_05
 s01a20l_06,gameplay,Act 1 Middle East,mgs4.exe --stage s01a20l_06
 s01a20l_1,gameplay,Act 1 Middle East,mgs4.exe --stage s01a20l_1
+s01a20l_D,cutscene,Act 1 Middle East,mgs4.exe --stage s01a20l_D
 s01a30l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a30l
 s01a30l_01,gameplay,Act 1 Middle East,mgs4.exe --stage s01a30l_01
 s01a30l_02,gameplay,Act 1 Middle East,mgs4.exe --stage s01a30l_02
@@ -75,6 +80,7 @@ s01a50l_06,gameplay,Act 1 Middle East,mgs4.exe --stage s01a50l_06
 s01a50l_07,gameplay,Act 1 Middle East,mgs4.exe --stage s01a50l_07
 s01a50l_1,gameplay,Act 1 Middle East,mgs4.exe --stage s01a50l_1
 s01a55l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a55l
+s01a55l_D,cutscene,Act 1 Middle East,mgs4.exe --stage s01a55l_D
 s01a57l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a57l
 s01a57l_1,gameplay,Act 1 Middle East,mgs4.exe --stage s01a57l_1
 s01a60l,stage-entry,Act 1 Middle East,mgs4.exe --stage s01a60l
@@ -173,16 +179,19 @@ s02a60l_2,gameplay,Act 2 South America,mgs4.exe --stage s02a60l_2
 s02a60l_3,gameplay,Act 2 South America,mgs4.exe --stage s02a60l_3
 s02a70l,stage-entry,Act 2 South America,mgs4.exe --stage s02a70l
 s02a70l_1,gameplay,Act 2 South America,mgs4.exe --stage s02a70l_1
+s02a70l_D,cutscene,Act 2 South America,mgs4.exe --stage s02a70l_D
 s02a73l,stage-entry,Act 2 South America,mgs4.exe --stage s02a73l
 s02a75l,stage-entry,Act 2 South America,mgs4.exe --stage s02a75l
 s02a78l,stage-entry,Act 2 South America,mgs4.exe --stage s02a78l
 s02a80l,stage-entry,Act 2 South America,mgs4.exe --stage s02a80l
 s02a80l_01,gameplay,Act 2 South America,mgs4.exe --stage s02a80l_01
 s02a85l,stage-entry,Act 2 South America,mgs4.exe --stage s02a85l
+s02a85l_D,cutscene,Act 2 South America,mgs4.exe --stage s02a85l_D
 s02a90l,stage-entry,Act 2 South America,mgs4.exe --stage s02a90l
 s02a90l_01,gameplay,Act 2 South America,mgs4.exe --stage s02a90l_01
 s02a90l_1,gameplay,Act 2 South America,mgs4.exe --stage s02a90l_1
 s02a95l,stage-entry,Act 2 South America,mgs4.exe --stage s02a95l
+s02a95l_D,cutscene,Act 2 South America,mgs4.exe --stage s02a95l_D
 s03a00l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a00l
 s03a00l_D1,cutscene,Act 3 Eastern Europe,mgs4.exe --stage s03a00l_D1
 s03a10l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a10l
@@ -233,6 +242,7 @@ s03a35l_02,gameplay,Act 3 Eastern Europe,mgs4.exe --stage s03a35l_02
 s03a35l_1,gameplay,Act 3 Eastern Europe,mgs4.exe --stage s03a35l_1
 s03a40l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a40l
 s03a50l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a50l
+s03a50l_D,cutscene,Act 3 Eastern Europe,mgs4.exe --stage s03a50l_D
 s03a60l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a60l
 s03a65l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a65l
 s03a70l,stage-entry,Act 3 Eastern Europe,mgs4.exe --stage s03a70l
@@ -289,6 +299,7 @@ s04a20l_4,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a20l_4
 s04a20l_5,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a20l_5
 s04a20l_6,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a20l_6
 s04a20l_7,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a20l_7
+s04a20l_D,cutscene,Act 4 Shadow Moses,mgs4.exe --stage s04a20l_D
 s04a30l,stage-entry,Act 4 Shadow Moses,mgs4.exe --stage s04a30l
 s04a30l_01,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a30l_01
 s04a30l_02,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a30l_02
@@ -315,6 +326,7 @@ s04a40l_1,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a40l_1
 s04a50l,stage-entry,Act 4 Shadow Moses,mgs4.exe --stage s04a50l
 s04a50l_01,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a50l_01
 s04a50l_02,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a50l_02
+s04a50l_D,cutscene,Act 4 Shadow Moses,mgs4.exe --stage s04a50l_D
 s04a60l,stage-entry,Act 4 Shadow Moses,mgs4.exe --stage s04a60l
 s04a60l_01,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a60l_01
 s04a60l_1,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a60l_1
@@ -327,6 +339,7 @@ s04a65l_01,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a65l_01
 s04a65l_02,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a65l_02
 s04a65l_1,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a65l_1
 s04a68l,stage-entry,Act 4 Shadow Moses,mgs4.exe --stage s04a68l
+s04a68l_D,cutscene,Act 4 Shadow Moses,mgs4.exe --stage s04a68l_D
 s04a70l,stage-entry,Act 4 Shadow Moses,mgs4.exe --stage s04a70l
 s04a70l_01,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a70l_01
 s04a70l_02,gameplay,Act 4 Shadow Moses,mgs4.exe --stage s04a70l_02
@@ -342,6 +355,7 @@ s05a10l_02,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a10l_02
 s05a10l_03,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a10l_03
 s05a10l_04,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a10l_04
 s05a10l_1,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a10l_1
+s05a10l_D,cutscene,Act 5 Outer Haven,mgs4.exe --stage s05a10l_D
 s05a20l,stage-entry,Act 5 Outer Haven,mgs4.exe --stage s05a20l
 s05a20l_01,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a20l_01
 s05a20l_02,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a20l_02
@@ -368,11 +382,15 @@ s05a30l_01,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a30l_01
 s05a30l_1,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a30l_1
 s05a40l,stage-entry,Act 5 Outer Haven,mgs4.exe --stage s05a40l
 s05a40l_01,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a40l_01
+s05a40l_D,cutscene,Act 5 Outer Haven,mgs4.exe --stage s05a40l_D
 s05a45l,stage-entry,Act 5 Outer Haven,mgs4.exe --stage s05a45l
+s05a45l_D,cutscene,Act 5 Outer Haven,mgs4.exe --stage s05a45l_D
 s05a50l,stage-entry,Act 5 Outer Haven,mgs4.exe --stage s05a50l
 s05a50l_01,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a50l_01
 s05a50l_1,gameplay,Act 5 Outer Haven,mgs4.exe --stage s05a50l_1
+s05a50l_D,cutscene,Act 5 Outer Haven,mgs4.exe --stage s05a50l_D
 s05a55l,stage-entry,Act 5 Outer Haven,mgs4.exe --stage s05a55l
+s05a55l_D,cutscene,Act 5 Outer Haven,mgs4.exe --stage s05a55l_D
 s10a10l,stage-entry,interlude/briefing (s10),mgs4.exe --stage s10a10l
 s10a10l_1,gameplay,interlude/briefing (s10),mgs4.exe --stage s10a10l_1
 s10a20l,stage-entry,interlude/briefing (s10),mgs4.exe --stage s10a20l
@@ -386,6 +404,7 @@ s10a30l_D2,cutscene,interlude/briefing (s10),mgs4.exe --stage s10a30l_D2
 s10a40l,stage-entry,interlude/briefing (s10),mgs4.exe --stage s10a40l
 s10a40l_1,gameplay,interlude/briefing (s10),mgs4.exe --stage s10a40l_1
 s10a40l_2,gameplay,interlude/briefing (s10),mgs4.exe --stage s10a40l_2
+s10a40l_D,cutscene,interlude/briefing (s10),mgs4.exe --stage s10a40l_D
 s10a40l_D2,cutscene,interlude/briefing (s10),mgs4.exe --stage s10a40l_D2
 s20a00l,stage-entry,interlude/briefing (s20),mgs4.exe --stage s20a00l
 s20a00l_1,gameplay,interlude/briefing (s20),mgs4.exe --stage s20a00l_1
@@ -394,6 +413,7 @@ s20a00l_D2,cutscene,interlude/briefing (s20),mgs4.exe --stage s20a00l_D2
 s20a00l_D3,cutscene,interlude/briefing (s20),mgs4.exe --stage s20a00l_D3
 s20a10l,stage-entry,interlude/briefing (s20),mgs4.exe --stage s20a10l
 s30a00l,stage-entry,interlude/briefing (s30),mgs4.exe --stage s30a00l
+s30a00l_D,cutscene,interlude/briefing (s30),mgs4.exe --stage s30a00l_D
 s30a00l_D2,cutscene,interlude/briefing (s30),mgs4.exe --stage s30a00l_D2
 s30a00l_D3,cutscene,interlude/briefing (s30),mgs4.exe --stage s30a00l_D3
 s30a00l_D4,cutscene,interlude/briefing (s30),mgs4.exe --stage s30a00l_D4

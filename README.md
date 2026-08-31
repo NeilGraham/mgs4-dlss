@@ -79,6 +79,66 @@ script only renders it.
 
 The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
+### The launcher (`launcher.bat`)
+
+`check-install.bat` says whether the add-on is set up; **`launcher.bat`** is the other half — it starts the game.
+One window, and the same thing as a command line, covering every way this repo has of getting into a scene: the
+400-odd stage ids the port accepts, the two ways past the Master Collection screen, the key-pressing that gets a
+stage through its boot prompts, the Cross-tapping the cutscene flashbacks want, the "stop when gameplay starts"
+rule the cutscene recorder used, and the `mgs4_dlss.ini` keys.
+
+```bat
+launcher.bat                          :: the window
+launcher.bat s02a50l_D1               :: boot that scene and exit
+launcher.bat --main                   :: MGS4's own menu, past the Master Collection screen
+launcher.bat --list naomi             :: what can be launched
+launcher.bat --shortcuts              :: rebuild "Desktop\MGS4 Shortcuts" against this checkout
+launcher.bat --set FrameGen=0         :: write ini keys without opening anything
+launcher.bat --help                   :: every option
+```
+
+**Play** lists all 423 entries — `tools\scenes.csv` (102 cutscenes, 250 gameplay sections, 68 stage entries) with the
+names from `tools\labels.json`, filtered by a search box, plus three entries for starting the game itself. Pick one,
+tick what should happen while it runs, press Launch. The panel shows the command line that does the same thing, so
+anything set up in the window can be pasted into a terminal or put in a shortcut.
+
+What can be ticked (all of it also works from the command line):
+
+- **Skip the boot prompts** (`--advance`, on by default) — taps a button until the add-on log reports the first 3D
+  frame, which is what gets a `--stage` boot past the auto-save notice, the "press any button" screen and the load.
+- **Keep pressing X** (`--mash-x`) — a virtual DualShock 4 taps **Cross** about six times a second for the whole
+  scene. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
+  prompts but does not trigger them. It needs the [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver plus
+  `ViGEmClient.dll` in `tools\` (both Nefarius, BSD-3; the DLL also ships inside the `vgamepad` PyPI package, or set
+  `VIGEM_CLIENT_DLL`) — the same pair `tools\ds4.py` uses. Without them the launcher says so and falls back to Enter.
+- **Close the game when gameplay starts** (`--end-on-gameplay`) — for cutscenes. The add-on's `SCENE-STATE` /
+  `SCENE-STATE-TICK` lines say whether the frame is a cutscene, gameplay or no 3D at all; the HUD coming up (40+ HUD
+  draws in one heartbeat, against the 4-5 a cutscene draws) or a sustained `gameplay` state ends the run, and a
+  sustained `no-3d` catches a scene that ended on a loading / continue screen. `--min-seconds` (30) keeps the HUD
+  flicker at the start of some cutscenes from ending them immediately.
+- **Close it after a fixed time** (`--hold N`), **render resolution** (`--res 3840x2160`, the port's
+  `--res_width` / `--res_height`).
+
+Escape, held anywhere, stops an attached run. The launcher writes `MGS4\logs\launcher.log`.
+
+**Settings** is `MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image
+keys (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each with what it does and the key name.
+Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
+Windows profile API, whose cache will quietly undo an outside edit. (While the game *is* up, the same keys are live
+in ReShade's overlay, Add-ons tab.)
+
+**Desktop shortcuts** writes `Desktop\MGS4 Shortcuts\` — one `.lnk` per scene under `cutscene`, `gameplay`,
+`stage entry` and `notable`, named `<stage id> - <act> - <scene name>` so each folder sorts in story order, plus the
+three game-start shortcuts at the top level. They run `tools\launcher.ps1` **by absolute path**, which is the one
+thing that can break them: move or re-clone the checkout and every shortcut points at a folder that is no longer
+there. Re-running `launcher.bat --shortcuts` fixes them all.
+
+The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
+`--res_width` / `--res_height`, `--windowing`, `--screen_index`, `--lang`, `--region`, `--input_device`, `--rumble`,
+`--next`, `--forcedlcon`. **`--skip-to-main-menu` is what a bare `mgs4.exe` used to do** — without it the port stops
+on the Master Collection screen first, so a plain "run the game" shortcut needs that argument. `--windowing` takes
+`windowed` / `full_borderless` but the port has been observed ignoring it.
+
 ### The setup this was verified on
 
 The add-on and the ASI come out of this repo, but the rest of the stack lives in the game folder and is worth
@@ -554,17 +614,23 @@ trace lists each full-frame draw with its `ps=` hash) - that is how the three pa
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
-`tools\launch_stage.ps1` automates a test setup: boots a stage, waits for the game window, then taps Enter every
-0.5 s until the add-on log reports the first 3D frame (auto-save notice and title are gone, the cutscene is running),
-for at most 60 s. Keys go through `keybd_event` with the window forced to the foreground - this port ignores
-scan-code `SendInput` events. Explicit sequences also work:
-`powershell -ExecutionPolicy Bypass -File tools\launch_stage.ps1 -Stage s00a00l -Keys "5,ENTER,4,ENTER"`
-(`-NoRestart` sends the keys to the running game; log in `MGS4\logs\launch_stage.log`).
+`launcher.bat` (see [The launcher](#the-launcher-launcherbat)) does this and the rest of it — a scene list, the
+Cross tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
+and `tools\test_stages.ps1` call. `tools\launch_stage.ps1` is still there as a shim over it, so existing shortcuts
+and notes keep working:
+
+```bat
+launcher.bat s00a00l                                 :: boot it, press through the prompts, exit
+launcher.bat s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
+launcher.bat s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
+```
+
+Keys go through `keybd_event` with the window forced to the foreground — this port ignores scan-code `SendInput`
+events, and only accepts input while it is the foreground window. Log: `MGS4\logs\launcher.log`.
 
 ### Recording the in-game cutscenes (4K60 AV1)
 
-`tools
-ecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
+`tools\record_cutscenes.py` records every one of the in-game cutscenes unattended (102 entries in `tools\scenes.csv`):
 
 - boots each `<stage>_D<n>` entry in chronological order (`tools/scenes.csv`),
 - drives OBS over obs-websocket (`tools/obs_control.py`): a dedicated scene with a Game Capture source cropped to the
@@ -582,7 +648,7 @@ ecord_cutscenes.py` records every one of the 82 in-game cutscenes unattended:
 
 ### Stage rotation for testing
 
-`tools	est_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `<MGS4_OUT>\stage_tests\<timestamp>\` (`-OutDir` overrides).
+`tools\test_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `<MGS4_OUT>\stage_tests\<timestamp>\` (`-OutDir` overrides).
 
 ### Robustness
 
