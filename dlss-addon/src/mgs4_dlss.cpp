@@ -1327,6 +1327,8 @@ static resource pick_depth(device* dev, resource color)
     return depth;
 }
 
+static void remember_internal_res(uint32_t w, uint32_t h);
+
 // Runs DLSS on `color` (state as bgfx tracks it) and either copies the result back over it (DLAA) or rewrites the SRV
 // descriptor at `srvCpu` so the composite draw samples the full-size output (upscaling modes).
 static void run_dlss(command_list* cmd, const cl_state* restore, resource color, resource_usage colorState, uint64_t srvCpu)
@@ -1342,6 +1344,9 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         static bool once = false; if (!once) { once = true; logmsg("depth %ux%u does not match color %ux%u; skipping", dd.texture.width, dd.texture.height, cd.texture.width, cd.texture.height); }
         return;
     }
+    // game's real render size (changed in-game?) - recorded only for an input the depth buffer vouches for,
+    // so a stray small texture picked up by the composite scan cannot write a wrong InternalRes into the ini
+    if (!g_scaling || !is_scaled(color)) remember_internal_res(cd.texture.width, cd.texture.height);
     if (g_cfgDebugMode == 2) return;
 
     const bool upscale = g_scaling && cd.texture.width == g_renderW && cd.texture.height == g_renderH && srvCpu != 0;
@@ -1907,7 +1912,10 @@ static bool scene_sized(device* dev, resource r, resource_desc* out)
     if (!r.handle || is_backbuffer(r) || !is_live(r.handle)) return false;
     resource_desc d = dev->get_resource_desc(r);
     if (out) *out = d;
-    return d.type == resource_type::texture_2d && d.texture.width >= 640 && d.texture.width <= g_bbW && d.texture.height >= 360 && d.texture.height <= g_bbH;
+    // The cap is the larger of the backbuffer and the configured InternalRes: in a window smaller than the
+    // render resolution (borderless 4K turned into a 94% window) the scene textures exceed the backbuffer.
+    const uint32_t maxW = g_internalW > g_bbW ? g_internalW : g_bbW, maxH = g_internalH > g_bbH ? g_internalH : g_bbH;
+    return d.type == resource_type::texture_2d && d.texture.width >= 640 && d.texture.width <= maxW && d.texture.height >= 360 && d.texture.height <= maxH;
 }
 
 static void remember_internal_res(uint32_t w, uint32_t h)
@@ -2564,8 +2572,6 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     }
     if (g_injectedThisFrame || !g_cfgEnabled || !color.handle) return;
     g_injectedThisFrame = true; g_compositeInjections++;
-    resource_desc cd = dev->get_resource_desc(color);
-    if (!g_scaling || !is_scaled(color)) remember_internal_res(cd.texture.width, cd.texture.height);   // game's real render size (changed in-game?)
     run_dlss(cmd, &s, color, resource_usage::shader_resource_pixel, srvCpu);
 }
 static bool on_draw(command_list* cmd, uint32_t vc, uint32_t ic, uint32_t fv, uint32_t fi) { g_skipThisDraw = false; handle_draw(cmd, draw_args{ false, vc, ic, fv, fi, 0 }); const bool skip = g_skipThisDraw; g_skipThisDraw = false; return skip; }

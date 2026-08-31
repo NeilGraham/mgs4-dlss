@@ -580,10 +580,15 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
         sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent),
     };
     uint32_t n = 2;
+    // DLSS-G only accepts the UI and HUD-less hints at the colour buffer's size; in a window smaller than the
+    // render resolution they are render-sized and every present would reject them - leave them untagged instead.
+    const uint32_t hintW = in.hudlessW ? in.hudlessW : in.renderW, hintH = in.hudlessH ? in.hudlessH : in.renderH;
+    const bool hintFits = in.bbW == 0 || (hintW == in.bbW && hintH == in.bbH);
+    if ((in.hudless || in.ui) && !hintFits) { static bool once = false; if (!once) { once = true; LOG("FG: UI/HUD-less hints %ux%u differ from the backbuffer %ux%u - not tagged (window smaller than the render resolution)", hintW, hintH, in.bbW, in.bbH); } }
     sl::Resource hudRes(sl::ResourceType::eTex2d, in.hudless, in.hudlessState);
-    if (in.hudless) { hudRes.width = in.hudlessW ? in.hudlessW : in.renderW; hudRes.height = in.hudlessH ? in.hudlessH : in.renderH; hudRes.nativeFormat = in.hudlessFormat; tags[n++] = sl::ResourceTag(&hudRes, sl::kBufferTypeHUDLessColor, in.hudlessUntilPresent ? sl::ResourceLifecycle::eValidUntilPresent : sl::ResourceLifecycle::eOnlyValidNow, in.hudlessSubrect ? &full : nullptr); }
+    if (in.hudless && hintFits) { hudRes.width = hintW; hudRes.height = hintH; hudRes.nativeFormat = in.hudlessFormat; tags[n++] = sl::ResourceTag(&hudRes, sl::kBufferTypeHUDLessColor, in.hudlessUntilPresent ? sl::ResourceLifecycle::eValidUntilPresent : sl::ResourceLifecycle::eOnlyValidNow, in.hudlessSubrect ? &full : nullptr); }
     sl::Resource uiRes(sl::ResourceType::eTex2d, in.ui, in.uiState);
-    if (in.ui) { uiRes.width = in.hudlessW ? in.hudlessW : in.renderW; uiRes.height = in.hudlessH ? in.hudlessH : in.renderH; uiRes.nativeFormat = in.uiFormat; tags[n++] = sl::ResourceTag(&uiRes, sl::kBufferTypeUIColorAndAlpha, in.uiUntilPresent ? sl::ResourceLifecycle::eValidUntilPresent : sl::ResourceLifecycle::eOnlyValidNow, &full); }
+    if (in.ui && hintFits) { uiRes.width = hintW; uiRes.height = hintH; uiRes.nativeFormat = in.uiFormat; tags[n++] = sl::ResourceTag(&uiRes, sl::kBufferTypeUIColorAndAlpha, in.uiUntilPresent ? sl::ResourceLifecycle::eValidUntilPresent : sl::ResourceLifecycle::eOnlyValidNow, &full); }
     sl::Extent bbExt{ (uint32_t)(in.vpY < 0 ? 0 : in.vpY), (uint32_t)(in.vpX < 0 ? 0 : in.vpX), in.vpW, in.vpH };
     if (in.vpW && in.vpH && (in.vpW != in.bbW || in.vpH != in.bbH)) tags[n++] = sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &bbExt);   // FG only on the game image rectangle
     r = p_slSetTagForFrame(*g_token, kViewport, tags, n, in.cmd);
