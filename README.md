@@ -75,10 +75,29 @@ game folder still has to be useful.
 
 ### Play
 
-The list is `tools\scenes.csv` (102 cutscenes, 250 gameplay sections, 68 stage entries) with the names from
-`tools\labels.json`, filtered by a search box, plus three entries for starting the game itself. Pick one, tick what
-should happen while it runs, press Launch. The panel shows the command line that does the same thing, so anything set
-up in the window can be pasted into a terminal or put in a shortcut.
+The list is `tools\scenes.csv` (the stage table) with names from `tools\labels.json` and the corrections in
+`tools\scene_info.json`, plus the two ways of starting the game itself. Pick one, tick what should happen while it
+runs, press Launch. The panel shows the command line that does the same thing, so anything set up in the window can
+be pasted into a terminal or put in a shortcut.
+
+Scenes are grouped by act and every group starts collapsed, so the window opens as a short list of acts rather than
+four hundred rows; click a header to open one. The order is story order — Acts 1 to 5, then the epilogue — which the
+stage ids do not give you: `s00` is the Big Boss material at the very end of the game, and `s10` / `s20` / `s30` are
+the briefings and closing scenes that belong between and after the acts. Typing in the search box opens every group
+that matched.
+
+**`tools\scene_info.json`** is where that lives: per stage id, which act it really belongs to, where it sorts inside
+it, what kind it is, a name and a one-line description of what you actually see. The stage table can say a scene
+exists; only booting it says what it is, so everything in that file was checked by launching it.
+
+- **Mission briefings** are their own kind, sorted to the top of the act they lead into — the Nomad briefing before
+  Act 2 sits above Act 2's own scenes. The Cutscenes filter includes them; "Mission briefings" shows only those.
+- **The same scene under two ids** is one row. `s10a20l` and `s10a20l_D1` start the same thing, as do `s10a40l` and
+  `s10a40l_D2`, `s20a00l` and `s20a00l_D1`, `s20a00l_D3` and `s20a10l`, `s30a00l` and `s30a00l_D`, `s30a10l` and
+  `s30a00l_D2`. The panel offers both ids so you can boot either, in case they differ in something not visible at
+  the first frame.
+- **Ids that crash or come up black** are out of the list and out of the shortcut folder: everything in `s10`, `s20`,
+  `s30` and `s99` whose id ends in `_1` or `_2`. The "Known broken" filter shows them if you want them anyway.
 
 The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
 to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
@@ -120,8 +139,8 @@ add-on's, not the launcher's, but the launcher is where you meet them.
   stage. There used to be a "Title / OTC intro" entry for it; it is gone, and `--title` now says so.
 - **Frame generation on the main menu** loses the device. With `FrameGen` non-zero, sitting on MGS4's own menu ends
   in `sl.dlss_g` failing `evaluateNGXFeature` with `0xbad00002` (invalid parameter) and Streamline unable to map a
-  buffer, then `DXGI_ERROR_DEVICE_REMOVED` (`0x887a0005`) and an access violation — two runs out of three, 20-50
-  seconds in. It needs *both* the add-on active and `FrameGen` non-zero: `Enabled=0` with `FrameGen=4` survives, and
+  buffer, then `DXGI_ERROR_DEVICE_REMOVED` (`0x887a0005`) and an access violation — most launches, 20-50 seconds
+  in, though not every one: it is a race, and it occasionally survives. It needs *both* the add-on active and `FrameGen` non-zero: `Enabled=0` with `FrameGen=4` survives, and
   so does `Enabled=1` with `FrameGen=0`. Scenes booted with `--stage` are unaffected, which is why this went
   unnoticed. Streamline names the shape of it — "internal state is 'fullscreen' but swap chain is 'windowed'" — so
   it is likely tied to the windowed swapchain the port has been booting with since 2026-08-31. The Play tab warns
@@ -549,7 +568,7 @@ dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (
 tools/paths.py|ps1|sh  where the game / the output folder live on this machine
 tools/mgs4_dlss.ps1    the app itself; tools/install_checks.ps1 the checks behind its Install tab
 tools/install_manifest.json  the file list, verified versions and download links the checks render
-tools/scenes.csv       every launchable scene; tools/labels.json the curated names
+tools/scenes.csv       every launchable scene; labels.json the names, scene_info.json the corrections
 third_party/minhook/   MinHook (BSD-2), vendored
 third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)

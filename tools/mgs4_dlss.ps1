@@ -25,6 +25,7 @@ $ErrorActionPreference = "Continue"
 
 $script:ScenesCsv = Join-Path $PSScriptRoot "scenes.csv"
 $script:LabelsJson = Join-Path $PSScriptRoot "labels.json"
+$script:SceneInfoJson = Join-Path $PSScriptRoot "scene_info.json"
 $script:ShippedIni = Join-Path (Split-Path -Parent $PSScriptRoot) "dlss-addon\mgs4_dlss.ini"
 $script:PrefsPath = Join-Path $env:LOCALAPPDATA "mgs4-dlss\launcher.json"
 
@@ -198,41 +199,120 @@ function Format-SceneName([string]$slug) {
 
 function Get-SceneCatalogue {
     if ($script:Catalogue) { return $script:Catalogue }
+
     $labels = @{}
     if (Test-Mgs4Path $script:LabelsJson) {
         $raw = Get-Content -LiteralPath $script:LabelsJson -Raw -Encoding UTF8 | ConvertFrom-Json
         foreach ($p in $raw.PSObject.Properties) { if ($p.Value) { $labels[$p.Name] = $p.Value } }
     }
+
+    # tools\scene_info.json: what a scene turns out to be once you boot it, which the stage table cannot say.
+    $info = @{}
+    $acts = [ordered]@{}
+    if (Test-Mgs4Path $script:SceneInfoJson) {
+        $raw = Get-Content -LiteralPath $script:SceneInfoJson -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($a in $raw.acts) { $acts[$a.key] = $a.title }
+        foreach ($p in $raw.scenes.PSObject.Properties) { $info[$p.Name] = $p.Value }
+    }
+    $script:ActTitles = $acts
+    $script:ActOrder = @($acts.Keys)
+
+    # Act 1..5 first, then the epilogue, is story order for someone picking a scene; the stage ids do not say that
+    # (s00 is the Big Boss material at the very end, s10/s20/s30 are the briefings between acts).
+    function ActKeyFor([string]$id) {
+        switch -regex ($id) {
+            '^s0[1-5]' { return "act" + $id.Substring(2, 1) }
+            '^s00'     { return "epilogue" }
+            default    { return "other" }
+        }
+    }
+
     $list = New-Object System.Collections.Generic.List[object]
+    function Add-Entry($props) { $list.Add([pscustomobject]$props) }
+
     # No "@title" here on purpose: `mgs4.exe --stage s00title_1` access-violates within seconds every time, with
     # the add-on idle (Enabled=0) and frame generation off as well, so it is the port's own crash on a stage id that
     # is a string in the exe rather than something bootable. Verified 2026-08-31; do not put it back untested.
-    $list.Add([pscustomobject]@{ Id = "@main"; Kind = "start"; Act = "Start the game"; Name = "Main menu"
-                                Note = "MGS4's own menu, past the Master Collection screen (--skip-to-main-menu)" })
-    $list.Add([pscustomobject]@{ Id = "@collection"; Kind = "start"; Act = "Start the game"; Name = "Master Collection launcher"
-                                Note = "the Unity front-end, where the display settings live" })
+    Add-Entry @{ Id = "@main"; Kind = "start"; ActKey = "start"; Rank = 0; Name = "Main menu"
+                 Description = "MGS4's own menu, past the Master Collection screen (--skip-to-main-menu)."
+                 Hidden = $false; Alts = @() }
+    Add-Entry @{ Id = "@collection"; Kind = "start"; ActKey = "start"; Rank = 20; Name = "Master Collection launcher"
+                 Description = "The Unity front-end, where the display settings live."
+                 Hidden = $false; Alts = @() }
+
+    # Everything in s10/s20/s30/s99 whose id ends in _1 or _2 crashes or comes up black (checked one by one). The
+    # _D<n> cutscenes of the same stages are fine - "_D2" does not end in "_2" for this test.
+    $brokenRe = '^s(10|20|30|99)a.*_[12]$'
+
+    $aliasOf = @{}
     if (Test-Mgs4Path $script:ScenesCsv) {
         foreach ($row in (Import-Csv -LiteralPath $script:ScenesCsv)) {
             $id = $row.stage_entry
-            $note = switch ($row.kind) {
-                "cutscene" { "in-engine cutscene" }
-                "gameplay" { "playable section" }
-                default    { "boots the stage at its start" }
-            }
-            $list.Add([pscustomobject]@{ Id = $id; Kind = $row.kind; Act = $row.act
-                                         Name = (Format-SceneName $labels[$id]); Note = $note })
+            $o = $info[$id]
+            if ($o -and $o.sameAs) { $aliasOf[$id] = $o.sameAs; continue }
+
+            $kind = $row.kind
+            if ($o -and $o.kind) { $kind = $o.kind }
+            $name = Format-SceneName $labels[$id]
+            if ($o -and $o.name) { $name = $o.name }
+            $act = ActKeyFor $id
+            if ($o -and $o.act) { $act = $o.act }
+            $rank = 0
+            if ($o -and $null -ne $o.rank) { $rank = [int]$o.rank }
+            $desc = ""
+            if ($o -and $o.description) { $desc = $o.description }
+            $hidden = ($id -match $brokenRe)
+            if ($o -and $null -ne $o.hidden) { $hidden = [bool]$o.hidden }
+
+            Add-Entry @{ Id = $id; Kind = $kind; ActKey = $act; Rank = $rank; Name = $name
+                         Description = $desc; Hidden = $hidden; Alts = @() }
         }
     }
-    $script:Catalogue = $list
-    return $list
+
+    # Fold the "same scene, other id" entries into the one they duplicate, so the list has one row and the panel
+    # offers the choice. If the primary is missing, the alias stands on its own rather than disappearing.
+    foreach ($id in $aliasOf.Keys) {
+        $primary = $list | Where-Object { $_.Id -eq $aliasOf[$id] } | Select-Object -First 1
+        if ($primary) { $primary.Alts = @($primary.Alts) + $id }
+        else { Add-Entry @{ Id = $id; Kind = "cutscene"; ActKey = (ActKeyFor $id); Rank = 0
+                            Name = ""; Description = ""; Hidden = $false; Alts = @() } }
+    }
+
+    foreach ($e in $list) {
+        $e | Add-Member -NotePropertyName ActTitle -NotePropertyValue $(
+            if ($acts[$e.ActKey]) { $acts[$e.ActKey] } else { "Uncategorised" }) -Force
+        $e | Add-Member -NotePropertyName Note -NotePropertyValue $(
+            switch ($e.Kind) {
+                "cutscene"   { "in-engine cutscene" }
+                "briefing"   { "mission briefing" }
+                "gameplay"   { "playable section" }
+                "start"      { "starts the game" }
+                default      { "boots the stage at its start" }
+            }) -Force
+    }
+
+    $order = @{}
+    for ($i = 0; $i -lt $script:ActOrder.Count; $i++) { $order[$script:ActOrder[$i]] = $i }
+    $script:Catalogue = @($list | Sort-Object @{ Expression = { $order[$_.ActKey] } },
+                                              @{ Expression = { $_.Rank } },
+                                              @{ Expression = { $_.Id } })
+    return $script:Catalogue
 }
 
-# The catalogue's "@" entries start the game rather than a scene.
-function Test-StartEntry([string]$id) { return $id -eq "" -or $id.StartsWith("@") }
+# Entries that start the game rather than a scene: the run options do not apply to them.
+function Test-StartEntry([string]$id) {
+    if ($id -eq "" -or $id.StartsWith("@")) { return $true }
+    $s = Find-Scene $id
+    return ($s -and $s.Kind -eq "start")
+}
 
+# By id, including the alternate ids folded into an entry.
 function Find-Scene([string]$id) {
     if (-not $id) { return $null }
-    return (Get-SceneCatalogue | Where-Object { $_.Id -eq $id } | Select-Object -First 1)
+    $all = Get-SceneCatalogue
+    $hit = $all | Where-Object { $_.Id -eq $id } | Select-Object -First 1
+    if ($hit) { return $hit }
+    return ($all | Where-Object { $_.Alts -contains $id } | Select-Object -First 1)
 }
 
 # ---------------------------------------------------------------------------------------------- the ini
@@ -665,11 +745,20 @@ function Invoke-SceneRun($opt, [scriptblock]$Say) {
 function Write-SceneList($filter) {
     $rows = Get-SceneCatalogue
     if ($filter) {
-        $rows = $rows | Where-Object { "$($_.Id) $($_.Name) $($_.Act) $($_.Kind)" -match [regex]::Escape($filter) }
+        $rows = $rows | Where-Object {
+            "$($_.Id) $($_.Alts) $($_.Name) $($_.ActTitle) $($_.Kind) $($_.Description)" -match [regex]::Escape($filter)
+        }
+    } else {
+        $rows = $rows | Where-Object { -not $_.Hidden }     # the ones that crash or come up black
     }
     $n = 0
+    $act = ""
     foreach ($r in $rows) {
-        Write-Host ("{0,-16} {1,-12} {2,-24} {3}" -f $r.Id, $r.Kind, $r.Act, $(if ($r.Name) { $r.Name } else { $r.Note }))
+        if ($r.ActTitle -ne $act) { $act = $r.ActTitle; Write-Host ""; Write-Host "[$act]" }
+        $ids = $r.Id
+        if ($r.Alts.Count) { $ids += " (= " + ($r.Alts -join ", ") + ")" }
+        $what = $(if ($r.Description) { $r.Description } else { $r.Note })
+        Write-Host ("  {0,-30} {1,-10} {2}" -f $ids, $r.Kind, $(if ($r.Name) { "$($r.Name) - $what" } else { $what }))
         $n++
     }
     Write-Host ""
@@ -714,7 +803,7 @@ function Set-SettingsFromCli($gameDir, $sets) {
 
 function Get-ShortcutName($scene) {
     $name = $scene.Id
-    if ($scene.Act -and $scene.Kind -ne "start") { $name += " - " + $scene.Act }
+    if ($scene.ActTitle -and $scene.Kind -ne "start") { $name += " - " + $scene.ActTitle }
     if ($scene.Name) { $name += " - " + $scene.Name }
     foreach ($c in [IO.Path]::GetInvalidFileNameChars()) { $name = $name.Replace($c, '-') }
     return $name
@@ -732,13 +821,16 @@ DLSS 5 Neural Rendering / frame generation exactly as mgs4_dlss.ini has it.
 
 Folders
 -------
-  cutscene       the in-engine cutscenes (stage ids ending in _D<n>)
-  gameplay       the playable segments
-  stage entry    the bare stage ids: each act's stage from its own beginning
-  notable        duplicates of the scenes that have a curated name
+  cutscene          the in-engine cutscenes (stage ids ending in _D<n>)
+  mission briefing  the Nomad briefings between the acts
+  gameplay          the playable segments
+  stage entry       the bare stage ids: each act's stage from its own beginning
+  notable           duplicates of the scenes that have a curated name
 
 Names are "<stage id> - <act> - <scene name>", so each folder sorts in story order. Scene names come from
-tools\labels.json; scenes without one show just the id and the act.
+tools\labels.json and tools\scene_info.json; scenes without one show just the id and the act. Stage ids that
+crash or come up black are left out, and where two ids start the same scene only one shortcut is written - the
+launcher window offers the other.
 
 Notes
 -----
@@ -758,7 +850,8 @@ function New-Shortcuts($opt) {
     if (-not $gameDir) { $gameDir = Get-Mgs4GameDir }
 
     $shell = New-Object -ComObject WScript.Shell
-    $folders = @{ "cutscene" = "cutscene"; "gameplay" = "gameplay"; "stage-entry" = "stage entry"; "start" = "" }
+    $folders = @{ "cutscene" = "cutscene"; "briefing" = "mission briefing"; "gameplay" = "gameplay"
+                  "stage-entry" = "stage entry"; "start" = "" }
     $removed = 0
     # "greatest" is what the folder used to be called; its shortcuts point at a path that no longer exists.
     foreach ($f in (@($folders.Values | Where-Object { $_ }) + @("notable", "greatest", ""))) {
@@ -777,6 +870,7 @@ function New-Shortcuts($opt) {
 
     $made = 0
     foreach ($scene in (Get-SceneCatalogue)) {
+        if ($scene.Hidden) { continue }        # these crash or come up black; a shortcut to one is a trap
         $sub = $folders[$scene.Kind]
         $dirs = @($(if ($sub) { Join-Path $root $sub } else { $root }))
         if ($scene.Name -and $scene.Kind -ne "start") { $dirs += (Join-Path $root "notable") }
@@ -786,7 +880,7 @@ function New-Shortcuts($opt) {
             $lnk.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Minimized -File "' + $scriptPath + '" ' + $scene.Id
             $lnk.WorkingDirectory = $gameDir
             $lnk.IconLocation = (Join-Mgs4Path $gameDir "mgs4.exe") + ",0"
-            $lnk.Description = "$($scene.Id) - $($scene.Note)"
+            $lnk.Description = "$($scene.Id) - " + $(if ($scene.Description) { $scene.Description } else { $scene.Note })
             $lnk.Save()
             $made++
         }
@@ -1169,6 +1263,11 @@ $script:Xaml = @'
                          Foreground="{StaticResource Muted}" Margin="0,2,0,0" TextWrapping="Wrap"/>
               <TextBlock x:Name="PickWarn" FontSize="11" Foreground="#F2C14E" Margin="0,7,0,0"
                          TextWrapping="Wrap" Visibility="Collapsed"/>
+              <StackPanel x:Name="AltRow" Orientation="Horizontal" Margin="0,9,0,0" Visibility="Collapsed">
+                <TextBlock Text="Same scene, two ids:" FontSize="11" Foreground="{StaticResource Muted}"
+                           VerticalAlignment="Center"/>
+                <ComboBox x:Name="AltPick" Width="140" Height="26" Margin="8,0,0,0"/>
+              </StackPanel>
             </StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,14,14,10">
@@ -1254,19 +1353,53 @@ $script:Xaml = @'
 $script:ItemTemplateXaml = @'
 <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
   <Grid>
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="135"/>
-      <ColumnDefinition Width="*"/>
-    </Grid.ColumnDefinitions>
-    <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="Consolas" FontSize="12" Foreground="#7C9CFF"
-               VerticalAlignment="Center"/>
-    <StackPanel Grid.Column="1">
-      <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#E7EAF0" TextTrimming="CharacterEllipsis"/>
-      <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="#858D9E" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
-    </StackPanel>
+    <Grid Visibility="{Binding HeaderVis}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="18"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="{Binding Chevron}" FontSize="11" Foreground="#858D9E" VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="1" Text="{Binding HeadText}" FontSize="13" FontWeight="SemiBold" Foreground="#E7EAF0"
+                 VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="2" Text="{Binding HeadCount}" FontSize="11" Foreground="#5C6478" VerticalAlignment="Center"/>
+    </Grid>
+    <Grid Visibility="{Binding SceneVis}" Margin="18,0,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="130"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="Consolas" FontSize="12" Foreground="#7C9CFF"
+                 VerticalAlignment="Center"/>
+      <StackPanel Grid.Column="1">
+        <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#E7EAF0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="#858D9E" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
+      </StackPanel>
+    </Grid>
   </Grid>
 </DataTemplate>
 '@
+
+# The two row shapes the scene list holds. Script scope on purpose: the list is built inside a closure, and a
+# function defined in the enclosing function would not be visible from there.
+function New-HeaderRow($actKey, $title, $count, $collapsed) {
+    return [pscustomobject]@{
+        IsHeader = $true; ActKey = $actKey
+        HeaderVis = "Visible"; SceneVis = "Collapsed"
+        HeadText = $title; HeadCount = "$count"
+        Chevron = $(if ($collapsed) { [char]0x25B8 } else { [char]0x25BE })   # > and v
+        Id = ""; Title = ""; Sub = ""; Entry = $null
+    }
+}
+
+function New-SceneRow($r) {
+    return [pscustomobject]@{
+        IsHeader = $false; ActKey = $r.ActKey
+        HeaderVis = "Collapsed"; SceneVis = "Visible"
+        HeadText = ""; HeadCount = ""; Chevron = ""
+        Id = $r.Id; Title = $r.Title; Sub = $r.Sub; Entry = $r.Entry
+    }
+}
 
 function ConvertTo-Brush($hex) {
     return New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex))
@@ -1414,7 +1547,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $ui = @{}
     foreach ($n in @("GamePath", "Caption", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
-                     "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "PickWarn", "OptAdvance", "OptMashX", "MashNote",
+                     "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
                      "Status", "ShortcutBtn", "ReloadBtn", "SaveBtn", "SettingsHost", "LockBanner", "LockText")) {
         $ui[$n] = $win.FindName($n)
@@ -1435,22 +1568,36 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         "Needs ViGEmBus and ViGEmClient.dll ($($pad.Why)). Without them the launcher can only press Enter, which gets past the prompts but does not fire the flashbacks."
     }
 
+    # Every scriptblock below is closed with GetNewClosure(), which binds it to its own dynamic module - so
+    # $script:... and the automatic variables inside one are NOT this scope's. Anything shared is captured here,
+    # above every closure that uses it: a local declared later would be captured as $null.
+    $spec = $script:IniSpec
+    $selfPath = $PSCommandPath
+    $state = @{ Controls = @(); RunProc = $null; Sections = $null; Collapsed = @{}; PickedId = "" }
+
     # ------------------------------------------------------------------ the scene list
+    # Rows are act headers and scenes in one list: the ListBox item template shows whichever half the row says,
+    # which keeps the grouping without a DataTemplateSelector.
     $all = @(Get-SceneCatalogue | ForEach-Object {
         [pscustomobject]@{
-            Id = $_.Id; Kind = $_.Kind; Act = $_.Act; Name = $_.Name; Note = $_.Note
+            Entry = $_
+            Id = $_.Id; Kind = $_.Kind; ActKey = $_.ActKey; Name = $_.Name; Hidden = $_.Hidden
             Title = $(if ($_.Name) { $_.Name } else { $_.Id })
-            Sub = $(if ($_.Kind -eq "start") { $_.Note } else { "$($_.Act)  -  $($_.Note)" })
-            Hay = "$($_.Id) $($_.Name) $($_.Act) $($_.Kind)".ToLower()
+            Sub = $(if ($_.Description) { $_.Description } else { $_.Note })
+            Hay = "$($_.Id) $($_.Alts -join ' ') $($_.Name) $($_.ActTitle) $($_.Kind) $($_.Description)".ToLower()
         }
     })
+    $actOrder = $script:ActOrder        # populated by Get-SceneCatalogue, just above
+    $actTitles = $script:ActTitles
     $kinds = [ordered]@{
-        "Everything"      = { $true }
-        "Start the game"  = { $_.Kind -eq "start" }
-        "Cutscenes"       = { $_.Kind -eq "cutscene" }
-        "Named scenes"    = { $_.Name -ne "" }
-        "Gameplay"        = { $_.Kind -eq "gameplay" }
-        "Stage entries"   = { $_.Kind -eq "stage-entry" }
+        "Everything"        = { $true }
+        "Start the game"    = { $_.Kind -eq "start" }
+        "Cutscenes"         = { $_.Kind -eq "cutscene" -or $_.Kind -eq "briefing" }
+        "Mission briefings" = { $_.Kind -eq "briefing" }
+        "Named scenes"      = { $_.Name -ne "" }
+        "Gameplay"          = { $_.Kind -eq "gameplay" }
+        "Stage entries"     = { $_.Kind -eq "stage-entry" }
+        "Known broken"      = { $_.Hidden }
     }
     foreach ($k in $kinds.Keys) { [void]$ui.KindFilter.Items.Add($k) }
     $ui.KindFilter.SelectedIndex = 0
@@ -1459,13 +1606,38 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $q = $ui.Search.Text.Trim().ToLower()
         $ui.SearchHint.Visibility = $(if ($ui.Search.Text) { "Collapsed" } else { "Visible" })
         $pick = "$($ui.KindFilter.SelectedItem)"
-        $test = $kinds[$pick]
-        $rows = @($all | Where-Object $test)
+        $rows = @($all | Where-Object $kinds[$pick])
+        if ($pick -ne "Known broken") { $rows = @($rows | Where-Object { -not $_.Hidden }) }
         if ($q) { $rows = @($rows | Where-Object { $_.Hay.Contains($q) }) }
-        $keep = $ui.SceneList.SelectedItem
-        $ui.SceneList.ItemsSource = $rows
-        if ($keep -and $rows -contains $keep) { $ui.SceneList.SelectedItem = $keep }
-        $ui.Status.Text = "$($rows.Count) of $($all.Count) entries"
+
+        # A search is a request to see what matched, so it overrides the collapsed groups.
+        $searching = [bool]$q
+        $out = New-Object System.Collections.Generic.List[object]
+        foreach ($key in $actOrder) {
+            $inAct = @($rows | Where-Object { $_.ActKey -eq $key })
+            if ($inAct.Count -eq 0) { continue }
+            $collapsed = (-not $searching) -and $state.Collapsed[$key]
+            [void]$out.Add((New-HeaderRow $key $actTitles[$key] $inAct.Count $collapsed))
+            if (-not $collapsed) { foreach ($r in $inAct) { [void]$out.Add((New-SceneRow $r)) } }
+        }
+        $keepId = $state.PickedId
+        $ui.SceneList.ItemsSource = $out
+        if ($keepId) {
+            $hit = @($out | Where-Object { -not $_.IsHeader -and $_.Id -eq $keepId }) | Select-Object -First 1
+            if ($hit) { $ui.SceneList.SelectedItem = $hit }
+        }
+        $shown = @($rows).Count
+        $ui.Status.Text = "$shown of $($all.Count) entries" +
+                          $(if ($pick -eq "Known broken") { " - these crash or come up black" } else { "" })
+    }.GetNewClosure()
+
+    # Clicking an act header expands or collapses it rather than picking anything.
+    $toggleGroup = {
+        $sel = $ui.SceneList.SelectedItem
+        if (-not $sel -or -not $sel.IsHeader) { return }
+        $state.Collapsed[$sel.ActKey] = -not $state.Collapsed[$sel.ActKey]
+        $ui.SceneList.SelectedItem = $null
+        & $applyFilter
     }.GetNewClosure()
 
     # ------------------------------------------------------------------ options <-> command line
@@ -1474,7 +1646,11 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $o.GameDir = $opt.GameDir
         $o.GameDirGiven = $opt.GameDirGiven
         $sel = $ui.SceneList.SelectedItem
+        if ($sel -and $sel.IsHeader) { $sel = $null }
         $o.Stage = $(if ($sel) { $sel.Id } else { "" })
+        if ($sel -and $ui.AltRow.Visibility -eq [System.Windows.Visibility]::Visible -and $ui.AltPick.SelectedItem) {
+            $o.Stage = "$($ui.AltPick.SelectedItem)"
+        }
         if (Test-StartEntry $o.Stage) {
             $o.Advance = $false            # a menu has no boot prompts and no first 3D frame
         } else {
@@ -1504,14 +1680,32 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = -not $isStart }
             $warn = ""
             if ($isStart) { $warn = "The run options below are for scenes; the game is started and left alone here." }
-            # Frame generation on the main menu loses the device, reproducibly, on this windowed swapchain.
+            # Frame generation on MGS4's own menu loses the device on most launches (not all - it is a race).
             if ($sel.Id -eq "@main" -and $gameDir) {
                 $fgm = Get-IniValue (Join-Mgs4Path $gameDir "mgs4_dlss.ini") "FrameGen"
                 if ($fgm -and $fgm -ne "0") {
-                    $warn = "Frame generation (FrameGen=$fgm) crashes the game on this menu: sl.dlss_g stops " +
-                            "evaluating and the device is lost within a minute. Set it to 0 on the Settings tab to " +
-                            "sit on the menu - scenes are unaffected."
+                    $warn = "Frame generation (FrameGen=$fgm) crashes the game on this menu most of the time: " +
+                            "sl.dlss_g stops evaluating and the device is lost within a minute. Set it to 0 on the " +
+                            "Settings tab to sit on the menu - scenes are unaffected."
                 }
+            }
+
+            # Some scenes are reachable under two stage ids. One row, and the id to boot picked here.
+            $alts = @()
+            if ($sel.Entry) { $alts = @($sel.Entry.Alts) }
+            if ($alts.Count) {
+                $wanted = "$($ui.AltPick.SelectedItem)"
+                $ids = @($sel.Id) + $alts
+                if ($ui.AltPick.Tag -ne $sel.Id) {
+                    $ui.AltPick.Items.Clear()
+                    foreach ($i in $ids) { [void]$ui.AltPick.Items.Add($i) }
+                    $ui.AltPick.Tag = $sel.Id
+                    $ui.AltPick.SelectedIndex = 0
+                } elseif ($ids -notcontains $wanted) { $ui.AltPick.SelectedIndex = 0 }
+                $ui.AltRow.Visibility = "Visible"
+            } else {
+                $ui.AltRow.Visibility = "Collapsed"
+                $ui.AltPick.Tag = $null
             }
             $ui.PickWarn.Text = $warn
             $ui.PickWarn.Visibility = $(if ($warn) { "Visible" } else { "Collapsed" })
@@ -1521,10 +1715,11 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.LaunchBtn.IsEnabled = $false
             $ui.CmdPreview.Text = "mgs4-dlss.bat --list"
             $ui.PickWarn.Visibility = "Collapsed"
+            $ui.AltRow.Visibility = "Collapsed"
             foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = $true }
         }
         Save-Prefs ([pscustomobject]@{
-            Stage = $(if ($sel) { $sel.Id } else { "" }); Kind = "$($ui.KindFilter.SelectedItem)"
+            Stage = $state.PickedId; Kind = "$($ui.KindFilter.SelectedItem)"
             Advance = [bool]$ui.OptAdvance.IsChecked; MashX = [bool]$ui.OptMashX.IsChecked
             EndOnGameplay = [bool]$ui.OptEnd.IsChecked; Hold = [bool]$ui.OptHold.IsChecked
             HoldSecs = $ui.HoldSecs.Text; Res = [bool]$ui.OptRes.IsChecked
@@ -1533,11 +1728,6 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     }.GetNewClosure()
 
     # ------------------------------------------------------------------ settings
-    # Every scriptblock below is closed with GetNewClosure(), which binds it to its own dynamic module - so
-    # $script:... inside one of them is NOT this script's scope. Anything shared goes through these locals.
-    $spec = $script:IniSpec
-    $selfPath = $PSCommandPath          # $PSCommandPath is per-scope too, and would be empty inside a closure
-    $state = @{ Controls = @(); RunProc = $null; Sections = $null }
 
     $buildSettings = {
         $ui.SettingsHost.Children.Clear()
@@ -1685,7 +1875,13 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     # ------------------------------------------------------------------ wiring
     $ui.Search.Add_TextChanged($applyFilter)
     $ui.KindFilter.Add_SelectionChanged($applyFilter)
-    $ui.SceneList.Add_SelectionChanged($refreshPreview)
+    $ui.SceneList.Add_SelectionChanged({
+        $sel = $ui.SceneList.SelectedItem
+        if ($sel -and $sel.IsHeader) { & $toggleGroup; return }
+        if ($sel) { $state.PickedId = $sel.Id }
+        & $refreshPreview
+    }.GetNewClosure())
+    $ui.AltPick.Add_SelectionChanged($refreshPreview)
     foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold, $ui.OptRes)) {
         $c.Add_Checked($refreshPreview); $c.Add_Unchecked($refreshPreview)
     }
@@ -1822,16 +2018,22 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         if ($prefs.ResW) { $ui.ResW.Text = $prefs.ResW }
         if ($prefs.ResH) { $ui.ResH.Text = $prefs.ResH }
     }
-    & $applyFilter
+    # Every act starts collapsed, so the window opens as a short list of acts rather than 400 rows.
+    foreach ($k in $actOrder) { $state.Collapsed[$k] = $true }
     $want = $opt.Stage
     if (-not $want -and $prefs) { $want = $prefs.Stage }
     if ($want) {
-        $hit = @($ui.SceneList.ItemsSource | Where-Object { $_.Id -eq $want }) | Select-Object -First 1
-        if (-not $hit) {
-            $ui.KindFilter.SelectedIndex = 0
-            & $applyFilter
-            $hit = @($ui.SceneList.ItemsSource | Where-Object { $_.Id -eq $want }) | Select-Object -First 1
+        # A scene asked for on the command line, or the last one used, opens its act and is selected in it.
+        $entry = Find-Scene $want
+        if ($entry) {
+            $state.Collapsed[$entry.ActKey] = $false
+            $state.PickedId = $entry.Id
+            if ($ui.KindFilter.Items.Contains("Everything")) { $ui.KindFilter.SelectedItem = "Everything" }
         }
+    }
+    & $applyFilter
+    if ($state.PickedId) {
+        $hit = @($ui.SceneList.ItemsSource | Where-Object { -not $_.IsHeader -and $_.Id -eq $state.PickedId }) | Select-Object -First 1
         if ($hit) { $ui.SceneList.SelectedItem = $hit; $ui.SceneList.ScrollIntoView($hit) }
     }
     & $refreshPreview

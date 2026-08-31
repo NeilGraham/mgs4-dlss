@@ -1,0 +1,133 @@
+{
+  "_comment": [
+    "Curated corrections on top of scenes.csv (the stage table) and labels.json (short names).",
+    "scenes.csv says what the executable holds; this says what a scene actually turns out to be when you boot it.",
+    "Every entry here was checked by launching it.",
+    "",
+    "  act         which group the scene belongs in, overriding the one implied by the stage id",
+    "  rank        sort order inside that group; negative sorts above the act's own scenes, positive below",
+    "  kind        stage-entry | gameplay | cutscene | briefing | start",
+    "  name        overrides labels.json",
+    "  description one sentence about what you actually see",
+    "  sameAs      this id starts the same scene as that one; the list folds them into one entry you can pick from",
+    "  hidden      out of the list unless the 'Known broken' filter is chosen"
+  ],
+
+  "acts": [
+    { "key": "start",    "title": "Start the game" },
+    { "key": "act1",     "title": "Act 1 - Middle East" },
+    { "key": "act2",     "title": "Act 2 - South America" },
+    { "key": "act3",     "title": "Act 3 - Eastern Europe" },
+    { "key": "act4",     "title": "Act 4 - Shadow Moses" },
+    { "key": "act5",     "title": "Act 5 - Outer Haven" },
+    { "key": "epilogue", "title": "Epilogue - Naked Sin" },
+    { "key": "other",    "title": "Uncategorised" }
+  ],
+
+  "scenes": {
+    "s10a10l": {
+      "act": "start", "kind": "start", "rank": 10,
+      "name": "Game start, before the pre-menu credits",
+      "description": "Boots the game from ahead of the credits that play before the main menu."
+    },
+
+    "s10a20l": {
+      "act": "act2", "kind": "briefing", "rank": -100,
+      "name": "Mission Briefing, before Act 2",
+      "description": "The Nomad briefing that leads into Act 2: the cutscenes first, then the interactive briefing."
+    },
+    "s10a20l_D1": { "sameAs": "s10a20l" },
+    "s10a20l_D2": {
+      "act": "act2", "kind": "briefing", "rank": -99,
+      "name": "Mission Briefing, Act 2 - interactive part only",
+      "description": "Straight into the interactive Nomad briefing, without the cutscenes that come before it."
+    },
+
+    "s10a30l": {
+      "act": "act3", "kind": "briefing", "rank": -100,
+      "name": "Mission Briefing, before Act 3",
+      "description": "The Nomad briefing that leads into Act 3."
+    },
+    "s10a30l_D1": { "sameAs": "s10a30l" },
+    "s10a30l_D2": {
+      "act": "act3", "kind": "briefing", "rank": -99,
+      "name": "Mission Briefing, Act 3 - from Naomi and Sunny",
+      "description": "Starts in the Nomad area, with the Naomi and Sunny cutscene before the interactive part."
+    },
+
+    "s10a40l": {
+      "act": "act4", "kind": "briefing", "rank": -100,
+      "name": "Mission Briefing, before Act 4",
+      "description": "The Nomad briefing that leads into Act 4."
+    },
+    "s10a40l_D2": { "sameAs": "s10a40l" },
+    "s10a40l_D": {
+      "act": "act4", "kind": "briefing", "rank": -99,
+      "name": "Mission Briefing, Act 4 - Sunny and the flower",
+      "description": "Starts at the cutscene where Sunny smells the flower Naomi gave her."
+    },
+
+    "s20a00l": {
+      "act": "act5", "kind": "briefing", "rank": -100,
+      "name": "Mission Briefing, before Act 5",
+      "description": "The briefing aboard the USS Missouri, before Outer Haven."
+    },
+    "s20a00l_D1": { "sameAs": "s20a00l" },
+    "s20a00l_D2": {
+      "act": "act5", "kind": "briefing", "rank": -99,
+      "name": "Mission Briefing, Act 5 - before the cigarette",
+      "description": "A later cutscene in the same briefing, just before Otacon lights Snake's cigarette."
+    },
+    "s20a00l_D3": {
+      "act": "act5", "kind": "cutscene", "rank": -98,
+      "name": "Act 5 title - Old Sun",
+      "description": "The 'Act 5 Old Sun' title screen, before the act officially starts."
+    },
+    "s20a10l": { "sameAs": "s20a00l_D3" },
+
+    "s30a00l": {
+      "act": "epilogue", "kind": "cutscene", "rank": 100,
+      "name": "Epilogue title - Naked Sin",
+      "description": "The 'Epilogue Naked Sin' title, then Meryl aboard the Nomad in her wedding dress."
+    },
+    "s30a00l_D": { "sameAs": "s30a00l" },
+    "s30a00l_D3": {
+      "act": "epilogue", "kind": "cutscene", "rank": 101,
+      "name": "Meryl and Johnny's wedding",
+      "description": "The wedding, outside the Nomad."
+    },
+    "s30a10l": {
+      "act": "epilogue", "kind": "cutscene", "rank": 102,
+      "name": "Raiden in hospital",
+      "description": "Raiden in hospital, visited by Rosemary and their son."
+    },
+    "s30a00l_D2": { "sameAs": "s30a10l" },
+    "s30a00l_D4": {
+      "act": "epilogue", "kind": "cutscene", "rank": 103,
+      "name": "End credits",
+      "description": "The closing credits."
+    },
+
+    "s00a00l": {
+      "description": "The cemetery: Snake and Otacon at Big Boss's grave."
+    },
+    "s01a00l": {
+      "description": "The Act 1 opening street, handing over to HUD gameplay after the intro."
+    },
+    "s02a40l": {
+      "description": "Jungle path with a PMC patrol, played with the HUD up."
+    },
+    "s02a50l_D1": {
+      "description": "The research lab: the rose garden and a Gekko."
+    },
+    "s02a60l": {
+      "description": "Snake alongside the lab building; runs with the port's dynamic resolution active."
+    },
+    "s03a40l": {
+      "description": "The motorcycle chase."
+    },
+    "s04a10l_D1": {
+      "description": "Arriving at Shadow Moses in the snowstorm."
+    }
+  }
+}
