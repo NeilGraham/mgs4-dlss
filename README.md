@@ -43,9 +43,9 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
 
-Run **`mgs4-dlss.bat`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
+Run **`mgs4-dlss`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
 
-## The app (`mgs4-dlss.bat`)
+## The app (`mgs4-dlss`)
 
 One window for the whole add-on, and the same things as a command line. It needs nothing installed — PowerShell
 ships with Windows and the `.bat` handles the execution policy — so it runs straight out of an unzipped release.
@@ -57,18 +57,34 @@ ships with Windows and the `.bat` handles the execution policy — so it runs st
 | **Install** | which files are in place, what the settings say, what the add-on did on its last run |
 
 ```bat
-mgs4-dlss.bat                         :: the window
-mgs4-dlss.bat s02a50l_D1              :: boot that scene and exit
-mgs4-dlss.bat --main                  :: MGS4's own menu, past the Master Collection screen
-mgs4-dlss.bat --list naomi            :: what can be launched
-mgs4-dlss.bat --install               :: the window, opened on the install check
-mgs4-dlss.bat --report                :: the install check as text, for pasting into an issue
-mgs4-dlss.bat <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
-mgs4-dlss.bat --set FrameGen=0        :: write ini keys without opening anything
-mgs4-dlss.bat --help                  :: every option
+mgs4-dlss                         :: the window
+mgs4-dlss s02a50l_D1              :: boot that scene and exit
+mgs4-dlss --main                  :: MGS4's own menu, past the Master Collection screen
+mgs4-dlss --list naomi            :: what can be launched
+mgs4-dlss --install               :: the window, opened on the install check
+mgs4-dlss --report                :: the install check as text, for pasting into an issue
+mgs4-dlss <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
+mgs4-dlss --set FrameGen=0        :: write ini keys without opening anything
+mgs4-dlss --help                  :: every option
 ```
 
-`mgs4-dlss.bat` is the only entry point; Play, Settings and Install are tabs of the one window. The **first** run
+**Two files, one program.** `mgs4-dlss.bat` is what a fresh clone has and always works. Running
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\build_app_exe.ps1
+```
+
+once builds **`mgs4-dlss.exe`** next to it: the same thing, but a Windows-subsystem program, so double-clicking it
+never flashes a console the way a `.bat` must (cmd.exe owns one before it can hide anything), and it wears the
+game's icon - in the title bar and on the file. Nothing has to be installed for that: the C# compiler ships with
+Windows, and the icon is read out of the `mgs4.exe` already on this machine, which is also why the exe is not in the
+repo - the artwork inside it is Konami's, so it is built locally rather than redistributed. Every example below
+works with either, since `mgs4-dlss` resolves to whichever is there.
+
+The exe passes arguments through and prints where you typed them, but cmd does not wait for a windowed program, so
+a script that needs to capture output or check an exit code should call `mgs4-dlss.bat` or `tools\mgs4_dlss.ps1`.
+
+Play, Settings and Install are tabs of the one window. The **first** run
 opens on Install, because the first thing anyone needs to know is whether the pieces are in place; after that it
 opens on Play. `--install` and `--settings` override that at any time.
 
@@ -144,7 +160,7 @@ choose - so "the Naomi lab cutscene, tapping X the whole way, closing when gamep
 double-click. The same thing from a terminal:
 
 ```bat
-mgs4-dlss.bat s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
+mgs4-dlss s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
 ```
 
 The shortcut runs `tools\mgs4_dlss.ps1` **by absolute path**, which is the one thing that can break it: move or
@@ -160,7 +176,7 @@ on the Master Collection screen first, so a plain "run the game" shortcut needs 
 
 `MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image keys
 (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each row naming its key and what it does.
-`mgs4-dlss.bat --settings` prints the same thing; `--set Key=Value` writes without opening a window.
+`mgs4-dlss --settings` prints the same thing; `--set Key=Value` writes without opening a window.
 
 Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
 Windows profile API, whose cache will quietly undo an outside edit. While the game *is* up, the same keys are live in
@@ -565,7 +581,7 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
-mgs4-dlss.bat          the app, and the only entry point: Play / Settings / Install
+mgs4-dlss          the app, and the only entry point: Play / Settings / Install
 config.example.ini     machine-local paths; copy to config.ini (git-ignored)
 d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
@@ -679,15 +695,15 @@ trace lists each full-frame draw with its `ps=` hash) - that is how the three pa
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
-`mgs4-dlss.bat` (see [The app](#the-app-mgs4-dlssbat)) does this and the rest of it — a scene list, the
+`mgs4-dlss` (see [The app](#the-app-mgs4-dlssbat)) does this and the rest of it — a scene list, the
 Cross tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
 and `tools\test_stages.ps1` call. `tools\launch_stage.ps1` is still there as a shim over it, so existing shortcuts
 and notes keep working:
 
 ```bat
-mgs4-dlss.bat s00a00l                                 :: boot it, press through the prompts, exit
-mgs4-dlss.bat s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
-mgs4-dlss.bat s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
+mgs4-dlss s00a00l                                 :: boot it, press through the prompts, exit
+mgs4-dlss s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
+mgs4-dlss s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
 ```
 
 Keys go through `keybd_event` with the window forced to the foreground — this port ignores scan-code `SendInput`

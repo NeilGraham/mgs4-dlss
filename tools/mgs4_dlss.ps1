@@ -1,14 +1,14 @@
 # MGS4 DLSS: the app for this add-on. Start the game or any single scene in it, set the add-on up, and check the
 # install - one window with three tabs, and the same things as a command line.
 #
-#   mgs4-dlss.bat                                the window
-#   mgs4-dlss.bat s02a50l_D1                     boot that scene, no window
-#   mgs4-dlss.bat --main                         straight to MGS4's main menu (past the collection screen)
-#   mgs4-dlss.bat --list naomi                   what can be launched
-#   mgs4-dlss.bat --install                      the window, on the install check
-#   mgs4-dlss.bat --report                       the install check as text, for pasting into an issue
-#   mgs4-dlss.bat s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
-#   mgs4-dlss.bat --set FrameGen=0 --set Mode=Quality
+#   mgs4-dlss                                the window
+#   mgs4-dlss s02a50l_D1                     boot that scene, no window
+#   mgs4-dlss --main                         straight to MGS4's main menu (past the collection screen)
+#   mgs4-dlss --list naomi                   what can be launched
+#   mgs4-dlss --install                      the window, on the install check
+#   mgs4-dlss --report                       the install check as text, for pasting into an issue
+#   mgs4-dlss s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
+#   mgs4-dlss --set FrameGen=0 --set Mode=Quality
 #
 # There is deliberately NO param() block: PowerShell then hands every argument through in $args verbatim, so the
 # --flag spellings above survive `powershell -File`. Run options are parsed by Read-Options below.
@@ -131,18 +131,18 @@ function Read-Options([string[]]$argv) {
 $script:HelpText = @'
 MGS4 DLSS - start the game or one scene of it, set the add-on up, check the install.
 
-  mgs4-dlss.bat                         open the window (Play / Settings / Install)
-  mgs4-dlss.bat <stage id>              boot that scene and exit
-  mgs4-dlss.bat --main                  MGS4's own main menu, past the Master Collection screen
-  mgs4-dlss.bat --collection            the Master Collection launcher
-  mgs4-dlss.bat --list [text]           every launchable scene (filtered by id / name / act)
-  mgs4-dlss.bat --install               the window, opened on the install check
+  mgs4-dlss                         open the window (Play / Settings / Install)
+  mgs4-dlss <stage id>              boot that scene and exit
+  mgs4-dlss --main                  MGS4's own main menu, past the Master Collection screen
+  mgs4-dlss --collection            the Master Collection launcher
+  mgs4-dlss --list [text]           every launchable scene (filtered by id / name / act)
+  mgs4-dlss --install               the window, opened on the install check
                                         (the first run opens there anyway; later ones open on Play)
-  mgs4-dlss.bat --report                the install check as text, for pasting into an issue
-  mgs4-dlss.bat <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
-  mgs4-dlss.bat --settings              print mgs4_dlss.ini the way the window shows it
-  mgs4-dlss.bat --set Key=Value [...]   write those keys into mgs4_dlss.ini
-  mgs4-dlss.bat --stop                  close a running game
+  mgs4-dlss --report                the install check as text, for pasting into an issue
+  mgs4-dlss <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
+  mgs4-dlss --settings              print mgs4_dlss.ini the way the window shows it
+  mgs4-dlss --set Key=Value [...]   write those keys into mgs4_dlss.ini
+  mgs4-dlss --stop                  close a running game
 
 Run options (any of them keeps this attached until the scene is done):
   --advance / --no-advance   press through the auto-save notice and "press any button" until the
@@ -783,7 +783,7 @@ function Write-SceneList($filter) {
         $n++
     }
     Write-Host ""
-    Write-Host ("{0} {1}.  mgs4-dlss.bat <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
+    Write-Host ("{0} {1}.  mgs4-dlss <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
 }
 
 function Write-SettingsReport($gameDir) {
@@ -879,7 +879,7 @@ function Get-CliArgs($opt) {
 
 # The same argument list as a line someone can paste into a terminal.
 function Format-CliPreview($cliArgs) {
-    return "mgs4-dlss.bat " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
+    return "mgs4-dlss " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
 }
 
 function Read-Prefs {
@@ -1376,6 +1376,39 @@ function New-SceneRow($r) {
     }
 }
 
+# The game's own icon on the window, taken from the mgs4.exe on this machine rather than shipped - PrivateExtractIcons
+# gives the best size it holds (256 in this port), which ExtractAssociatedIcon would flatten to 32.
+function Set-WindowIcon($win, [string]$gameDir) {
+    if (-not $gameDir) { return }
+    $exe = Join-Mgs4Path $gameDir "mgs4.exe"
+    if (-not (Test-Mgs4Path $exe)) { return }
+    try {
+        Add-Type -AssemblyName System.Drawing
+        Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Mgs4WinIcon {
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+  public static extern int PrivateExtractIcons(string file, int index, int cx, int cy, IntPtr[] icons, int[] ids, int count, int flags);
+  [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr h);
+}
+"@ -ErrorAction SilentlyContinue
+        foreach ($size in @(256, 64, 32)) {
+            $handles = New-Object IntPtr[] 1
+            $ids = New-Object int[] 1
+            if ([Mgs4WinIcon]::PrivateExtractIcons($exe, 0, $size, $size, $handles, $ids, 1, 0) -le 0) { continue }
+            if ($handles[0] -eq [IntPtr]::Zero) { continue }
+            try {
+                $src = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon(
+                    $handles[0], [System.Windows.Int32Rect]::Empty,
+                    [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+                $src.Freeze()
+                $win.Icon = $src
+                return
+            } finally { [void][Mgs4WinIcon]::DestroyIcon($handles[0]) }
+        }
+    } catch { }        # an icon is decoration; never let it stop the window opening
+}
+
 function ConvertTo-Brush($hex) {
     return New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex))
 }
@@ -1528,6 +1561,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui[$n] = $win.FindName($n)
     }
     $script:LinkStyle = $win.FindResource("Link")
+    Set-WindowIcon $win $gameDir
     $ui.GamePath.Text = $(if ($gameDir) { $gameDir }
                           elseif ($opt.GameDirBad) { "no mgs4.exe in $($opt.GameDirBad) - see the Install tab" }
                           else { "no MGS4 install found - see the Install tab" })
@@ -1701,7 +1735,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PickSub.Text = "Choose a scene on the left."
             $ui.LaunchBtn.IsEnabled = $false
             $ui.ShortcutBtn.IsEnabled = $false
-            $ui.CmdPreview.Text = "mgs4-dlss.bat --list"
+            $ui.CmdPreview.Text = "mgs4-dlss --list"
             $ui.PickWarn.Visibility = "Collapsed"
             $ui.AltRow.Visibility = "Collapsed"
             foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = $true }
@@ -2120,7 +2154,7 @@ switch ($opt.Action) {
     "set"       { exit (Set-SettingsFromCli $gameDir $opt.Sets) }
     "stop"      { Stop-Game; Write-Host "closed mgs4.exe"; exit 0 }
     "shortcut"  {
-        if (-not $opt.Stage) { Write-Host "--shortcut needs a scene: mgs4-dlss.bat <id> --shortcut <file>" -ForegroundColor Red; exit 2 }
+        if (-not $opt.Stage) { Write-Host "--shortcut needs a scene: mgs4-dlss <id> --shortcut <file>" -ForegroundColor Red; exit 2 }
         $written = New-SceneShortcut $opt $opt.ShortcutPath
         Write-Host "shortcut written: $written"
         exit 0
