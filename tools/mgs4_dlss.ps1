@@ -1658,6 +1658,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PickTitle.Text = $sel.Title
             $ui.PickSub.Text = $sel.Sub
             $ui.LaunchBtn.IsEnabled = [bool]$gameDir
+            $ui.ShortcutBtn.IsEnabled = $true
             $ui.CmdPreview.Text = Format-CliPreview (Get-CliArgs (& $collect))
 
             # The run options drive a scene. On a menu there is nothing to press through, and tapping Cross would
@@ -1699,6 +1700,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PickTitle.Text = "Nothing picked"
             $ui.PickSub.Text = "Choose a scene on the left."
             $ui.LaunchBtn.IsEnabled = $false
+            $ui.ShortcutBtn.IsEnabled = $false
             $ui.CmdPreview.Text = "mgs4-dlss.bat --list"
             $ui.PickWarn.Visibility = "Collapsed"
             $ui.AltRow.Visibility = "Collapsed"
@@ -1844,9 +1846,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         $ui.StopBtn.IsEnabled = $running -or $busy
         $ui.SaveBtn.IsEnabled = (-not $running) -and [bool]$gameDir
-            $ui.LaunchBtn.IsEnabled = [bool]$gameDir -and [bool]$ui.SceneList.SelectedItem
-        $ui.ShortcutBtn.IsEnabled = [bool]$ui.SceneList.SelectedItem -and -not $ui.SceneList.SelectedItem.IsHeader
-        if ($ui.SettingsView.Visibility -eq [System.Windows.Visibility]::Visible) {
+            if ($ui.SettingsView.Visibility -eq [System.Windows.Visibility]::Visible) {
             if (-not $gameDir) {
                 $ui.LockText.Text = "No MGS4 install found, so there is no mgs4_dlss.ini to read or write. The Install tab says what was looked for."
                 $ui.LockBanner.Visibility = [System.Windows.Visibility]::Visible
@@ -1948,6 +1948,8 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
 
     # ------------------------------------------------------------------ install check
     $buildInstall = {
+        # Queued at Background priority, so the tab may have been left before this runs.
+        if ($ui.InstallView.Visibility -ne [System.Windows.Visibility]::Visible) { return }
         $ui.InstallHost.Children.Clear()
         if (-not $gameDir) {
             $why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up."
@@ -1980,6 +1982,17 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.Status.Text = "checked at " + (Get-Date -Format "HH:mm:ss") + "  -  file list: tools\install_manifest.json"
     }.GetNewClosure()
 
+    # Invoke-InstallChecks is about a third of a second of file reads and log parsing, and the cards on top of that.
+    # Run synchronously it holds the click, so the tab looks like it is refusing to open. Put a placeholder up, let
+    # WPF paint, and do the work at Background priority once the frame is on screen.
+    $showInstall = {
+        $ui.InstallHost.Children.Clear()
+        $c = New-Card "Install" "Reading the files, the settings and the last run..." "info" "checking"
+        [void]$ui.InstallHost.Children.Add($c.Card)
+        $ui.Status.Text = "checking..."
+        [void]$win.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]$buildInstall)
+    }.GetNewClosure()
+
     $showView = {
         $tab = "play"
         if ($ui.NavSettings.IsChecked) { $tab = "settings" }
@@ -1994,14 +2007,14 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.RecheckBtn.Visibility = & $vis ($tab -eq "install")
         $ui.Caption.Text = switch ($tab) { "settings" { "add-on settings" } "install" { "install check" } default { "start a scene" } }
         if ($tab -eq "settings") { & $buildSettings }
-        if ($tab -eq "install") { & $buildInstall }
+        if ($tab -eq "install") { & $showInstall }
         & $refreshState
     }.GetNewClosure()
     $ui.NavPlay.Add_Checked($showView)
     $ui.NavSettings.Add_Checked($showView)
     $ui.NavInstall.Add_Checked($showView)
 
-    $ui.RecheckBtn.Add_Click($buildInstall)
+    $ui.RecheckBtn.Add_Click($showInstall)
     $ui.CopyBtn.Add_Click({
         if (-not $state.Sections) { return }
         Set-Clipboard -Value (Format-TextReport $gameDir $state.Sections)
@@ -2059,7 +2072,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $win.Add_KeyDown({
         if ($_.Key -eq [System.Windows.Input.Key]::F5) {
             if ($ui.NavSettings.IsChecked) { & $buildSettings }
-            elseif ($ui.NavInstall.IsChecked) { & $buildInstall }
+            elseif ($ui.NavInstall.IsChecked) { & $showInstall }
             else { & $applyFilter }
         }
     }.GetNewClosure())
