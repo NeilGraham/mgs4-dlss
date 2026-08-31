@@ -1608,11 +1608,22 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
 
     # Clicking an act header expands or collapses it rather than picking anything.
     $toggleGroup = {
-        $sel = $ui.SceneList.SelectedItem
-        if (-not $sel -or -not $sel.IsHeader) { return }
-        $state.Collapsed[$sel.ActKey] = -not $state.Collapsed[$sel.ActKey]
-        $ui.SceneList.SelectedItem = $null
+        param($row)
+        if (-not $row -or -not $row.IsHeader) { return }
+        $state.Collapsed[$row.ActKey] = -not $state.Collapsed[$row.ActKey]
         & $applyFilter
+    }.GetNewClosure()
+
+    # The row the mouse is over, or $null. OriginalSource is whatever bit of the template was hit, so walk up the
+    # visual tree to the container; anything that is not a Visual (a text Run, say) ends the walk.
+    $rowUnderMouse = {
+        param($src)
+        while ($src -and -not ($src -is [System.Windows.Controls.ListBoxItem])) {
+            if ($src -is [System.Windows.Media.Visual]) { $src = [System.Windows.Media.VisualTreeHelper]::GetParent($src) }
+            else { $src = $null }
+        }
+        if ($src) { return $src.DataContext }
+        return $null
     }.GetNewClosure()
 
     # ------------------------------------------------------------------ options <-> command line
@@ -1851,9 +1862,30 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     # ------------------------------------------------------------------ wiring
     $ui.Search.Add_TextChanged($applyFilter)
     $ui.KindFilter.Add_SelectionChanged($applyFilter)
+    # Act headers are toggled here, before the ListBox gets the click, and the event is marked handled so a header
+    # is never selected. Driving this from SelectionChanged instead used to fire twice on some clicks: rebuilding
+    # the list inside the handler left the ListBox to finish its click against the rebuilt row, which selected the
+    # header again and toggled it straight back.
+    $ui.SceneList.Add_PreviewMouseLeftButtonDown({
+        param($sender, $e)
+        $row = & $rowUnderMouse $e.OriginalSource
+        if ($row -and $row.IsHeader) {
+            $e.Handled = $true
+            & $toggleGroup $row
+        }
+    }.GetNewClosure())
+
+    # Keyboard: headers can still be reached with the arrow keys, where Enter or Space opens and closes them.
+    $ui.SceneList.Add_KeyDown({
+        param($sender, $e)
+        if ($e.Key -ne [System.Windows.Input.Key]::Return -and $e.Key -ne [System.Windows.Input.Key]::Space) { return }
+        $sel = $ui.SceneList.SelectedItem
+        if ($sel -and $sel.IsHeader) { $e.Handled = $true; & $toggleGroup $sel }
+    }.GetNewClosure())
+
     $ui.SceneList.Add_SelectionChanged({
         $sel = $ui.SceneList.SelectedItem
-        if ($sel -and $sel.IsHeader) { & $toggleGroup; return }
+        if ($sel -and $sel.IsHeader) { return }      # arrow-keyed onto a header; nothing to preview
         if ($sel) { $state.PickedId = $sel.Id }
         & $refreshPreview
     }.GetNewClosure())
