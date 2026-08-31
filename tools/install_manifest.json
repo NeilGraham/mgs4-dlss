@@ -1,0 +1,140 @@
+{
+  "_comment": "Files the add-on needs, by feature. tools/check_install.ps1 renders this; the versions match the 'setup this was verified on' table in README.md. Paths are relative to the folder holding mgs4.exe. Keep this file the single place filenames, versions and download links are written down.",
+  "sections": [
+    {
+      "id": "required",
+      "title": "Required",
+      "blurb": "Without these the add-on does not load or DLSS cannot be created.",
+      "files": [
+        {
+          "name": "The game",
+          "path": "mgs4.exe",
+          "detail": "Metal Gear Solid 4, Master Collection Vol. 2",
+          "url": "https://store.steampowered.com/app/2492670/"
+        },
+        {
+          "name": "ReShade, with add-on support",
+          "path": "dxgi.dll",
+          "verified": "6.8.0",
+          "detail": "installed for mgs4.exe as dxgi.dll - the add-on build, not the plain one",
+          "url": "https://reshade.me/"
+        },
+        {
+          "name": "This add-on",
+          "path": "mgs4_dlss.addon64",
+          "detail": "dlss-addon\\build.bat, then sh dlss-addon/install.sh",
+          "url": "https://github.com/NeilGraham/mgs4-dlss/releases"
+        },
+        {
+          "name": "Add-on configuration",
+          "path": "mgs4_dlss.ini",
+          "detail": "shipped next to the add-on; the first run writes InternalRes into it",
+          "url": "https://github.com/NeilGraham/mgs4-dlss/releases"
+        },
+        {
+          "name": "DLSS runtime",
+          "path": "nvngx_dlss.dll",
+          "verified": "310.8.0",
+          "optionalIfDriverOverride": true,
+          "detail": "from the DLSS SDK, or supplied by the NVIDIA app's DLSS override",
+          "url": "https://github.com/NVIDIA/DLSS"
+        }
+      ]
+    },
+    {
+      "id": "nr",
+      "title": "DLSS 5 Neural Rendering",
+      "blurb": "Optional. With these present the add-on runs DLAA on the final image so NR works at full strength.",
+      "files": [
+        {
+          "name": "Neural Rendering add-on",
+          "path": "renodx-dlss5.addon64",
+          "detail": "auto-detected; its presence switches the insertion point to the composite",
+          "url": "https://github.com/clshortfuse/renodx"
+        },
+        {
+          "name": "DLSS NR runtime",
+          "path": "nvngx_dlssnr.dll",
+          "verified": "310.8.0",
+          "detail": "from the DLSS SDK, or supplied by the NVIDIA app",
+          "url": "https://github.com/NVIDIA/DLSS"
+        }
+      ]
+    },
+    {
+      "id": "fg",
+      "title": "Frame generation",
+      "blurb": "Optional, needs FrameGen in the ini. Only helps when the display refreshes faster than the game's 60 fps.",
+      "files": [
+        {
+          "name": "Streamline interposer",
+          "path": "sl.interposer.dll",
+          "verified": "2.13.0",
+          "url": "https://github.com/NVIDIA-RTX/Streamline"
+        },
+        {
+          "name": "Streamline common",
+          "path": "sl.common.dll",
+          "verified": "2.13.0",
+          "url": "https://github.com/NVIDIA-RTX/Streamline"
+        },
+        {
+          "name": "Streamline DLSS-G",
+          "path": "sl.dlss_g.dll",
+          "verified": "2.13.0",
+          "url": "https://github.com/NVIDIA-RTX/Streamline"
+        },
+        {
+          "name": "Streamline Reflex",
+          "path": "sl.reflex.dll",
+          "verified": "2.13.0",
+          "url": "https://github.com/NVIDIA-RTX/Streamline"
+        },
+        {
+          "name": "Streamline PCL",
+          "path": "sl.pcl.dll",
+          "verified": "2.13.0",
+          "url": "https://github.com/NVIDIA-RTX/Streamline"
+        },
+        {
+          "name": "DLSS-G runtime",
+          "path": "nvngx_dlssg.dll",
+          "verified": "310.8.0",
+          "url": "https://github.com/NVIDIA/DLSS"
+        }
+      ]
+    },
+    {
+      "id": "extras",
+      "title": "Extras",
+      "blurb": "Optional. The frame limiter, and the pieces the development tooling uses.",
+      "files": [
+        {
+          "name": "Ultimate ASI Loader",
+          "path": "winmm.dll",
+          "verified": "9.7.4",
+          "detail": "loads the .asi files in scripts\\ (mgs4.exe imports winmm at startup)",
+          "url": "https://github.com/ThirteenAG/Ultimate-ASI-Loader"
+        },
+        {
+          "name": "Frame limiter",
+          "path": "scripts\\MGSFPSUnlock.asi",
+          "detail": "with MGSFPSUnlock.ini set to TargetFrameRate = 60",
+          "url": "https://github.com/Skyth3r/MGSFPSUnlock"
+        },
+        {
+          "name": "D3D12 switch (fallback)",
+          "path": "scripts\\MGS4_D3D12.asi",
+          "detail": "only for builds without the in-game DirectX 12 option; leave Enabled = 0 otherwise",
+          "url": "https://github.com/NeilGraham/mgs4-dlss/releases"
+        },
+        {
+          "name": "Steam app id",
+          "path": "steam_appid.txt",
+          "detail": "lets mgs4.exe --stage boot without going through Steam",
+          "url": "https://github.com/NeilGraham/mgs4-dlss#direct-stage-boot"
+        }
+      ]
+    }
+  ]
+}

@@ -43,12 +43,47 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
 
+Run **`check-install.bat`** at any point to see which of those pieces are actually in place — see below.
+
+### Checking the install (`check-install.bat`)
+
+Most of the files above cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and ReShade all have
+to be fetched from their own projects, so an install is assembled by hand and it is easy to end up one file short.
+`check-install.bat` opens a window listing every required and optional file, what version it is, and a link to where
+each missing one comes from. **Refresh** (or F5) re-runs every check with the window open, so it can be left up on a
+second monitor while files are dropped into the game folder.
+
+```bat
+check-install.bat                     :: the window
+check-install.bat --report            :: the same findings as text, for pasting into an issue
+check-install.bat -GameDir "D:\..."   :: an install the Steam library search does not find
+```
+
+It needs nothing installed — PowerShell ships with Windows, and the `.bat` handles the execution policy, so it runs
+straight out of an unzipped release.
+
+What it reports, beyond whether a file exists:
+
+- **Files**, grouped by the feature each one unlocks (required / DLSS 5 NR / frame generation / extras), with the
+  version found next to the version this was verified against.
+- **Settings** read out of the game's own files — `api=dx12`, FXAA, the frame limiter, `Enabled`, `FrameGen` against
+  the display's actual refresh rate, whether ReShade has the add-on disabled, and whether a diagnostic key was left
+  on. A file being present is not the same as it being switched on.
+- **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialised, whether DLSS came from
+  the local DLL or the driver override, whether `renodx-dlss5` really loaded, the insertion point, the Streamline
+  and driver versions, and how many frames DLSS evaluated. This is the part a file list cannot tell you — a
+  ReShade build **without** add-on support looks perfectly correct on disk and silently loads nothing.
+
+The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
+script only renders it.
+
 The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
 ### The setup this was verified on
 
 The add-on and the ASI come out of this repo, but the rest of the stack lives in the game folder and is worth
-recording, because "DLSS 5 NR is on" is not one setting. Versions the v1.1.1 numbers were taken with:
+recording, because "DLSS 5 NR is on" is not one setting. Versions the v1.1.1 numbers were taken with (the same
+versions `tools\install_manifest.json` checks against, so change both together):
 
 | component | file in `MGS4\` | version |
 | --- | --- | --- |
@@ -407,10 +442,12 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
+check-install.bat      opens the install check below
 config.example.ini     machine-local paths; copy to config.ini (git-ignored)
 d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh  where the game / the output folder live on this machine
+tools/check_install.*  the install check (ps1) and its file list (install_manifest.json)
 third_party/minhook/   MinHook (BSD-2), vendored
 third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
