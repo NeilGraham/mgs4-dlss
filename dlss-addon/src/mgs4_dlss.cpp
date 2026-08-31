@@ -26,6 +26,7 @@
 #include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
 #include "resample_cs.h"
 #include "depth_stretch_cs.h"   // g_depth_stretch_cs
+#include "probe_cs.h"          // g_probe_cs: per-frame 240x135 luminance readback of pipeline stages (Probe=1)
 #include "dof_coc_cs.h"        // g_dof_coc_cs / g_dof_gather_cs / g_dof_composite_cs: the game's DoF re-applied after DLSS (PostDof=1)
 #include "dof_gather_cs.h"
 #include "dof_composite_cs.h"
@@ -229,9 +230,27 @@ static uint32_t g_dofOverlaysThisFrame = 0, g_dofOverlays = 0;
 // first-evaluation stalls do not land in the first half second of the first cutscene.
 static int g_cfgPreWarm = 1;
 static bool g_warmDone = false; static uint32_t g_warmEvals = 0, g_noSceneFrames = 0;
+// ---- pipeline probe (Probe=1): programmatic layout verification ---------------------------------------------------
+// Each frame, up to three pipeline stages are downsampled to 240x135 luminance on the GPU and read back through an
+// 8-frame ring. On the CPU every image is scanned for a dynamic-resolution sub-rect signature: a sharp vertical /
+// horizontal gradient wall at x = k*W (k in 0.4..0.97). Stages: 0 = the colour DLSS evaluates, 1 = our output after
+// the DoF re-apply, 2 = the texture the game's composite actually samples (what is displayed).
+static int g_cfgProbe = 0;
+static ID3D12PipelineState* g_probePso = nullptr; static ID3D12DescriptorHeap* g_probeHeap = nullptr;
+static ID3D12Resource* g_probeRb = nullptr; static uint8_t* g_probeRbPtr = nullptr;
+static resource g_probeTex[4] = {}; static resource_usage g_probeTexState[4] = { resource_usage::unordered_access, resource_usage::unordered_access, resource_usage::unordered_access, resource_usage::unordered_access };
+static uint32_t g_probeMeta[4][8] = {};
+static uint32_t g_probeSlot = 0;
+static bool g_probeReady = false, g_probeInitTried = false;
+static uint32_t g_probeFlags[4] = {}, g_probeFrames = 0, g_probeLogs = 0;
+static const uint32_t PROBE_W = 240, PROBE_H = 135, PROBE_PITCH = 256, PROBE_SLOT_BYTES = 35328;   // 512-aligned slot
+static void probe_dispatch(command_list* cmd, resource src, resource_usage srcState, int stage);
 static bool g_dofReady = false, g_dofInitTried = false;   // frames left to the game's DoF because the scene was a dynamic-resolution sub-rect   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
-static uint32_t g_lateSceneWrites = 0;   // scene writes into the final AFTER this frame's pre-HUD insertion: the insertion fired too early
+static uint32_t g_lateSceneWrites = 0;
+static bool g_frameKStep = false;        // this frame the dynamic-resolution scale stepped or the chain disagreed about it
+static int g_cfgDofStepFreeze = 1;       // 1 = on such frames skip the evaluation and show the previous DLSS output (one-frame hold instead of the game's inconsistent frame)
+static uint32_t g_stepFreezes = 0;   // scene writes into the final AFTER this frame's pre-HUD insertion: the insertion fired too early
 static resource g_dofCoc = { 0 }, g_dofBlur = { 0 }; static resource_usage g_dofCocState = resource_usage::unordered_access, g_dofBlurState = resource_usage::unordered_access;
 static uint32_t g_dofW = 0, g_dofH = 0;
 static bool g_prevFrameHadScene = false;       // the previous frame rendered a full-frame 3D scene
@@ -1483,6 +1502,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f;
     ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
+    if (g_cfgProbe && !upscale) probe_dispatch(cmd, color, resource_usage::shader_resource_non_pixel, 0);
     const uint32_t visInW = (g_cfgDRS == 2) ? subW : outW, visInH = (g_cfgDRS == 2) ? subH : outH;   // full grid: the MV texture and the output map 1:1
     if (g_cfgDebugMode == 5) {
         vis_dispatch(cmd, visInW, visInH, outW, outH);   // show the MV field instead of the DLSS result
@@ -1520,6 +1540,16 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
         cmd->barrier(color, resource_usage::copy_source, resource_usage::shader_resource_non_pixel);
         g_frozenPassFrames++;
+    } else if (g_cfgPostDof && g_cfgDofStepFreeze && g_frameKStep && g_evalCount > 2 && !g_windowMode) {
+        // a resolution-step frame: the game's own chain disagrees about the scale and its final image can carry a
+        // sub-rect layout; hold the previous, consistent DLSS output for this one frame instead of evaluating it
+        cmd->barrier(color, resource_usage::shader_resource_non_pixel, resource_usage::copy_dest);
+        cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_source);
+        cmd->copy_resource(g_out, color);
+        cmd->barrier(g_out, resource_usage::copy_source, resource_usage::unordered_access);
+        cmd->barrier(color, resource_usage::copy_dest, resource_usage::shader_resource_non_pixel);
+        g_stepFreezes++;
+        static uint32_t nf = 0; if (nf++ < 20) logmsg("step-frame hold f%u: previous DLSS output shown (resolution step)", g_frame);
     } else {
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (NVSDK_NGX_FAILED(r)) { if (g_failCount++ < 5) logmsg("NGX EvaluateFeature -> %s", ngx_str(r)); }
@@ -1533,6 +1563,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         if (outW != g_dlssOutW || outH != g_dlssOutH) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: skipped on frame %u - colour %ux%u is not the DLSS output size %ux%u", g_frame, outW, outH, g_dlssOutW, g_dlssOutH); g_dofMissed++; }
         else if (dof_apply(cmd, dev, g_dlssOutW, g_dlssOutH, static_cast<DXGI_FORMAT>(cd.texture.format), g_dofKx, g_dofKy)) g_dofFrames++; else g_dofMissed++;
     } else if (g_cfgPostDof && g_dofSeenThisFrame) g_dofMissed++;
+    if (g_cfgProbe && !upscale && !NVSDK_NGX_FAILED(r)) probe_dispatch(cmd, g_out, g_outState, 1);
     objmv::mark_frame_end(native);
 
     if (fg::status().initialised && g_cfgFgMode != 0) {
@@ -1891,6 +1922,141 @@ static void remember_internal_res(uint32_t w, uint32_t h)
 
 struct draw_args { bool indexed; uint32_t count, instances, first, first_instance; int32_t vertex_offset; };
 
+static bool probe_init(device* dev)
+{
+    if (g_probeInitTried) return g_probeReady;
+    g_probeInitTried = true;
+    if (!dof_init()) return false;   // root signature (static sampler) + the 256-byte CB ring
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pso = {}; pso.pRootSignature = g_dofRootSig; pso.CS = { g_probe_cs, sizeof(g_probe_cs) };
+    if (FAILED(g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_probePso)))) { logmsg("probe: PSO failed"); return false; }
+    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 128, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+    if (FAILED(g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_probeHeap)))) { logmsg("probe: heap failed"); return false; }
+    for (int i = 0; i < 4; ++i) {
+        if (!dev->create_resource(resource_desc(PROBE_W, PROBE_H, 1, 1, format::r8_unorm, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource | resource_usage::copy_source),
+                                  nullptr, resource_usage::unordered_access, &g_probeTex[i])) { logmsg("probe: texture failed"); return false; }
+        dev->set_resource_name(g_probeTex[i], "MGS4DLSS probe");
+    }
+    D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_READBACK, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
+    D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = UINT64(4) * 8 * PROBE_SLOT_BYTES; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&g_probeRb)))) { logmsg("probe: readback buffer failed"); return false; }
+    D3D12_RANGE all = { 0, (SIZE_T)bd.Width }; g_probeRb->Map(0, &all, reinterpret_cast<void**>(&g_probeRbPtr));
+    g_probeReady = g_probeRbPtr != nullptr;
+    logmsg("probe: ready (%s) - per-frame 240x135 readback of DLSS input / DoF output / composite input", g_probeReady ? "ok" : "map failed");
+    return g_probeReady;
+}
+static DXGI_FORMAT probe_srv_format(format f)
+{
+    switch (f) {
+    case format::r8g8b8a8_typeless: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case format::b8g8r8a8_typeless: return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case format::r16g16b16a16_typeless: return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case format::r10g10b10a2_typeless: return DXGI_FORMAT_R10G10B10A2_UNORM;
+    default: return static_cast<DXGI_FORMAT>(f);
+    }
+}
+static void probe_dispatch(command_list* cmd, resource src, resource_usage srcState, int stage)
+{
+    device* dev = cmd->get_device();
+    if (!probe_init(dev) || !src.handle) return;
+    const resource_desc sd = dev->get_resource_desc(src);
+    if (sd.type != resource_type::texture_2d) return;
+    const DXGI_FORMAT sf = probe_srv_format(sd.texture.format);
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t g = (g_probeSlot * 4 + (uint32_t)stage) * 4;
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_probeHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(g) * inc;
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_probeHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(g) * inc;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = sf; srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
+    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(src.handle), &srv, cpu);
+    D3D12_CPU_DESCRIPTOR_HANDLE c1 = cpu; c1.ptr += inc; g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(src.handle), &srv, c1);
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R8_UNORM; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    D3D12_CPU_DESCRIPTOR_HANDLE c2 = cpu; c2.ptr += 2 * inc; g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_probeTex[stage].handle), nullptr, &uav, c2);
+    D3D12_CPU_DESCRIPTOR_HANDLE c3 = cpu; c3.ptr += 3 * inc; g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_probeTex[stage].handle), nullptr, &uav, c3);
+    const bool srcMove = srcState != resource_usage::shader_resource_non_pixel;
+    if (srcMove) cmd->barrier(src, srcState, resource_usage::shader_resource_non_pixel);
+    if (g_probeTexState[stage] != resource_usage::unordered_access) { cmd->barrier(g_probeTex[stage], g_probeTexState[stage], resource_usage::unordered_access); g_probeTexState[stage] = resource_usage::unordered_access; }
+    ID3D12DescriptorHeap* heaps[1] = { g_probeHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_dofRootSig);
+    native->SetPipelineState(g_probePso);
+    native->SetComputeRootConstantBufferView(0, g_dofCbRes->GetGPUVirtualAddress());
+    native->SetComputeRootDescriptorTable(1, gpu);
+    D3D12_GPU_DESCRIPTOR_HANDLE gu = gpu; gu.ptr += 2 * inc; native->SetComputeRootDescriptorTable(2, gu);
+    native->Dispatch((PROBE_W + 7) / 8, (PROBE_H + 7) / 8, 1);
+    cmd->barrier(g_probeTex[stage], resource_usage::unordered_access, resource_usage::copy_source); g_probeTexState[stage] = resource_usage::copy_source;
+    D3D12_TEXTURE_COPY_LOCATION dst = {}; dst.pResource = g_probeRb; dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dst.PlacedFootprint.Offset = UINT64((uint32_t)stage * 8 + g_probeSlot) * PROBE_SLOT_BYTES;
+    dst.PlacedFootprint.Footprint = { DXGI_FORMAT_R8_UNORM, PROBE_W, PROBE_H, 1, PROBE_PITCH };
+    D3D12_TEXTURE_COPY_LOCATION srcLoc = {}; srcLoc.pResource = reinterpret_cast<ID3D12Resource*>(g_probeTex[stage].handle); srcLoc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; srcLoc.SubresourceIndex = 0;
+    native->CopyTextureRegion(&dst, 0, 0, 0, &srcLoc, nullptr);
+    cmd->barrier(g_probeTex[stage], resource_usage::copy_source, resource_usage::unordered_access); g_probeTexState[stage] = resource_usage::unordered_access;
+    if (srcMove) cmd->barrier(src, resource_usage::shader_resource_non_pixel, srcState);
+    g_probeMeta[stage][g_probeSlot] = g_frame;
+}
+// CPU side: scan one read-back luminance image for a sub-rect boundary wall.
+static void probe_analyze(int stage, uint32_t slot)
+{
+    const uint32_t frame = g_probeMeta[stage][slot];
+    if (!frame) return;
+    g_probeMeta[stage][slot] = 0;
+    const uint8_t* img = g_probeRbPtr + (UINT64((uint32_t)stage * 8 + slot) * PROBE_SLOT_BYTES);
+    // TRANSIENT walls: analyse the difference against the previous frame of the same stage. Static UI edges (HUD bars,
+    // Codec panel borders) cancel out; a layout flash (sub-rect content appearing for a frame) leaves a sharp wall.
+    const uint32_t prevSlot = (slot + 7) % 8;
+    const uint32_t prevFrame = g_probeMeta[stage][prevSlot] ? g_probeMeta[stage][prevSlot] : frame - 1;
+    const uint8_t* prv = g_probeRbPtr + (UINT64((uint32_t)stage * 8 + prevSlot) * PROBE_SLOT_BYTES);
+    static float dbuf[4][PROBE_H][PROBE_W];   // per stage: |cur - prev|
+    float (*d)[PROBE_W] = dbuf[stage];
+    float colGrad[PROBE_W] = {}, rowGrad[PROBE_H] = {};
+    double mean = 0, dmean = 0;
+    for (uint32_t y = 0; y < PROBE_H; ++y) {
+        const uint8_t* r = img + y * PROBE_PITCH; const uint8_t* q = prv + y * PROBE_PITCH;
+        for (uint32_t x = 0; x < PROBE_W; ++x) { d[y][x] = fabsf(float(r[x]) - float(q[x])); mean += r[x]; dmean += d[y][x]; }
+    }
+    mean /= double(PROBE_W) * PROBE_H; dmean /= double(PROBE_W) * PROBE_H;
+    if (mean < 2.0) return;      // black / fade frames carry no layout information
+    if (dmean > 12.0) return;    // a cut: everything changes, no wall information
+    for (uint32_t y = 0; y < PROBE_H; ++y) {
+        for (uint32_t x = 0; x + 1 < PROBE_W; ++x) colGrad[x] += fabsf(d[y][x + 1] - d[y][x]);
+        if (y + 1 < PROBE_H) for (uint32_t x = 0; x < PROBE_W; ++x) rowGrad[y] += fabsf(d[y + 1][x] - d[y][x]);
+    }
+    (void)prevFrame;
+    float colBase = 0, rowBase = 0;
+    for (uint32_t x = 0; x + 1 < PROBE_W; ++x) { colGrad[x] /= PROBE_H; colBase += colGrad[x]; }
+    for (uint32_t y = 0; y + 1 < PROBE_H; ++y) { rowGrad[y] /= PROBE_W; rowBase += rowGrad[y]; }
+    colBase /= PROBE_W - 1; rowBase /= PROBE_H - 1;
+    // strongest wall in the k = 0.40..0.97 range, compared against its own neighbourhood
+    float bestC = 0; uint32_t bestX = 0;
+    for (uint32_t x = PROBE_W * 2 / 5; x < PROBE_W * 97 / 100; ++x) {
+        const float nb = 0.25f * (colGrad[x - 2] + colGrad[x - 1] + colGrad[x + 1] + colGrad[x + 2]);
+        const float sc = colGrad[x] - nb;
+        if (sc > bestC) { bestC = sc; bestX = x; }
+    }
+    float bestR = 0; uint32_t bestY = 0;
+    for (uint32_t y = PROBE_H * 2 / 5; y < PROBE_H * 97 / 100; ++y) {
+        const float nb = 0.25f * (rowGrad[y - 2] + rowGrad[y - 1] + rowGrad[y + 1] + rowGrad[y + 2]);
+        const float sc = rowGrad[y] - nb;
+        if (sc > bestR) { bestR = sc; bestY = y; }
+    }
+    const float kx = float(bestX + 1) / PROBE_W, kyv = float(bestY + 1) / PROBE_H;
+    // a transient LAYOUT wall: a sharp rectangle edge in the frame difference AND the region beyond it is stale
+    // (the previous frame shows through), while the region inside updates. A moving object edge updates both sides.
+    double dInC = 0, dOutC = 0; uint32_t nInC = 0, nOutC = 0;
+    for (uint32_t y = 0; y < PROBE_H; ++y) for (uint32_t x = 0; x < PROBE_W; ++x) { if (x <= bestX) { dInC += d[y][x]; nInC++; } else { dOutC += d[y][x]; nOutC++; } }
+    dInC /= nInC ? nInC : 1; dOutC /= nOutC ? nOutC : 1;
+    double dInR = 0, dOutR = 0; uint32_t nInR = 0, nOutR = 0;
+    for (uint32_t y = 0; y < PROBE_H; ++y) for (uint32_t x = 0; x < PROBE_W; ++x) { if (y <= bestY) { dInR += d[y][x]; nInR++; } else { dOutR += d[y][x]; nOutR++; } }
+    dInR /= nInR ? nInR : 1; dOutR /= nOutR ? nOutR : 1;
+    const bool hitC = bestC > 4.0f && bestC > colBase * 6.0f && dOutC < 0.8 && dInC > dOutC * 4.0 + 1.0;
+    const bool hitR = bestR > 4.0f && bestR > rowBase * 6.0f && dOutR < 0.8 && dInR > dOutR * 4.0 + 1.0;
+    const bool hit = hitC || hitR;
+    if (hit) {
+        g_probeFlags[stage]++;
+        if (g_probeLogs++ < 200) logmsg("PROBE f%u stage %d (%s): STALE-OUTSIDE layout wall %s, k = %.3f x %.3f (wall %.1f/%.1f, in/out diff %.2f/%.2f | %.2f/%.2f, mean %.0f, dmean %.1f)", frame, stage,
+            stage == 0 ? "DLSS input" : (stage == 1 ? "output after DoF" : (stage == 2 ? "composite input" : "PRESENTED BACKBUFFER")), hitC ? (hitR ? "V+H" : "V") : "H", kx, kyv, bestC, bestR, dInC, dOutC, dInR, dOutR, mean, dmean);
+    }
+}
+
 // One warm-up step on a frame without a 3D scene: create the resources + the DLSS feature at the swapchain size (DLAA)
 // and run an evaluation on our own scratch textures. The game's state is restored afterwards (the draw goes on as usual).
 static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
@@ -1979,6 +2145,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                             static uint32_t nm = 0; if (nm++ < 20) logmsg("PostDof: f%u scene viewport %.0fx%.0f disagrees with the post chain (k %.3f -> %.0fx%.0f) - the game's DoF for this frame", g_frame, g_sceneVpFrame.width, g_sceneVpFrame.height, kx, kx * float(s.rt_w), ky * float(s.rt_h));
                         }
                         g_dofSkipFrame = s.vp_valid && kStable && (!subRect || g_cfgDofSubRect != 0);   // a resolution-step frame keeps the game's DoF: parts of its chain can disagree about the scale on that frame
+                        g_frameKStep = !kStable;
                         if (!kStable) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
                         if (subRect) {
                             g_dofSubRectFrames++;
@@ -2345,6 +2512,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     if (g_cfgTraceFreeze && drawIdx == 0) frz_record("f%u composite -> backbuffer samples %s (scene draws %u, depth-tested %u, injected %d, HUD draws %u)", g_frame, desc_str(dev, color).c_str(), g_sceneDrawsThisFrame, g_depthOnDrawsThisFrame, (int)g_injectedThisFrame, g_hudDrawsThisFrame);
     if (color.handle && color.handle != g_finalRt[0]) { g_finalRt[1] = g_finalRt[0]; g_finalRt[0] = color.handle; }
     if (color.handle && s.vp.width > 0) { g_gameVp[0] = s.vp.x; g_gameVp[1] = s.vp.y; g_gameVp[2] = s.vp.width; g_gameVp[3] = s.vp.height; }
+    if (g_cfgProbe && drawIdx == 0 && color.handle) { probe_dispatch(cmd, color, resource_usage::shader_resource_pixel, 2); restore_state(dev, cmd, s); }
     if (color.handle && g_sceneVpValid && g_dlssW && (uint32_t)(g_sceneVp.width + 0.5f) < g_dlssW) {   // composite of a DRS sub-rect: where does the scale live?
         static int dumps = 0;
         if (dumps < 3 && (g_frame % 90) == 0) {
@@ -2460,6 +2628,8 @@ static void reload_config()
         g_cfgDofJitterSign = GetPrivateProfileIntA("DLSS", "DofJitterSign", 1, g_iniPath);
         g_cfgDofSubRect = GetPrivateProfileIntA("DLSS", "DofSubRect", 1, g_iniPath);
         g_cfgPreWarm = GetPrivateProfileIntA("DLSS", "PreWarm", 1, g_iniPath);
+        g_cfgProbe = GetPrivateProfileIntA("DLSS", "Probe", 0, g_iniPath);
+        g_cfgDofStepFreeze = GetPrivateProfileIntA("DLSS", "DofStepFreeze", 1, g_iniPath);
         {   // TraceFrames=N (live): trace every full-frame draw for the next N frames (with TraceFreeze=1 the lines go to the log)
             static int lastTf = 0; const int tf = GetPrivateProfileIntA("DLSS", "TraceFrames", 0, g_iniPath);
             if (tf != lastTf) { lastTf = tf; if (tf > 0) { g_traceUntil = g_frame + (uint32_t)tf; logmsg("tracing the next %d frames (%u..%u)", tf, g_frame, g_traceUntil - 1); } }
@@ -2528,7 +2698,8 @@ static void frame_rollover()
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
-    g_noSceneFrames = g_depthOnDrawsThisFrame < 20 ? g_noSceneFrames + 1 : 0; g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    if (g_probeReady) { const uint32_t nxt = (g_probeSlot + 1) % 8; for (int st = 0; st < 4; ++st) probe_analyze(st, nxt); g_probeSlot = nxt; g_probeFrames++; }
+    g_frameKStep = false; g_noSceneFrames = g_depthOnDrawsThisFrame < 20 ? g_noSceneFrames + 1 : 0; g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2577,7 +2748,8 @@ static void frame_rollover()
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_dofCbValid ? "captured" : "none");
+        if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
@@ -2592,8 +2764,12 @@ static void frame_rollover()
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }
     if (g_frame % 120 == 0) reload_config();
 }
-static void on_present(command_queue* queue, swapchain*, const rect*, const rect*, uint32_t, const rect*)
+static void on_present(command_queue* queue, swapchain* sc, const rect*, const rect*, uint32_t, const rect*)
 {
+    if (g_cfgProbe && g_probeReady && queue && sc) {   // every presented frame, generated ones included
+        command_list* icl = queue->get_immediate_command_list();
+        if (icl) { resource bb = sc->get_current_back_buffer(); if (bb.handle) probe_dispatch(icl, bb, resource_usage::present, 3); }
+    }
     { static bool once = false; if (!once && queue) { once = true; ID3D12CommandQueue* q = reinterpret_cast<ID3D12CommandQueue*>(queue->get_native()); UINT64 hz = 0; if (q && SUCCEEDED(q->GetTimestampFrequency(&hz))) objmv::set_timestamp_frequency(hz); } }
     if (fg::status().swapchainProxied) return;
     frame_rollover();
