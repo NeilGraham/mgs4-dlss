@@ -419,13 +419,22 @@ With `PostDof=1` (live key, panel checkbox) the three draws are skipped - identi
 shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - the CoC constants (`cb0[8..17]`) and the depth copy are taken
 from the skipped CoC pass, and an exact HLSL transcription of the three passes (`dof_coc_cs`, `dof_gather_cs`,
 `dof_composite_cs`) runs on the DLSS output before it is copied back, so the blur is applied to the NR-processed image.
-Two things the game does around its DoF are handled explicitly: (1) while the scene is a dynamic-resolution sub-rect
-(the CoC pass's viewport is smaller than half the target - scene starts, heavy load) the game's own DoF is left in place
-for that frame, since the re-apply assumes the full grid; (2) overlays the game draws *after* its DoF combine and before
-the upscale into the final texture (title cards such as "Three Days Earlier", captions: 5-8-vertex quads into the graded
-scene texture whose input is not the scene) are replayed into a mask layer, and the composite keeps those pixels sharp -
-otherwise they would be blurred with the surface behind them. The stats line reports `PostDof: frames re-applied N,
-draws skipped M, skipped without re-apply K, sub-rect frames left to the game S, overlay draws masked O`; K should stay 0.
+Three things the game does around its DoF are handled explicitly: (1) dynamic-resolution sub-rect frames (scene
+starts, heavy load) are handled at the exact per-frame scale (see below); a frame where the scale *steps* keeps the
+game's DoF for that one frame (measured on the cemetery-entry ramp: the fallback flashes at +0.30 relative sharpness
+on step frames vs +0.75 when the step frame is handled at the new scale - parts of the chain can lag the step), as
+does a frame where the scene's viewport genuinely disagrees with the post chain's scale (a safety net); (2) overlays the game draws
+*after* its DoF combine and before the upscale into the final texture (title cards such as "Three Days Earlier",
+captions: 5-8-vertex quads into the graded scene texture whose input is not the scene) are replayed into a mask layer,
+and the composite keeps those pixels sharp - otherwise they would be blurred with the surface behind them; (3) the
+2048x2048 capture of the final texture the cutscene WIPE transitions slide over the next shot at every cut is taken
+*before* the pre-HUD insertion - with PostDof the final texture has no blur yet at that point, so every cut flashed a
+sharp, DoF-less copy of the previous shot across the screen for the wipe's ~4 frames (found by scanning 4K60 display
+captures for high-frequency-energy jumps: every flash lined up with a camera-cut history reset in the log). The
+capture draw's SRV is redirected in place to the previous frame's DLSS+DoF output - same size, one frame stale, and
+the wipe shows the previous shot anyway. The stats line reports `PostDof: frames re-applied N,
+draws skipped M, skipped without re-apply K, sub-rect frames left to the game S, overlay draws masked O, wipe captures
+redirected W`; K should stay 0.
 Debug views: `DebugMode=10` the blurred layer, `11` its coverage, `12` the overlay mask.
 Dynamic resolution: the CoC pass's viewport is exactly half the scene sub-rect, so the scale is known per frame
 without the add-on's 20-frame viewport hysteresis; the depth sample, the spiral step and the overlay mask are scaled by

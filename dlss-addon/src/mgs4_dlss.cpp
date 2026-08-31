@@ -265,6 +265,7 @@ static bool g_frozen = false;                    // the world stopped through th
 // A full-size copy of the DLSS output is kept at the capture and the game's seed blit is redirected to sample it.
 static resource g_keep = { 0 }; static resource_usage g_keepState = resource_usage::copy_dest;
 static uint64_t g_keepSeed = 0; static bool g_keepValid = false; static uint32_t g_keepRedirects = 0;
+static uint32_t g_wipeRedirects = 0;   // cutscene captures of the final texture redirected to the previous frame's DLSS+DoF output (the WIPE transitions display them; pre-insertion the final texture has no DoF)
 static bool g_freshWrite = false;                // this frame the final texture received a scene write from a live source (geometry target, video)
 static uint32_t g_frozenPassFrames = 0;
 // Discontinuities in what DLSS sees: after a pass-through frame, or when the insertion switches between the final
@@ -2138,15 +2139,18 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         const float kx = s.vp_valid ? s.vp.width * 2.0f / float(s.rt_w) : 1.0f, ky = s.vp_valid ? s.vp.height * 2.0f / float(s.rt_h) : 1.0f;
                         const bool subRect = !s.vp_valid || kx < 0.999f || ky < 0.999f;
                         g_dofKx = (s.vp_valid && kx > 0.05f) ? (kx > 1.0f ? 1.0f : kx) : 1.0f; g_dofKy = (s.vp_valid && ky > 0.05f) ? (ky > 1.0f ? 1.0f : ky) : 1.0f;
-                        static float lastKx = 1.0f, lastKy = 1.0f; bool kStable = kx == lastKx && ky == lastKy; lastKx = kx; lastKy = ky;
-                        // the frame before a detected step: the scene already rendered at the new size while the post chain still runs at the old one
-                        if (kStable && g_sceneVpFrameValid && s.vp_valid && (fabsf(g_sceneVpFrame.width - kx * float(s.rt_w)) > 2.0f || fabsf(g_sceneVpFrame.height - ky * float(s.rt_h)) > 2.0f)) {
-                            kStable = false;
-                            static uint32_t nm = 0; if (nm++ < 20) logmsg("PostDof: f%u scene viewport %.0fx%.0f disagrees with the post chain (k %.3f -> %.0fx%.0f) - the game's DoF for this frame", g_frame, g_sceneVpFrame.width, g_sceneVpFrame.height, kx, kx * float(s.rt_w), ky * float(s.rt_h));
-                        }
-                        g_dofSkipFrame = s.vp_valid && kStable && (!subRect || g_cfgDofSubRect != 0);   // a resolution-step frame keeps the game's DoF: parts of its chain can disagree about the scale on that frame
-                        g_frameKStep = !kStable;
-                        if (!kStable) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
+                        static float lastKx = 1.0f, lastKy = 1.0f; const bool kStep = kx != lastKx || ky != lastKy; lastKx = kx; lastKy = ky;
+                        // A resolution-step frame keeps the game's DoF for that one frame (measured on 4K60 display
+                        // captures of the cemetery entry ramp: the fallback flashes at +0.30 relative sharpness on the
+                        // step frames, handling them at the new scale flashed at +0.75 - parts of the chain can lag the
+                        // step by a frame). A genuine disagreement between the scene's viewport and the post chain's
+                        // scale (never observed since the CoC-viewport step check landed, kept as a safety net) also
+                        // falls back to the game's DoF.
+                        bool mismatch = !kStep && g_sceneVpFrameValid && s.vp_valid && (fabsf(g_sceneVpFrame.width - kx * float(s.rt_w)) > 2.0f || fabsf(g_sceneVpFrame.height - ky * float(s.rt_h)) > 2.0f);
+                        if (mismatch) { static uint32_t nm = 0; if (nm++ < 20) logmsg("PostDof: f%u scene viewport %.0fx%.0f disagrees with the post chain (k %.3f -> %.0fx%.0f) - the game's DoF for this frame", g_frame, g_sceneVpFrame.width, g_sceneVpFrame.height, kx, kx * float(s.rt_w), ky * float(s.rt_h)); }
+                        g_dofSkipFrame = s.vp_valid && !kStep && !mismatch && (!subRect || g_cfgDofSubRect != 0);
+                        g_frameKStep = kStep || mismatch;
+                        if (kStep) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
                         if (subRect) {
                             g_dofSubRectFrames++;
                             static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u -> k %.3f x %.3f) - %s", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_dofKx, g_dofKy, g_dofSkipFrame ? "handled at that scale" : "the game's DoF stays");
@@ -2329,6 +2333,26 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         cmd->barrier(g_keep, resource_usage::copy_dest, resource_usage::shader_resource); g_keepState = resource_usage::shader_resource;
                         g_keepSeed = s.rt.handle; g_keepValid = true;
                     } else g_keepValid = false;
+                }
+                // Cutscene capture of the final texture (the 2048x2048 one the WIPE transitions slide over the next shot
+                // at every cut, and the camera-blur feedback): it samples the final texture BEFORE the pre-HUD insertion,
+                // and with PostDof the blur only exists in the DLSS output after that insertion - so every wipe flashed a
+                // sharp, DoF-less copy of the previous shot across the screen (~4 frames per cut; the "blur collapses to a
+                // corner" flashes). Redirect the capture to the previous frame's DLSS+DoF output: same size, one frame
+                // stale - and the wipe shows the previous shot anyway.
+                if (idx >= 0 && !halfSize && g_cfgPostDof && g_dofSkipFrame && g_dofSeenThisFrame && !g_injectedThisFrame && !g_windowInjectedThisFrame
+                    && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode == 0 && g_out.handle && g_evalCount > 2 && g_dofFrames > 0 && g_dlssOutW && is_live(g_finalSceneRt)) {
+                    // g_dofFrames > 0: before the first real re-apply, g_out holds the pre-warm scratch evaluation - never hand that to a capture
+                    const resource_desc fd = dev->get_resource_desc(resource{ g_finalSceneRt });
+                    if (fd.texture.width == g_dlssOutW && fd.texture.height == g_dlssOutH) {
+                        uint64_t cpu = 0, size = 0; D3D12_DESCRIPTOR_HEAP_TYPE type;
+                        if (table_to_cpu(dev, s.tables[param], idx, &cpu, &size, &type) && type == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV) {
+                            if (g_outState != resource_usage::shader_resource_pixel) { cmd->barrier(g_out, g_outState, resource_usage::shader_resource_pixel); g_outState = resource_usage::shader_resource_pixel; }
+                            g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_out.handle), nullptr, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)cpu });
+                            g_wipeRedirects++;
+                            static uint32_t nlog = 0; if (nlog++ < 4) logmsg("PostDof: capture into %s (r%d[%d]) redirected to the previous DLSS+DoF output at frame %u (the wipe transitions show it)", desc_str(dev, s.rt).c_str(), param, idx, g_frame);
+                        }
+                    }
                 }
             }
             const bool uiCandidate = (!g_injectedThisFrame || g_finalPreHudThisFrame || g_windowInjectedThisFrame) && !depthOn && g_sceneDrawsThisFrame >= 20
@@ -2749,7 +2773,7 @@ static void frame_rollover()
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
