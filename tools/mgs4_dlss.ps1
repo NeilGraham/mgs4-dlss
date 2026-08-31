@@ -5,7 +5,7 @@
 #   mgs4-dlss s02a50l_D1                     boot that scene, no window
 #   mgs4-dlss --main                         straight to MGS4's main menu (past the collection screen)
 #   mgs4-dlss --list naomi                   what can be launched
-#   mgs4-dlss --install                      the window, on the install check
+#   mgs4-dlss --setup                        the window, on Setup (game folder + install check)
 #   mgs4-dlss --report                       the install check as text, for pasting into an issue
 #   mgs4-dlss s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
 #   mgs4-dlss --set FrameGen=0 --set Mode=Quality
@@ -79,7 +79,7 @@ function Read-Options([string[]]$argv) {
         elseif ($a -match '^--(ui|window)$')              { $o.Action = "ui"; $took = $false }
         elseif ($a -match '^--list$')                     { $o.Action = "list"; $took = $false }
         elseif ($a -match '^--(show-settings|settings)$') { $o.Action = "settings"; $took = $false }
-        elseif ($a -match '^--(install|check|check-install)$') { $o.Action = "install"; $took = $false }
+        elseif ($a -match '^--(setup|install|check|check-install)$') { $o.Action = "install"; $took = $false }
         elseif ($a -match '^--report$')                   { $o.Action = "report"; $took = $false }
         elseif ($a -match '^--stop$')                     { $o.Action = "stop"; $took = $false }
         elseif ($a -match '^--main$')                     { $o.Stage = "@main"; $took = $false }
@@ -136,7 +136,7 @@ MGS4 DLSS - start the game or one scene of it, set the add-on up, check the inst
   mgs4-dlss --main                  MGS4's own main menu, past the Master Collection screen
   mgs4-dlss --collection            the Master Collection launcher
   mgs4-dlss --list [text]           every launchable scene (filtered by id / name / act)
-  mgs4-dlss --install               the window, opened on the install check
+  mgs4-dlss --setup                 the window, opened on Setup: the game folder and the install check
                                         (the first run opens there anyway; later ones open on Play)
   mgs4-dlss --report                the install check as text, for pasting into an issue
   mgs4-dlss <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
@@ -421,6 +421,36 @@ function Set-Ini([string]$path, [hashtable]$values) {
 }
 
 function Test-GameRunning { return [bool](Get-Process mgs4 -ErrorAction SilentlyContinue) }
+
+# Where the game folder came from, for the Setup tab to say so.
+function Get-GameDirSource {
+    if ([Environment]::GetEnvironmentVariable("MGS4_DIR")) { return "from the MGS4_DIR environment variable" }
+    if ((Get-Mgs4ConfigValues)["MGS4_DIR"]) { return "from config.ini" }
+    return "found in the Steam libraries"
+}
+
+# The one place the app writes it. config.ini is git-ignored and is what every script in the repo already asks.
+function Set-ConfiguredGameDir([string]$dir) {
+    $path = $Mgs4Config
+    $lines = @()
+    if (Test-Mgs4Path $path) { $lines = @(Get-Content -LiteralPath $path) }
+    $done = $false
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*;?\s*MGS4_DIR\s*=\s*(.*)$') {   # the shipped example is commented out; take it over
+            $lines[$i] = $(if ($dir) { "MGS4_DIR=$dir" } else { ";MGS4_DIR=" + $Matches[1] })
+            $done = $true
+            break
+        }
+    }
+    if (-not $done -and $dir) {
+        if ($lines.Count -eq 0) {
+            $lines = @("; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key.")
+        }
+        $lines += "MGS4_DIR=$dir"
+    }
+    Set-Content -LiteralPath $path -Value $lines -Encoding UTF8
+    return $path
+}
 
 # ---------------------------------------------------------------------------------------------- input
 
@@ -787,13 +817,12 @@ function Write-SceneList($filter) {
 }
 
 function Write-SettingsReport($gameDir) {
-    $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
     Write-Host "mgs4_dlss.ini: $ini"
     if (-not (Test-Mgs4Path $ini)) { Write-Host "  (not there - copy dlss-addon\mgs4_dlss.ini next to mgs4.exe)"; return }
     $group = ""
     foreach ($s in $script:IniSpec) {
         if ($s.Group -ne $group) { $group = $s.Group; Write-Host ""; Write-Host "[$group]" }
-        $v = Get-IniValue $ini $s.Key
+        $v = Get-IniValue (Join-Mgs4Path $state.GameDir "mgs4_dlss.ini") $s.Key
         if ($null -eq $v) { $v = "(unset)" }
         Write-Host ("  {0,-22} {1,-12} {2}" -f $s.Key, $v, $s.Label)
     }
@@ -804,7 +833,6 @@ function Write-SettingsReport($gameDir) {
 }
 
 function Set-SettingsFromCli($gameDir, $sets) {
-    $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
     if (Test-GameRunning) {
         Write-Host "mgs4.exe is running - it rewrites mgs4_dlss.ini through the profile API and would undo this. Close it first." -ForegroundColor Yellow
         return 1
@@ -987,6 +1015,32 @@ $script:Xaml = @'
       <Setter Property="Padding" Value="10,3"/>
       <Setter Property="FontSize" Value="11"/>
     </Style>
+    <Style x:Key="Chip" TargetType="ToggleButton">
+      <Setter Property="Foreground" Value="#858D9E"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,0,6,6"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ToggleButton">
+            <Border x:Name="b" CornerRadius="4" Background="#12151D" BorderBrush="#2A3040" BorderThickness="1"
+                    Padding="10,4">
+              <ContentPresenter VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="BorderBrush" Value="#3E4A66"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#25335C"/>
+                <Setter TargetName="b" Property="BorderBrush" Value="#4E6DE8"/>
+                <Setter Property="Foreground" Value="#CBD8FF"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style x:Key="Nav" TargetType="RadioButton">
       <Setter Property="Foreground" Value="#858D9E"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -1012,19 +1066,21 @@ $script:Xaml = @'
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- No padding on the border: it ate the height the text needed, so a box with a set height clipped whatever was
+         typed into it. The content host is inset horizontally and centred vertically instead, which cannot clip. -->
     <Style TargetType="TextBox">
       <Setter Property="Foreground" Value="#E7EAF0"/>
       <Setter Property="CaretBrush" Value="#E7EAF0"/>
       <Setter Property="Background" Value="#12151D"/>
       <Setter Property="BorderBrush" Value="#333A4D"/>
       <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Padding" Value="8,5"/>
+      <Setter Property="MinHeight" Value="30"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
             <Border CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="1" Padding="{TemplateBinding Padding}">
-              <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+                    BorderThickness="1">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="9,0" VerticalAlignment="Center"/>
             </Border>
           </ControlTemplate>
         </Setter.Value>
@@ -1175,7 +1231,7 @@ $script:Xaml = @'
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
           <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="Settings" GroupName="nav"/>
-          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="Install" GroupName="nav"/>
+          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="Setup" GroupName="nav"/>
         </StackPanel>
         <Border x:Name="Pill" Grid.Column="2" CornerRadius="8" Padding="16,9" Background="#161B2A" BorderBrush="#33436E"
                 BorderThickness="1" VerticalAlignment="Center" MinWidth="150">
@@ -1204,18 +1260,14 @@ $script:Xaml = @'
           </Grid.RowDefinitions>
           <Border Grid.Row="0" Background="#1B1F29" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
                   CornerRadius="10,10,0,0" Padding="14,12">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-              </Grid.ColumnDefinitions>
-              <Grid Grid.Column="0" Margin="0,0,10,0">
-                <TextBox x:Name="Search" Height="30"/>
+            <StackPanel>
+              <Grid>
+                <TextBox x:Name="Search"/>
                 <TextBlock x:Name="SearchHint" Text="Search by scene name, stage id or act" FontSize="12"
                            Foreground="#5C6478" IsHitTestVisible="False" VerticalAlignment="Center" Margin="10,0,0,0"/>
               </Grid>
-              <ComboBox x:Name="KindFilter" Grid.Column="1" Width="170" Height="30"/>
-            </Grid>
+              <WrapPanel x:Name="Filters" Margin="0,10,0,-6"/>
+            </StackPanel>
           </Border>
           <ListBox x:Name="SceneList" Grid.Row="1" Margin="0,4,0,6"/>
         </Grid>
@@ -1432,6 +1484,67 @@ $script:StatusStyle = @{
     info = @{ Glyph = [char]0x25CF; Fg = "#7C9CFF"; Bg = "#161B2A"; Br = "#33436E" }
 }
 
+# The Setup tab's first card: which folder everything else is checked against, and how to change it.
+function New-GameDirCard($state) {
+    $ok = [bool]$state.GameDir
+    $c = New-Card "Game folder" $(if ($ok) { Get-GameDirSource } else { "not set" }) `
+                  $(if ($ok) { "ok" } else { "bad" }) $(if ($ok) { "found" } else { "not set" })
+
+    $row = New-Object System.Windows.Controls.Border
+    $row.Padding = New-Object System.Windows.Thickness 18, 13, 18, 13
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $path = New-TextBlock $(if ($ok) { $state.GameDir } else { "no mgs4.exe found - pick the folder that holds it" }) `
+                          12 $(if ($ok) { "#7C9CFF" } else { "#FF7B72" }) $false $true
+    $path.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $path.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$g.Children.Add($path)
+
+    $buttons = New-Object System.Windows.Controls.StackPanel
+    $buttons.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+    $buttons.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+    $browse = New-Object System.Windows.Controls.Button
+    $browse.Content = "Browse..."
+    $browse.Style = $script:FlatStyle
+    $browse.Tag = $state
+    $browse.Add_Click({
+        $st = $this.Tag
+        $dlg = New-Object Microsoft.Win32.OpenFileDialog
+        $dlg.Title = "Pick mgs4.exe"
+        $dlg.Filter = "mgs4.exe|mgs4.exe|Any program (*.exe)|*.exe"
+        $dlg.CheckFileExists = $true
+        if ($st.GameDir) { $dlg.InitialDirectory = $st.GameDir }
+        if ($dlg.ShowDialog() -eq $true) { & $st.ApplyGameDir ([IO.Path]::GetDirectoryName($dlg.FileName)) }
+    })
+    [void]$buttons.Children.Add($browse)
+
+    $auto = New-Object System.Windows.Controls.Button
+    $auto.Content = "Detect"
+    $auto.Style = $script:FlatStyle
+    $auto.Margin = New-Object System.Windows.Thickness 8, 0, 0, 0
+    $auto.Tag = $state
+    $auto.ToolTip = "Forget the configured folder and search the Steam libraries again"
+    $auto.Add_Click({
+        $st = $this.Tag
+        [void](Set-ConfiguredGameDir "")          # stop pinning it, then look again - and leave it unpinned
+        $found = $null
+        try { $found = Get-Mgs4GameDir } catch { }
+        & $st.ApplyGameDir $found $false
+    })
+    [void]$buttons.Children.Add($auto)
+
+    [System.Windows.Controls.Grid]::SetColumn($buttons, 1)
+    [void]$g.Children.Add($buttons)
+    $row.Child = $g
+    [void]$c.Body.Children.Add($row)
+    return $c.Card
+}
+
 function New-Card($title, $blurb, $tagKind, $tagLabel) {
     $card = New-Object System.Windows.Controls.Border
     $card.Background = ConvertTo-Brush "#171A21"
@@ -1467,7 +1580,7 @@ function New-Card($title, $blurb, $tagKind, $tagLabel) {
         $tag.Background = ConvertTo-Brush $st.Bg
         $tag.BorderBrush = ConvertTo-Brush $st.Br
         $tag.BorderThickness = New-Object System.Windows.Thickness 1
-        $tag.CornerRadius = New-Object System.Windows.CornerRadius 20
+        $tag.CornerRadius = New-Object System.Windows.CornerRadius 4
         $tag.Padding = New-Object System.Windows.Thickness 12, 4, 12, 4
         $tag.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
         $tag.Child = (New-TextBlock $tagLabel 11 $st.Fg $true $false)
@@ -1536,8 +1649,36 @@ function New-CheckRow($row, $first) {
     return $rb
 }
 
+# Windows groups taskbar buttons by AppUserModelID, and a process that never sets one inherits its host's - which
+# is why the window sat under "Windows PowerShell". Claiming an id of our own, before any window exists, makes it a
+# separate taskbar entry named after the window instead.
+function Set-AppUserModelId([string]$id) {
+    try {
+        Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Mgs4AppId {
+  [DllImport("shell32.dll", CharSet=CharSet.Unicode, PreserveSig=false)]
+  public static extern void SetCurrentProcessExplicitAppUserModelID(string appId);
+}
+"@ -ErrorAction SilentlyContinue
+        [Mgs4AppId]::SetCurrentProcessExplicitAppUserModelID($id)
+    } catch { }
+}
+
 function Show-AppWindow($opt, $gameDir, $startTab) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+    Set-AppUserModelId "NeilGraham.Mgs4Dlss"
+
+    # Every scriptblock below is closed with GetNewClosure(), which binds it to its own dynamic module - so
+    # $script:... and the automatic variables inside one are NOT this scope's. Anything shared is captured here,
+    # above every closure that uses it: a local declared later would be captured as $null.
+    $spec = $script:IniSpec
+    $selfPath = $PSCommandPath
+    # GameDir lives in $state because the Setup tab can repoint it while the window is open; every closure below
+    # reads $state.GameDir rather than closing over the value it had at startup.
+    $state = @{ Controls = @(); RunProc = $null; Sections = $null; Collapsed = @{}; PickedId = ""
+                GameDir = $gameDir }
+
 
     $win = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader ([xml]$script:Xaml)))
     Add-Type -Namespace Mgs4 -Name Dwm -MemberDefinition @'
@@ -1555,20 +1696,24 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $ui = @{}
     foreach ($n in @("GamePath", "Caption", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
-                     "Search", "SearchHint", "KindFilter", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
+                     "Search", "SearchHint", "Filters", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
                      "Status", "ShortcutBtn", "ReloadBtn", "SaveBtn", "SettingsHost", "LockBanner", "LockText")) {
         $ui[$n] = $win.FindName($n)
     }
     $script:LinkStyle = $win.FindResource("Link")
-    Set-WindowIcon $win $gameDir
-    $ui.GamePath.Text = $(if ($gameDir) { $gameDir }
-                          elseif ($opt.GameDirBad) { "no mgs4.exe in $($opt.GameDirBad) - see the Install tab" }
-                          else { "no MGS4 install found - see the Install tab" })
-    $ui.GamePath.ToolTip = $ui.GamePath.Text
+    $script:FlatStyle = $win.FindResource("Flat")
+    Set-WindowIcon $win $state.GameDir
+
+    $refreshGamePath = {
+        $ui.GamePath.Text = $(if ($state.GameDir) { $state.GameDir }
+                              elseif ($opt.GameDirBad) { "no mgs4.exe in $($opt.GameDirBad) - see Setup" }
+                              else { "no MGS4 install found - see Setup" })
+        $ui.GamePath.ToolTip = $ui.GamePath.Text
+    }.GetNewClosure()
+    & $refreshGamePath
     $ui.SceneList.ItemTemplate = [Windows.Markup.XamlReader]::Parse($script:ItemTemplateXaml)
 
-    $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
     $pad = Open-Pad
     [Mgs4Pad]::Close()
     $ui.MashNote.Text = if ($pad.Ok) {
@@ -1577,46 +1722,49 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         "Needs ViGEmBus and ViGEmClient.dll ($($pad.Why)). Without them the launcher can only press Enter, which gets past the prompts but does not fire the flashbacks."
     }
 
-    # Every scriptblock below is closed with GetNewClosure(), which binds it to its own dynamic module - so
-    # $script:... and the automatic variables inside one are NOT this scope's. Anything shared is captured here,
-    # above every closure that uses it: a local declared later would be captured as $null.
-    $spec = $script:IniSpec
-    $selfPath = $PSCommandPath
-    $state = @{ Controls = @(); RunProc = $null; Sections = $null; Collapsed = @{}; PickedId = "" }
-
     # ------------------------------------------------------------------ the scene list
     # Rows are act headers and scenes in one list: the ListBox item template shows whichever half the row says,
     # which keeps the grouping without a DataTemplateSelector.
+    # Which of the filter chips a scene answers to. Worked out once here, so filtering is a set test rather than a
+    # predicate run over four hundred rows on every keystroke.
+    $catsOf = {
+        param($e)
+        $c = @()
+        if ($e.Kind -eq "start") { $c += "Start the game" }
+        if ($e.Kind -eq "cutscene" -or $e.Kind -eq "briefing") { $c += "Cutscenes" }
+        if ($e.Kind -eq "briefing") { $c += "Mission briefings" }
+        if ($e.Name) { $c += "Named scenes" }
+        if ($e.Kind -eq "gameplay") { $c += "Gameplay" }
+        if ($e.Kind -eq "stage-entry") { $c += "Stage entries" }
+        if ($e.Hidden) { $c += "Known broken" }
+        return $c
+    }
     $all = @(Get-SceneCatalogue | ForEach-Object {
         [pscustomobject]@{
             Entry = $_
             Id = $_.Id; Kind = $_.Kind; ActKey = $_.ActKey; Name = $_.Name; Hidden = $_.Hidden
             Title = $(if ($_.Name) { $_.Name } else { $_.Id })
             Sub = $(if ($_.Description) { $_.Description } else { $_.Note })
+            Cats = @(& $catsOf $_)
             Hay = "$($_.Id) $($_.Alts -join ' ') $($_.Name) $($_.ActTitle) $($_.Kind) $($_.Description)".ToLower()
         }
     })
     $actOrder = $script:ActOrder        # populated by Get-SceneCatalogue, just above
     $actTitles = $script:ActTitles
-    $kinds = [ordered]@{
-        "Everything"        = { $true }
-        "Start the game"    = { $_.Kind -eq "start" }
-        "Cutscenes"         = { $_.Kind -eq "cutscene" -or $_.Kind -eq "briefing" }
-        "Mission briefings" = { $_.Kind -eq "briefing" }
-        "Named scenes"      = { $_.Name -ne "" }
-        "Gameplay"          = { $_.Kind -eq "gameplay" }
-        "Stage entries"     = { $_.Kind -eq "stage-entry" }
-        "Known broken"      = { $_.Hidden }
-    }
-    foreach ($k in $kinds.Keys) { [void]$ui.KindFilter.Items.Add($k) }
-    $ui.KindFilter.SelectedIndex = 0
+    $catNames = @("Start the game", "Cutscenes", "Mission briefings", "Named scenes", "Gameplay", "Stage entries",
+                  "Known broken")
 
     $applyFilter = {
         $q = $ui.Search.Text.Trim().ToLower()
         $ui.SearchHint.Visibility = $(if ($ui.Search.Text) { "Collapsed" } else { "Visible" })
-        $pick = "$($ui.KindFilter.SelectedItem)"
-        $rows = @($all | Where-Object $kinds[$pick])
-        if ($pick -ne "Known broken") { $rows = @($rows | Where-Object { -not $_.Hidden }) }
+
+        # No chip ticked means everything (bar the broken ids); ticking chips shows the union of what they cover.
+        $picked = @($ui.Filters.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
+        $rows = $all
+        if ($picked.Count) {
+            $rows = @($rows | Where-Object { @($_.Cats | Where-Object { $picked -contains $_ }).Count -gt 0 })
+        }
+        if ($picked -notcontains "Known broken") { $rows = @($rows | Where-Object { -not $_.Hidden }) }
         if ($q) { $rows = @($rows | Where-Object { $_.Hay.Contains($q) }) }
 
         # A search is a request to see what matched, so it overrides the collapsed groups.
@@ -1637,7 +1785,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         $shown = @($rows).Count
         $ui.Status.Text = "$shown of $($all.Count) entries" +
-                          $(if ($pick -eq "Known broken") { " - these crash or come up black" } else { "" })
+                          $(if ($picked.Count) { " - " + ($picked -join ", ") } else { "" })
     }.GetNewClosure()
 
     # Clicking an act header expands or collapses it rather than picking anything.
@@ -1691,7 +1839,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         if ($sel) {
             $ui.PickTitle.Text = $sel.Title
             $ui.PickSub.Text = $sel.Sub
-            $ui.LaunchBtn.IsEnabled = [bool]$gameDir
+            $ui.LaunchBtn.IsEnabled = [bool]$state.GameDir
             $ui.ShortcutBtn.IsEnabled = $true
             $ui.CmdPreview.Text = Format-CliPreview (Get-CliArgs (& $collect))
 
@@ -1702,8 +1850,8 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $warn = ""
             if ($isStart) { $warn = "The run options below are for scenes; the game is started and left alone here." }
             # Frame generation on MGS4's own menu loses the device on most launches (not all - it is a race).
-            if ($sel.Id -eq "@main" -and $gameDir) {
-                $fgm = Get-IniValue (Join-Mgs4Path $gameDir "mgs4_dlss.ini") "FrameGen"
+            if ($sel.Id -eq "@main" -and $state.GameDir) {
+                $fgm = Get-IniValue (Join-Mgs4Path $state.GameDir "mgs4_dlss.ini") "FrameGen"
                 if ($fgm -and $fgm -ne "0") {
                     $warn = "Frame generation (FrameGen=$fgm) crashes the game on this menu most of the time: " +
                             "sl.dlss_g stops evaluating and the device is lost within a minute. Set it to 0 on the " +
@@ -1741,7 +1889,8 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = $true }
         }
         Save-Prefs ([pscustomobject]@{
-            Stage = $state.PickedId; Kind = "$($ui.KindFilter.SelectedItem)"
+            Stage = $state.PickedId
+            Filters = @($ui.Filters.Children | Where-Object { $_.IsChecked } | ForEach-Object { "$($_.Tag)" })
             Advance = [bool]$ui.OptAdvance.IsChecked; MashX = [bool]$ui.OptMashX.IsChecked
             EndOnGameplay = [bool]$ui.OptEnd.IsChecked; Hold = [bool]$ui.OptHold.IsChecked
             HoldSecs = $ui.HoldSecs.Text; Res = [bool]$ui.OptRes.IsChecked
@@ -1776,7 +1925,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
 
             $first = $true
             foreach ($s in ($spec | Where-Object { $_.Group -eq $g })) {
-                $cur = Get-IniValue $ini $s.Key
+                $cur = Get-IniValue (Join-Mgs4Path $state.GameDir "mgs4_dlss.ini") $s.Key
                 $row = New-Object System.Windows.Controls.Border
                 $row.Padding = New-Object System.Windows.Thickness 18, 11, 18, 11
                 if (-not $first) {
@@ -1853,7 +2002,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         if ($vals.Count -eq 0) { $ui.Status.Text = "settings unchanged"; return }
         try {
-            Set-Ini $ini $vals
+            Set-Ini (Join-Mgs4Path $state.GameDir "mgs4_dlss.ini") $vals
             $ui.Status.Text = "wrote " + (($vals.Keys | Sort-Object) -join ", ") + " to mgs4_dlss.ini"
             & $buildSettings
         } catch {
@@ -1879,9 +2028,9 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PillText.Foreground = ConvertTo-Brush "#7C9CFF"
         }
         $ui.StopBtn.IsEnabled = $running -or $busy
-        $ui.SaveBtn.IsEnabled = (-not $running) -and [bool]$gameDir
+        $ui.SaveBtn.IsEnabled = (-not $running) -and [bool]$state.GameDir
             if ($ui.SettingsView.Visibility -eq [System.Windows.Visibility]::Visible) {
-            if (-not $gameDir) {
+            if (-not $state.GameDir) {
                 $ui.LockText.Text = "No MGS4 install found, so there is no mgs4_dlss.ini to read or write. The Install tab says what was looked for."
                 $ui.LockBanner.Visibility = [System.Windows.Visibility]::Visible
             } elseif ($running) {
@@ -1895,7 +2044,15 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
 
     # ------------------------------------------------------------------ wiring
     $ui.Search.Add_TextChanged($applyFilter)
-    $ui.KindFilter.Add_SelectionChanged($applyFilter)
+    foreach ($name in $catNames) {
+        $chip = New-Object System.Windows.Controls.Primitives.ToggleButton
+        $chip.Content = $name
+        $chip.Tag = $name
+        $chip.Style = $win.FindResource("Chip")
+        $chip.Add_Checked($applyFilter)
+        $chip.Add_Unchecked($applyFilter)
+        [void]$ui.Filters.Children.Add($chip)
+    }
     # Act headers are toggled here, before the ListBox gets the click, and the event is marked handled so a header
     # is never selected. Driving this from SelectionChanged instead used to fire twice on some clicks: rebuilding
     # the list inside the handler left the ListBox to finish its click against the rebuilt row, which selected the
@@ -1985,18 +2142,21 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         # Queued at Background priority, so the tab may have been left before this runs.
         if ($ui.InstallView.Visibility -ne [System.Windows.Visibility]::Visible) { return }
         $ui.InstallHost.Children.Clear()
-        if (-not $gameDir) {
+        if (-not $state.GameDir) {
+            [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
             $why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up."
             if ($opt.GameDirBad) { $why = "There is no mgs4.exe in $($opt.GameDirBad)." }
-            $c = New-Card "No MGS4 install found" ($why + " Set MGS4_DIR in config.ini (copy config.example.ini), " +
-                 "or start this with --game-dir ""<path to the MGS4 folder>"".") "bad" "nothing to check"
+            $c = New-Card "Nothing to check yet" ($why + " Point the app at the folder holding mgs4.exe with " +
+                 "Browse above, and everything below fills in.") "bad" "no game folder"
             [void]$ui.InstallHost.Children.Add($c.Card)
+            $ui.Status.Text = "no game folder set"
             return
         }
-        $sections = Invoke-InstallChecks -Game $gameDir
+        [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
+        $sections = Invoke-InstallChecks -Game $state.GameDir
         $state.Sections = $sections
         $v = Get-Verdict $sections
-        $vc = New-Card ("Install: " + $v.Text) $v.Note $v.Kind $v.Text
+        $vc = New-Card ("Install check: " + $v.Text) $v.Note $v.Kind $v.Text
         [void]$ui.InstallHost.Children.Add($vc.Card)
         foreach ($sec in $sections) {
             $bad = @($sec.Rows | Where-Object { $_.Status -eq "bad" }).Count
@@ -2021,7 +2181,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     # WPF paint, and do the work at Background priority once the frame is on screen.
     $showInstall = {
         $ui.InstallHost.Children.Clear()
-        $c = New-Card "Install" "Reading the files, the settings and the last run..." "info" "checking"
+        $c = New-Card "Setup" "Reading the files, the settings and the last run..." "info" "checking"
         [void]$ui.InstallHost.Children.Add($c.Card)
         $ui.Status.Text = "checking..."
         [void]$win.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [action]$buildInstall)
@@ -2039,7 +2199,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.ReloadBtn.Visibility = & $vis ($tab -eq "settings")
         $ui.CopyBtn.Visibility = & $vis ($tab -eq "install")
         $ui.RecheckBtn.Visibility = & $vis ($tab -eq "install")
-        $ui.Caption.Text = switch ($tab) { "settings" { "add-on settings" } "install" { "install check" } default { "start a scene" } }
+        $ui.Caption.Text = switch ($tab) { "settings" { "add-on settings" } "install" { "setup and install check" } default { "start a scene" } }
         if ($tab -eq "settings") { & $buildSettings }
         if ($tab -eq "install") { & $showInstall }
         & $refreshState
@@ -2048,10 +2208,41 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $ui.NavSettings.Add_Checked($showView)
     $ui.NavInstall.Add_Checked($showView)
 
+    # Repointing the game folder from the Setup tab. Reached through $state so New-GameDirCard's button can call it
+    # without this having to exist before the card builder does.
+    $state.ApplyGameDir = {
+        param($dir, $persist = $true)
+        if ($dir) {
+            $dir = $dir.TrimEnd('\')
+            if (Test-Mgs4Path (Join-Mgs4Path $dir "MGS4\mgs4.exe")) { $dir = Join-Mgs4Path $dir "MGS4" }
+            if (-not (Test-Mgs4Path (Join-Mgs4Path $dir "mgs4.exe"))) {
+                $ui.Status.Text = "no mgs4.exe in $dir"
+                return
+            }
+        }
+        $state.GameDir = $dir
+        $opt.GameDir = $dir
+        $opt.GameDirBad = ""
+        if ($persist) {
+            try {
+                $written = Set-ConfiguredGameDir $dir
+                $ui.Status.Text = "game folder saved to $written"
+            } catch {
+                $ui.Status.Text = "could not write config.ini: $($_.Exception.Message)"
+            }
+        } else {
+            $ui.Status.Text = $(if ($dir) { "found $dir - left to auto-detection" } else { "no MGS4 install found" })
+        }
+        Set-WindowIcon $win $dir
+        & $refreshGamePath
+        & $applyFilter
+        & $showInstall
+    }.GetNewClosure()
+
     $ui.RecheckBtn.Add_Click($showInstall)
     $ui.CopyBtn.Add_Click({
         if (-not $state.Sections) { return }
-        Set-Clipboard -Value (Format-TextReport $gameDir $state.Sections)
+        Set-Clipboard -Value (Format-TextReport $state.GameDir $state.Sections)
         $this.Content = "Copied"
         $t = New-Object System.Windows.Threading.DispatcherTimer
         $t.Interval = [TimeSpan]::FromSeconds(1.6)
@@ -2064,7 +2255,9 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $prefs = Read-Prefs
     $ui.OptAdvance.IsChecked = $true
     if ($prefs) {
-        if ($prefs.Kind -and $ui.KindFilter.Items.Contains($prefs.Kind)) { $ui.KindFilter.SelectedItem = $prefs.Kind }
+        if ($prefs.Filters) {
+            foreach ($chip in $ui.Filters.Children) { $chip.IsChecked = (@($prefs.Filters) -contains "$($chip.Tag)") }
+        }
         $ui.OptAdvance.IsChecked = [bool]$prefs.Advance
         $ui.OptMashX.IsChecked = [bool]$prefs.MashX
         $ui.OptEnd.IsChecked = [bool]$prefs.EndOnGameplay
@@ -2084,7 +2277,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         if ($entry) {
             $state.Collapsed[$entry.ActKey] = $false
             $state.PickedId = $entry.Id
-            if ($ui.KindFilter.Items.Contains("Everything")) { $ui.KindFilter.SelectedItem = "Everything" }
+            foreach ($chip in $ui.Filters.Children) { $chip.IsChecked = $false }   # so the scene is in view
         }
     }
     & $applyFilter

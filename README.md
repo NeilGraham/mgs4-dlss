@@ -54,14 +54,14 @@ ships with Windows and the `.bat` handles the execution policy — so it runs st
 | --- | --- |
 | **Play** | start the game, or any one of the 423 launchable scenes, with the automation the tests use |
 | **Settings** | `MGS4\mgs4_dlss.ini` as a form |
-| **Install** | which files are in place, what the settings say, what the add-on did on its last run |
+| **Setup** | the game folder, which files are in place, what the settings say, what the add-on did on its last run |
 
 ```bat
 mgs4-dlss                         :: the window
 mgs4-dlss s02a50l_D1              :: boot that scene and exit
 mgs4-dlss --main                  :: MGS4's own menu, past the Master Collection screen
 mgs4-dlss --list naomi            :: what can be launched
-mgs4-dlss --install               :: the window, opened on the install check
+mgs4-dlss --setup                 :: the window, opened on Setup (game folder + install check)
 mgs4-dlss --report                :: the install check as text, for pasting into an issue
 mgs4-dlss <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
 mgs4-dlss --set FrameGen=0        :: write ini keys without opening anything
@@ -84,11 +84,11 @@ works with either, since `mgs4-dlss` resolves to whichever is there.
 The exe passes arguments through and prints where you typed them, but cmd does not wait for a windowed program, so
 a script that needs to capture output or check an exit code should call `mgs4-dlss.bat` or `tools\mgs4_dlss.ps1`.
 
-Play, Settings and Install are tabs of the one window. The **first** run
-opens on Install, because the first thing anyone needs to know is whether the pieces are in place; after that it
-opens on Play. `--install` and `--settings` override that at any time.
+Play, Settings and Setup are tabs of the one window. The **first** run
+opens on Setup, because the first thing anyone needs to know is whether the pieces are in place; after that it
+opens on Play. `--setup` and `--settings` override that at any time.
 
-The window opens even when no MGS4 install can be found — it starts on Install and says which folder it looked in,
+The window opens even when no MGS4 install can be found — it starts on Setup and says which folder it looked in,
 which is the one case where a tool that needs the game folder still has to be useful.
 
 ### Play
@@ -107,6 +107,10 @@ that matched.
 **`tools\scene_info.json`** is where that lives: per stage id, which act it really belongs to, where it sorts inside
 it, what kind it is, a name and a one-line description of what you actually see. The stage table can say a scene
 exists; only booting it says what it is, so everything in that file was checked by launching it.
+
+The filter row under the search box is a checklist rather than a dropdown: nothing ticked shows everything (bar the
+known-broken ids), and ticking chips shows the union of what they cover - "Mission briefings" and "Start the game"
+together lists both, not their overlap.
 
 - **Mission briefings** are their own kind, sorted to the top of the act they lead into — the Nomad briefing before
   Act 2 sits above Act 2's own scenes. The Cutscenes filter includes them; "Mission briefings" shows only those.
@@ -182,11 +186,11 @@ Saving is blocked while the game is running, because the add-on owns that file t
 Windows profile API, whose cache will quietly undo an outside edit. While the game *is* up, the same keys are live in
 ReShade's overlay, Add-ons tab.
 
-### Install
+### Setup
 
 Most of the files this add-on needs cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and
 ReShade all have to be fetched from their own projects, so an install is assembled by hand and it is easy to end up
-one file short. The Install tab lists every required and optional file, what version it is, and a link to where each
+one file short. The Setup tab leads with the game folder everything is checked against - the path, where it came from, and a Browse button that records your choice as `MGS4_DIR` in `config.ini`. Below that it lists every required and optional file, what version it is, and a link to where each
 missing one comes from. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
 second monitor while files are dropped into the game folder, and **Copy report** puts the text form on the clipboard.
 
