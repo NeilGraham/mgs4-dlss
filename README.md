@@ -161,8 +161,22 @@ that matched.
 it, what kind it is, a name and a one-line description of what you actually see. The stage table can say a scene
 exists; only booting it says what it is, so everything in that file was checked by launching it.
 
+**Each row says what kind of scene it is.** A coloured badge sits between the stage id and the name, in the same
+colour families the rest of the window uses: green **Gameplay** for what you play, violet **Cutscene** for what you
+watch, amber **Briefing** for the Nomad briefings, blue **Stage** for a plain stage boot, sky **Start** for the two
+entries that start the game. The badge column is a fixed width, so the names line up down the list.
+
+**Favourites.** Every scene row has a star on the right: click the outline to add it, click the filled one to take
+it out. It is saved the moment it is clicked - not when the window closes - so a scene starred and a window shut
+straight after keeps it. The list of ids lives with the rest of the window's memory in
+`%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`.
+
+**Favourites** is also the first filter chip, and works like the others: nothing ticked shows everything, ticking
+chips shows the union of what they cover. **Start the game** is no longer a chip - the two entries it covered are
+an act of their own at the top of the list, so filtering for them only ever hid everything else.
+
 The filter row under the search box is a checklist rather than a dropdown: nothing ticked shows everything (bar the
-known-broken ids), and ticking chips shows the union of what they cover - "Mission briefings" and "Start the game"
+known-broken ids), and ticking chips shows the union of what they cover - "Mission briefings" and "Gameplay"
 together lists both, not their overlap.
 
 - **Mission briefings** are their own kind, sorted to the top of the act they lead into — the Nomad briefing before

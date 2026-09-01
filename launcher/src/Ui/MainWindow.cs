@@ -23,6 +23,9 @@ namespace Mgs4Launcher
         string _gameDir;
         List<Section> _sections;
         string _pickedId = "";
+        // Scene ids the user has starred. Kept in the preferences file next to everything else the window
+        // remembers, and written the moment a star is clicked rather than only when the window closes.
+        readonly HashSet<string> _favourites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, bool> _collapsed = new Dictionary<string, bool>();
         System.Diagnostics.Process _runProc;
 
@@ -77,6 +80,7 @@ namespace Mgs4Launcher
             _sceneList.ItemTemplate = (DataTemplate)XamlReader.Parse(Resource("SceneRow.xaml"));
 
             WireNav();
+            LoadFavourites();       // before the rows are built: each one is created knowing whether it is starred
             WirePlay();
             WireSettings();
             WireSetup();
@@ -217,6 +221,15 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------------------- prefs
 
+        void LoadFavourites()
+        {
+            Dictionary<string, object> p = Prefs.Read();
+            object list;
+            if (p == null || !p.TryGetValue("Favourites", out list) || !(list is object[])) return;
+            foreach (object o in (object[])list)
+                if (o != null) _favourites.Add(o.ToString());
+        }
+
         void RestorePrefs()
         {
             _optAdvance.IsChecked = true;
@@ -268,6 +281,7 @@ namespace Mgs4Launcher
             {
                 { "Stage", _pickedId },
                 { "Filters", filters },
+                { "Favourites", new List<string>(_favourites) },
                 { "Advance", _optAdvance.IsChecked == true },
                 { "MashX", _optMashX.IsChecked == true },
                 { "EndOnGameplay", _optEnd.IsChecked == true },

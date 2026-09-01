@@ -9,9 +9,34 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 
 namespace Mgs4Launcher
 {
+    // What a scene is, as a badge: a short word and a colour of its own, so the kind reads before the name does.
+    // The families are the ones the rest of the window already uses - green for what plays, violet for what is
+    // watched, amber for a briefing, blue for a plain stage boot, sky for the two entries that start the game.
+    class Badge
+    {
+        public string Text, Back, Edge, Ink;
+        public Badge(string text, string back, string edge, string ink)
+        { Text = text; Back = back; Edge = edge; Ink = ink; }
+
+        public static Badge For(string kind)
+        {
+            switch (kind)
+            {
+                case "gameplay":    return new Badge("Gameplay", "#12261A", "#1F6F43", "#5BD98A");
+                case "cutscene":    return new Badge("Cutscene", "#211A33", "#4B3E7A", "#B79CFF");
+                case "briefing":    return new Badge("Briefing", "#2A2312", "#7A6220", "#F2C14E");
+                case "start":       return new Badge("Start", "#10222B", "#2A5A73", "#7DD3FC");
+                case "stage-entry": return new Badge("Stage", "#161B2A", "#33436E", "#8FA6E8");
+                default:            return new Badge(string.IsNullOrEmpty(kind) ? "Scene" : kind,
+                                                     "#161B2A", "#33436E", "#8FA6E8");
+            }
+        }
+    }
+
     // One row of the scene list: either an act header or a scene, never both.
     public class SceneRow
     {
@@ -29,23 +54,38 @@ namespace Mgs4Launcher
         public List<string> Cats { get; set; }
         public string Hay { get; set; }
         public bool Hidden { get; set; }
+
+        public string BadgeText { get; set; }
+        public Brush BadgeBack { get; set; }
+        public Brush BadgeEdge { get; set; }
+        public Brush BadgeInk { get; set; }
+
+        // A filled star for a favourite, an outline for the rest. Both are one character wide, so the column does
+        // not shift as rows are starred.
+        public bool Favourite { get; set; }
+        public string Star { get { return Favourite ? "\u2605" : "\u2606"; } }
+        public Brush StarInk { get { return Widgets.Brush(Favourite ? "#F2C14E" : "#4A5163"); } }
+        public string StarTip { get { return Favourite ? "In Favourites - click to remove" : "Add to Favourites"; } }
     }
 
     partial class MainWindow
     {
+        // Favourites first, because it is the one a person curates. "Start the game" is not a chip: the two entries
+        // it covered are an act of their own at the top of the list, so a filter for them only ever hid the rest.
+        public const string FavouritesCat = "Favourites";
         static readonly string[] CatNames =
         {
-            "Start the game", "Cutscenes", "Mission briefings", "Named scenes", "Gameplay", "Stage entries", "Known broken"
+            FavouritesCat, "Cutscenes", "Mission briefings", "Named scenes", "Gameplay", "Stage entries", "Known broken"
         };
 
         List<SceneRow> _allRows;
 
         // Which of the filter chips a scene answers to. Worked out once, so filtering is a set test rather than a
         // predicate run over four hundred rows on every keystroke.
-        static List<string> CatsOf(Scene e)
+        List<string> CatsOf(Scene e)
         {
             var c = new List<string>();
-            if (e.Kind == "start") c.Add("Start the game");
+            if (_favourites.Contains(e.Id)) c.Add(FavouritesCat);
             if (e.Kind == "cutscene" || e.Kind == "briefing") c.Add("Cutscenes");
             if (e.Kind == "briefing") c.Add("Mission briefings");
             if (!string.IsNullOrEmpty(e.Name)) c.Add("Named scenes");
@@ -57,17 +97,26 @@ namespace Mgs4Launcher
 
         void WirePlay()
         {
-            _allRows = Catalogue.All().Select(e => new SceneRow
+            _allRows = Catalogue.All().Select(e =>
             {
-                IsHeader = false,
-                Entry = e,
-                Id = e.Id,
-                ActKey = e.ActKey,
-                Hidden = e.Hidden,
-                Title = string.IsNullOrEmpty(e.Name) ? e.Id : e.Name,
-                Sub = string.IsNullOrEmpty(e.Description) ? e.Note : e.Description,
-                Cats = CatsOf(e),
-                Hay = (e.Id + " " + string.Join(" ", e.Alts) + " " + e.Name + " " + e.ActTitle + " " + e.Kind + " " + e.Description).ToLowerInvariant(),
+                Badge badge = Badge.For(e.Kind);
+                return new SceneRow
+                {
+                    IsHeader = false,
+                    Entry = e,
+                    Id = e.Id,
+                    ActKey = e.ActKey,
+                    Hidden = e.Hidden,
+                    Title = string.IsNullOrEmpty(e.Name) ? e.Id : e.Name,
+                    Sub = string.IsNullOrEmpty(e.Description) ? e.Note : e.Description,
+                    Cats = CatsOf(e),
+                    Hay = (e.Id + " " + string.Join(" ", e.Alts) + " " + e.Name + " " + e.ActTitle + " " + e.Kind + " " + e.Description).ToLowerInvariant(),
+                    BadgeText = badge.Text,
+                    BadgeBack = Widgets.Brush(badge.Back),
+                    BadgeEdge = Widgets.Brush(badge.Edge),
+                    BadgeInk = Widgets.Brush(badge.Ink),
+                    Favourite = _favourites.Contains(e.Id),
+                };
             }).ToList();
 
             string padNote;
@@ -99,7 +148,16 @@ namespace Mgs4Launcher
                 var item = src as ListBoxItem;
                 if (item == null) return;
                 var row = item.DataContext as SceneRow;
-                if (row == null || !row.IsHeader) return;
+                if (row == null) return;
+
+                // The star is its own click: toggling a favourite must not also pick the scene.
+                if (!row.IsHeader && HitTheStar(e.OriginalSource))
+                {
+                    ToggleFavourite(row.Id);
+                    e.Handled = true;
+                    return;
+                }
+                if (!row.IsHeader) return;
                 _collapsed[row.ActKey] = !(_collapsed.ContainsKey(row.ActKey) && _collapsed[row.ActKey]);
                 e.Handled = true;
                 ApplyFilter();
@@ -153,6 +211,36 @@ namespace Mgs4Launcher
                 ShowPicked(entry);
             }
             else UpdatePreview();
+        }
+
+        // The star carries Tag="star" in the row template; nothing else in a row does.
+        static bool HitTheStar(object source)
+        {
+            var d = source as DependencyObject;
+            while (d != null)
+            {
+                var fe = d as FrameworkElement;
+                if (fe != null && (fe.Tag as string) == "star") return true;
+                if (d is ListBoxItem) return false;
+                d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+            }
+            return false;
+        }
+
+        void ToggleFavourite(string id)
+        {
+            if (!_favourites.Remove(id)) _favourites.Add(id);
+            foreach (SceneRow r in _allRows)
+            {
+                if (r.Id != id) continue;
+                r.Favourite = _favourites.Contains(id);
+                r.Cats = CatsOf(r.Entry);
+            }
+            SavePrefs();            // a starred scene should still be starred if the window is closed on the spot
+            ApplyFilter();
+            Say(_favourites.Contains(id)
+                ? id + " added to Favourites (" + _favourites.Count + ")"
+                : id + " removed from Favourites (" + _favourites.Count + ")");
         }
 
         void ApplyFilter()
