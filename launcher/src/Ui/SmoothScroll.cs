@@ -1,10 +1,15 @@
-// Wheel notches are eased toward a target offset; a precision touchpad is followed one to one.
+// Wheel notches and trackpad deltas both ease toward a target offset; only the time constant differs.
 //
 // WPF gives a notch three "lines" and applies it in one jump - and in a ListBox a "line" is a whole row, so the
 // scene list moved three scenes at a time. The step is taken on CompositionTarget.Rendering, the frame the
 // compositor is about to draw, and the distance covered depends on how long the frame took, so a dropped frame
 // costs no ground. A DispatcherTimer was the obvious way to do this and the wrong one: it runs at Background
 // priority, which measured 42 ticks a second with stalls to 147 ms, and every stall is a stutter.
+//
+// A precision touchpad reports the finger in deltas well under a notch, but it reports them in bursts rather than
+// evenly, so applying each one as it arrives reads as chunky however small it is. It gets the same easing with a
+// much shorter time constant: fast enough to stay under the finger, slow enough to smooth the bursts into a
+// scrub.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,11 +22,13 @@ namespace Mgs4Launcher
 {
     class SmoothScroll
     {
-        public static double Step = 72;     // pixels a wheel notch asks for
-        public static double Tau = 70;      // ms to cover 63% of the remaining distance, whatever the frame rate
+        public static double Step = 48;         // pixels a wheel notch asks for
+        public static double Tau = 70;          // ms to cover 63% of what is left, for a notch
+        public static double TauFine = 22;      // the same for a trackpad, where the finger is still moving
 
         readonly Dictionary<ScrollViewer, double> _targets = new Dictionary<ScrollViewer, double>();
         readonly Stopwatch _clock = Stopwatch.StartNew();
+        double _tau = Tau;
         bool _running;
 
         public static void Attach(Window win)
@@ -53,19 +60,16 @@ namespace Mgs4Launcher
             if (sv == null) return;             // nothing here scrolls - leave the event alone
             e.Handled = true;
 
-            Func<double, double> clamp = v => v < 0 ? 0 : v > sv.ScrollableHeight ? sv.ScrollableHeight : v;
-
-            // A precision touchpad reports the finger continuously, in deltas well under a notch. That stream is
-            // already smooth, and easing it would only add lag between the finger and the page.
-            if (Math.Abs(e.Delta) < 120)
-            {
-                _targets.Remove(sv);
-                sv.ScrollToVerticalOffset(clamp(sv.VerticalOffset - e.Delta / 120.0 * Step));
-                return;
-            }
+            // Anything under a full notch came from a precision touchpad: same distance per unit of movement,
+            // but caught up with far sooner, so the page stays under the finger.
+            _tau = Math.Abs(e.Delta) < 120 ? TauFine : Tau;
 
             double from = _targets.ContainsKey(sv) ? _targets[sv] : sv.VerticalOffset;
-            _targets[sv] = clamp(from - e.Delta / 120.0 * Step);
+            double to = from - e.Delta / 120.0 * Step;
+            if (to < 0) to = 0;
+            if (to > sv.ScrollableHeight) to = sv.ScrollableHeight;
+            _targets[sv] = to;
+
             if (!_running)
             {
                 _clock.Restart();
@@ -80,7 +84,7 @@ namespace Mgs4Launcher
             _clock.Restart();
             if (dt <= 0) return;
             if (dt > 200) dt = 200;             // after a long stall, glide the rest rather than teleporting
-            double f = 1.0 - Math.Exp(-dt / Tau);
+            double f = 1.0 - Math.Exp(-dt / _tau);
 
             var done = new List<ScrollViewer>();
             foreach (var kv in _targets)

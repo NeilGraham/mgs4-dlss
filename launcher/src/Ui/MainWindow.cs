@@ -69,6 +69,7 @@ namespace Mgs4Launcher
             Widgets.ChipStyle = (Style)Win.FindResource("Chip");
 
             Bind();
+            TitleBar.Follow(Win);
             Art.SetWindowIcon(Win, _gameDir);
             Art.ApplyHeader(Win, _logoArt, _titleText, _heroArt, _headerBar);
             SmoothScroll.Attach(Win);
@@ -83,6 +84,7 @@ namespace Mgs4Launcher
             RestorePrefs();
             RestoreSelection();
             ShowTab(startTab);
+            StartStatePolling();
             Win.Closing += (s, e) => SavePrefs();
         }
 
@@ -160,19 +162,52 @@ namespace Mgs4Launcher
 
             if (tab == "install") ShowSetup();
             else if (tab == "settings") BuildSettings();
-            UpdatePill();
+            RefreshState();
         }
 
-        // The pill in the header: what the game is doing, which is the one thing the window cannot infer.
-        void UpdatePill()
+        // The pill in the header, and everything else that depends on whether the game is up: what the window
+        // cannot infer, it polls for. Driven by a timer rather than by tab switches alone - the game can start or
+        // stop while the window sits there, and it did, which left the pill reading "idle" over a running game and
+        // Close the game pressable with nothing to close.
+        void RefreshState()
         {
             bool running = Checks.GameRunning();
-            _pillText.Text = running ? "running" : "idle";
-            _pillNote.Text = running ? "mgs4.exe is up" : "nothing is running";
-            StatusStyle st = Widgets.Status[running ? "ok" : "info"];
-            _pill.Background = Widgets.Brush(st.Bg);
-            _pill.BorderBrush = Widgets.Brush(st.Br);
-            _pillText.Foreground = Widgets.Brush(st.Fg);
+            bool busy = _runProc != null && !_runProc.HasExited;
+            string text, note, bg, br, fg;
+            if (busy) { text = "driving"; note = "the launcher is attached"; bg = "#251E10"; br = "#7A6027"; fg = "#F2C14E"; }
+            else if (running) { text = "running"; note = "mgs4.exe is up"; bg = "#152318"; br = "#2C6B45"; fg = "#5FD38D"; }
+            else { text = "idle"; note = "nothing is running"; bg = "#161B2A"; br = "#33436E"; fg = "#7C9CFF"; }
+            _pillText.Text = text;
+            _pillNote.Text = note;
+            _pill.Background = Widgets.Brush(bg);
+            _pill.BorderBrush = Widgets.Brush(br);
+            _pillText.Foreground = Widgets.Brush(fg);
+
+            _stopBtn.IsEnabled = running || busy;
+            _saveBtn.IsEnabled = !running && !string.IsNullOrEmpty(_gameDir);
+
+            if (_settingsView.Visibility == Visibility.Visible)
+            {
+                if (string.IsNullOrEmpty(_gameDir))
+                {
+                    _lockText.Text = "No MGS4 install found, so there is no mgs4_dlss.ini to read or write. The Setup tab says what was looked for.";
+                    _lockBanner.Visibility = Visibility.Visible;
+                }
+                else if (running)
+                {
+                    _lockText.Text = "The game is running. It rewrites mgs4_dlss.ini through the Windows profile API, whose cache would undo anything written from here - close the game to save. Most of these keys are read again every second by the add-on, and its own overlay (ReShade, Add-ons tab) can change them live.";
+                    _lockBanner.Visibility = Visibility.Visible;
+                }
+                else _lockBanner.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        void StartStatePolling()
+        {
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+            timer.Tick += (s, e) => RefreshState();
+            timer.Start();
+            Win.Closed += (s, e) => timer.Stop();
         }
 
         public void Say(string text)

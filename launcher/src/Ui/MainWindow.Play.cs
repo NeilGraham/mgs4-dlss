@@ -125,7 +125,7 @@ namespace Mgs4Launcher
             };
 
             _launchBtn.Click += (s, e) => Launch();
-            _stopBtn.Click += (s, e) => { Runner.StopGame(); Say("closed mgs4.exe"); UpdatePill(); };
+            _stopBtn.Click += (s, e) => { Runner.StopGame(); Say("closed mgs4.exe"); RefreshState(); };
             _shortcutBtn.Click += (s, e) => MakeShortcut();
 
             // Every act starts collapsed, so the window opens as a short list of acts rather than 400 rows.
@@ -265,7 +265,7 @@ namespace Mgs4Launcher
                 Say("launching: " + Options.Preview(CurrentOptions().ToCli()));
             }
             catch (Exception e) { Say("could not launch: " + e.Message); }
-            UpdatePill();
+            RefreshState();
         }
 
         void MakeShortcut()
