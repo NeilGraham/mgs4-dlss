@@ -11,7 +11,9 @@ namespace Mgs4Launcher
     // Which file a key lives in. Two of them, with different owners and the same hazard: the add-on rewrites
     // mgs4_dlss.ini through the Windows profile API while the game runs, and the game rewrites mgs4.savedsettings
     // when it exits - so neither is safe to edit under a running game, and both are safe when it is closed.
-    enum IniSource { Addon, Game }
+    // Addon: MGS4\mgs4_dlss.ini. Game: the game's own mgs4.savedsettings. Launcher: config.ini in this checkout,
+    // for the handful of things that belong to the app rather than to either of them.
+    enum IniSource { Addon, Game, Launcher }
 
     class IniKey
     {
@@ -33,6 +35,46 @@ namespace Mgs4Launcher
     {
         public static readonly List<IniKey> Spec = new List<IniKey>
         {
+            // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
+            // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
+            // tab has a button for exactly those four; the rest are here because this is where settings live.
+            new IniKey("The game: display", "api", "choice", "Renderer",
+                "this add-on is a D3D12 add-on and does nothing on the D3D11 backend",
+                new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
+                IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "displayIndex", "int", "Display",
+                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "vsync", "bool", "Vsync",
+                "off pairs better with frame generation - the limiter below is what paces the game",
+                null, null, IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "fpsLimiter", "int", "Frame limiter",
+                "60. The port's physics are tied to it; frame generation is what puts more frames on screen",
+                null, null, IniSource.Game, "true", "false"),
+
+            new IniKey("The game: quality", "globalGraphicsQuality", "choice", "Overall quality",
+                "the preset the three below follow unless they are set apart from it",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "textureQuality", "choice", "Textures",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "shadowQuality", "choice", "Shadows",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "vfxQuality", "choice", "Effects",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "enableFXAA", "bool", "FXAA",
+                "off with DLAA - it only blurs the image DLSS is given",
+                null, null, IniSource.Game, "true", "false"),
+
+            // Not one of the game's own keys: the resolution this app passes to mgs4.exe when it starts one. It
+            // lives in config.ini, because it belongs to the launcher rather than to the game - the game has no
+            // resolution setting of its own, it takes --res_width / --res_height on the command line.
+            new IniKey("The game: launch", "MGS4_RES", "text", "Default resolution",
+                "WIDTHxHEIGHT, e.g. 3840x2160. Empty lets the game choose; the Play tab's own resolution box overrides it for that run",
+                null, null, IniSource.Launcher, "true", "false"),
+
+
             new IniKey("DLSS", "Enabled", "bool", "DLSS on",
                 "read again every second; 0 leaves the add-on loaded but idle"),
             new IniKey("DLSS", "Mode", "choice", "Mode",
@@ -86,37 +128,6 @@ namespace Mgs4Launcher
             new IniKey("Diagnostics", "DumpShaders", "bool", "Dump shaders",
                 "write every pipeline's bytecode to logs\\shaders"),
 
-            // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
-            // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
-            // tab has a button for exactly those four; the rest are here because this is where settings live.
-            new IniKey("The game: display", "api", "choice", "Renderer",
-                "this add-on is a D3D12 add-on and does nothing on the D3D11 backend",
-                new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
-                IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "displayIndex", "int", "Display",
-                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "vsync", "bool", "Vsync",
-                "off pairs better with frame generation - the limiter below is what paces the game",
-                null, null, IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "fpsLimiter", "int", "Frame limiter",
-                "60. The port's physics are tied to it; frame generation is what puts more frames on screen",
-                null, null, IniSource.Game, "true", "false"),
-
-            new IniKey("The game: quality", "globalGraphicsQuality", "choice", "Overall quality",
-                "the preset the three below follow unless they are set apart from it",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "textureQuality", "choice", "Textures",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "shadowQuality", "choice", "Shadows",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "vfxQuality", "choice", "Effects",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "enableFXAA", "bool", "FXAA",
-                "off with DLAA - it only blurs the image DLSS is given",
-                null, null, IniSource.Game, "true", "false"),
         };
 
         public static string IniPath(string gameDir) { return Paths.Join(gameDir, "mgs4_dlss.ini"); }
@@ -125,19 +136,48 @@ namespace Mgs4Launcher
         // and handed around rather than re-searched per row.
         public static string PathFor(IniSource source, string gameDir)
         {
-            return source == IniSource.Addon ? IniPath(gameDir) : Checks.SavedSettingsPath(gameDir);
+            if (source == IniSource.Addon) return IniPath(gameDir);
+            if (source == IniSource.Launcher) return Paths.ConfigPath;
+            return Checks.SavedSettingsPath(gameDir);
         }
 
         public static string SourceLabel(IniSource source)
         {
-            return source == IniSource.Addon ? "mgs4_dlss.ini" : "mgs4.savedsettings";
+            if (source == IniSource.Addon) return "mgs4_dlss.ini";
+            if (source == IniSource.Launcher) return "config.ini";
+            return "mgs4.savedsettings";
+        }
+
+        // What a group is, said in a badge or two on its card: whose setting this is, and whether it is one of the
+        // diagnostics that cost frames. "Diagnostics" is the add-on's, so it carries both.
+        public static string[] BadgesFor(IniKey spec)
+        {
+            if (spec.Source == IniSource.Game || spec.Source == IniSource.Launcher) return new[] { "Game" };
+            if (spec.Group == "Diagnostics") return new[] { "Debug", "MGS4 DLSS" };
+            return new[] { "MGS4 DLSS" };
         }
 
         // The value as the file holds it, or null when the file has no such key.
         public static string Read(IniKey spec, string addonIni, string gameIni)
         {
-            string file = spec.Source == IniSource.Addon ? addonIni : gameIni;
+            string file = spec.Source == IniSource.Addon ? addonIni
+                        : spec.Source == IniSource.Launcher ? Paths.ConfigPath
+                        : gameIni;
             return string.IsNullOrEmpty(file) ? null : Checks.IniValue(file, spec.Key);
+        }
+
+        // The resolution a scene boot uses when nothing was asked for on the command line: MGS4_RES from the
+        // environment or config.ini, as WIDTHxHEIGHT. Zero when it is unset or unreadable, which means "let the
+        // game choose", the way it behaved before this existed.
+        public static void DefaultResolution(out int width, out int height)
+        {
+            width = 0; height = 0;
+            string v = Paths.Setting("MGS4_RES", null);
+            if (string.IsNullOrEmpty(v)) return;
+            Match m = Regex.Match(v.Trim(), "^(\\d+)\\s*[xX]\\s*(\\d+)$");
+            if (!m.Success) return;
+            width = int.Parse(m.Groups[1].Value);
+            height = int.Parse(m.Groups[2].Value);
         }
 
         public static IniKey Find(string key)
@@ -158,7 +198,9 @@ namespace Mgs4Launcher
                 if (shown != spec.Source)
                 {
                     shown = spec.Source;
-                    string file = spec.Source == IniSource.Addon ? addonIni : gameIni;
+                    string file = spec.Source == IniSource.Addon ? addonIni
+                                : spec.Source == IniSource.Launcher ? Paths.ConfigPath
+                                : gameIni;
                     outp.Add("");
                     outp.Add(SourceLabel(spec.Source) + ": " + (file ?? "not found"));
                     if (spec.Source == IniSource.Addon && !Paths.Exists(addonIni))
@@ -205,6 +247,10 @@ namespace Mgs4Launcher
             foreach (var kv in byFile)
             {
                 string file = PathFor(kv.Key, gameDir);
+                if (kv.Key == IniSource.Launcher && !Paths.Exists(file))
+                    System.IO.File.WriteAllText(file,
+                        "; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key." +
+                        Environment.NewLine);
                 if (string.IsNullOrEmpty(file) || !Paths.Exists(file))
                 {
                     say("no " + SourceLabel(kv.Key) + " to write to" +

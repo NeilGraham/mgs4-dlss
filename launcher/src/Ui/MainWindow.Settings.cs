@@ -53,7 +53,10 @@ namespace Mgs4Launcher
             StackPanel current = null;
             foreach (IniKey spec in IniForm.Spec)
             {
-                bool missing = spec.Source == IniSource.Addon ? !Paths.Exists(addonIni) : string.IsNullOrEmpty(gameIni);
+                // config.ini is written when it is first needed, so a launcher key is never "not there".
+                bool missing = spec.Source == IniSource.Addon ? !Paths.Exists(addonIni)
+                             : spec.Source == IniSource.Game ? string.IsNullOrEmpty(gameIni)
+                             : false;
                 if (spec.Source == IniSource.Addon && missing) continue;   // the card above already says so
                 if (spec.Group != group)
                 {
@@ -63,7 +66,8 @@ namespace Mgs4Launcher
                     string blurb = IniForm.SourceLabel(spec.Source);
                     if (missing) blurb += " - not there yet; run the game once and it writes them";
                     _settingsHost.Children.Add(Widgets.Card(group, blurb, missing ? "warn" : "info",
-                                                            missing ? "not there" : null, out body));
+                                                            missing ? "not there" : null,
+                                                            IniForm.BadgesFor(spec), out body));
                     current = body;
                 }
                 if (missing) continue;

@@ -245,24 +245,30 @@ on the Master Collection screen first, so a plain "run the game" shortcut needs 
 
 ### Settings
 
-**Every setting either half of this touches, in one form.** Two files, each row naming its key, what it does, and
-which file it belongs to:
+**Every group says whose setting it is**, in a badge left of its title: **Game** for the game's own, **MGS4 DLSS**
+for the add-on's, and **Debug** alongside it on the diagnostics, which cost frames and are not for normal play.
+The game's groups come first, because they are the ones that have to be right before any of the rest matters.
 
-- **`MGS4\mgs4_dlss.ini`** — the add-on's own: DLSS mode and preset, frame generation and its target fps, the image
-  keys (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics.
 - **`mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`** — *the game's own*, the same file its in-game menu
   writes: renderer (`api`), display index, vsync, frame limiter, the four quality levels and FXAA. Four of them are
   what the add-on needs set a particular way, and the Setup tab keeps its one-click **Set them for me** for exactly
   those four; the rest are here because this is where settings live.
+- **`config.ini`** — one key that belongs to neither: **`MGS4_RES`**, the resolution this app passes to `mgs4.exe`
+  when it starts a scene (`--res_width` / `--res_height`; the game has no resolution setting of its own). Written
+  as `WIDTHxHEIGHT`, e.g. `3840x2160`; empty lets the game choose. The Play tab's own resolution box still wins for
+  the run it is ticked on, and `--res` on the command line wins over both.
+- **`MGS4\mgs4_dlss.ini`** — the add-on's own: DLSS mode and preset, frame generation and its target fps, the image
+  keys (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics.
 
-The two files spell booleans differently — the add-on writes `1` / `0`, the game writes `true` / `false` — so each
-key carries its own spelling and a tick box writes whichever its file expects. **Save settings** writes both at
-once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a key the game has not
-written yet leaves that group showing *not there* until the game has run once.
+The files spell booleans differently — the add-on writes `1` / `0`, the game writes `true` / `false` — so each key
+carries its own spelling and a tick box writes whichever its file expects. **Save settings** writes all of them at
+once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a group whose file the
+game has not written yet shows *not there* until the game has run once.
 
-`mgs4-dlss-launcher --settings` prints both files the way the tab shows them. `--set Key=Value` writes without
-opening a window and **routes each key to the file that holds it**, so `--set api=dx12 --set Sharpness=42` writes
-one value to each; a key neither spec knows goes to the add-on's ini, which is where every key used to go.
+`mgs4-dlss-launcher --settings` prints every file the way the tab shows them. `--set Key=Value` writes without
+opening a window and **routes each key to the file that holds it**, so `--set api=dx12 --set MGS4_RES=3840x2160
+--set Sharpness=42` writes one value to each of the three; a key no group knows goes to the add-on's ini, which is
+where every key used to go.
 
 Saving is blocked while the game is running, because both files have an owner then: the add-on rewrites
 `mgs4_dlss.ini` through the Windows profile API, whose cache will quietly undo an outside edit, and the game

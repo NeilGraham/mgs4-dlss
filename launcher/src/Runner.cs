@@ -187,10 +187,14 @@ namespace Mgs4Launcher
             var cli = new List<string>();
             if (opt.Stage == "@main" || opt.Stage == "") cli.Add("--skip-to-main-menu");
             else { cli.Add("--stage"); cli.Add(opt.Stage); }
-            if (opt.Width > 0 && opt.Height > 0)
+            // A resolution asked for on the command line wins; otherwise the default from config.ini is used, and
+            // with neither the game picks for itself.
+            int w = opt.Width, h = opt.Height;
+            if (w <= 0 || h <= 0) IniForm.DefaultResolution(out w, out h);
+            if (w > 0 && h > 0)
             {
-                cli.Add("--res_width"); cli.Add(opt.Width.ToString());
-                cli.Add("--res_height"); cli.Add(opt.Height.ToString());
+                cli.Add("--res_width"); cli.Add(w.ToString());
+                cli.Add("--res_height"); cli.Add(h.ToString());
             }
             if (!string.IsNullOrEmpty(opt.Windowing)) { cli.Add("--windowing"); cli.Add(opt.Windowing); }
             args = string.Join(" ", cli.ConvertAll(c => c.Contains(" ") ? "\"" + c + "\"" : c));

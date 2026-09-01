@@ -55,8 +55,39 @@ namespace Mgs4Launcher
             return g;
         }
 
+        // The badges a settings group wears, left of its title: whose setting it is, and whether it is a
+        // diagnostic. Their own small palette, in the families the rest of the window uses.
+        static readonly Dictionary<string, StatusStyle> BadgeStyles = new Dictionary<string, StatusStyle>
+        {
+            { "Game",      new StatusStyle { Bg = "#10222B", Br = "#2A5A73", Fg = "#7DD3FC" } },
+            { "MGS4 DLSS", new StatusStyle { Bg = "#161B2A", Br = "#33436E", Fg = "#9FB6FF" } },
+            { "Debug",     new StatusStyle { Bg = "#2A2312", Br = "#7A6220", Fg = "#F2C14E" } },
+        };
+
+        public static Border Badge(string text)
+        {
+            StatusStyle st = BadgeStyles.ContainsKey(text) ? BadgeStyles[text] : Status["info"];
+            return new Border
+            {
+                Background = Brush(st.Bg),
+                BorderBrush = Brush(st.Br),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(8, 2, 8, 2),
+                Margin = new Thickness(0, 0, 8, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = Text(text, 10, st.Fg, true),
+            };
+        }
+
         // A card: a titled panel with a status tag, and a body the caller fills with rows.
         public static Border Card(string title, string blurb, string tagKind, string tagLabel, out StackPanel body)
+        {
+            return Card(title, blurb, tagKind, tagLabel, null, out body);
+        }
+
+        public static Border Card(string title, string blurb, string tagKind, string tagLabel,
+                                  IEnumerable<string> badges, out StackPanel body)
         {
             var card = new Border
             {
@@ -78,7 +109,13 @@ namespace Mgs4Launcher
             };
             Grid hg = Columns("*", "Auto");
             var hs = new StackPanel();
-            hs.Children.Add(Text(title, 14, "#E7EAF0", true));
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
+            if (badges != null)
+                foreach (string b in badges) titleRow.Children.Add(Badge(b));
+            TextBlock titleText = Text(title, 14, "#E7EAF0", true);
+            titleText.VerticalAlignment = VerticalAlignment.Center;
+            titleRow.Children.Add(titleText);
+            hs.Children.Add(titleRow);
             if (!string.IsNullOrEmpty(blurb))
             {
                 TextBlock b = Text(blurb, 11, "#858D9E");
