@@ -8,15 +8,24 @@ using System.Text.RegularExpressions;
 
 namespace Mgs4Launcher
 {
+    // Which file a key lives in. Two of them, with different owners and the same hazard: the add-on rewrites
+    // mgs4_dlss.ini through the Windows profile API while the game runs, and the game rewrites mgs4.savedsettings
+    // when it exits - so neither is safe to edit under a running game, and both are safe when it is closed.
+    enum IniSource { Addon, Game }
+
     class IniKey
     {
         public string Group, Key, Type, Label, Help;
         public string[] Choices, ChoiceLabels;
+        public IniSource Source;
+        public string TrueWord, FalseWord;      // the game writes true/false where the add-on writes 1/0
         public IniKey(string group, string key, string type, string label, string help,
-                      string[] choices = null, string[] choiceLabels = null)
+                      string[] choices = null, string[] choiceLabels = null,
+                      IniSource source = IniSource.Addon, string trueWord = "1", string falseWord = "0")
         {
             Group = group; Key = key; Type = type; Label = label; Help = help;
             Choices = choices; ChoiceLabels = choiceLabels;
+            Source = source; TrueWord = trueWord; FalseWord = falseWord;
         }
     }
 
@@ -76,59 +85,137 @@ namespace Mgs4Launcher
             new IniKey("Diagnostics", "Probe", "bool", "Pipeline probe", "sample the image before and after the insertion"),
             new IniKey("Diagnostics", "DumpShaders", "bool", "Dump shaders",
                 "write every pipeline's bytecode to logs\\shaders"),
+
+            // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
+            // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
+            // tab has a button for exactly those four; the rest are here because this is where settings live.
+            new IniKey("The game: display", "api", "choice", "Renderer",
+                "this add-on is a D3D12 add-on and does nothing on the D3D11 backend",
+                new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
+                IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "displayIndex", "int", "Display",
+                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "vsync", "bool", "Vsync",
+                "off pairs better with frame generation - the limiter below is what paces the game",
+                null, null, IniSource.Game, "true", "false"),
+            new IniKey("The game: display", "fpsLimiter", "int", "Frame limiter",
+                "60. The port's physics are tied to it; frame generation is what puts more frames on screen",
+                null, null, IniSource.Game, "true", "false"),
+
+            new IniKey("The game: quality", "globalGraphicsQuality", "choice", "Overall quality",
+                "the preset the three below follow unless they are set apart from it",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "textureQuality", "choice", "Textures",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "shadowQuality", "choice", "Shadows",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "vfxQuality", "choice", "Effects",
+                "3 is what the game writes at its highest",
+                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+            new IniKey("The game: quality", "enableFXAA", "bool", "FXAA",
+                "off with DLAA - it only blurs the image DLSS is given",
+                null, null, IniSource.Game, "true", "false"),
         };
 
         public static string IniPath(string gameDir) { return Paths.Join(gameDir, "mgs4_dlss.ini"); }
 
+        // The file a key is written to. The game's is found by searching the save folder, so it is resolved once
+        // and handed around rather than re-searched per row.
+        public static string PathFor(IniSource source, string gameDir)
+        {
+            return source == IniSource.Addon ? IniPath(gameDir) : Checks.SavedSettingsPath(gameDir);
+        }
+
+        public static string SourceLabel(IniSource source)
+        {
+            return source == IniSource.Addon ? "mgs4_dlss.ini" : "mgs4.savedsettings";
+        }
+
+        // The value as the file holds it, or null when the file has no such key.
+        public static string Read(IniKey spec, string addonIni, string gameIni)
+        {
+            string file = spec.Source == IniSource.Addon ? addonIni : gameIni;
+            return string.IsNullOrEmpty(file) ? null : Checks.IniValue(file, spec.Key);
+        }
+
+        public static IniKey Find(string key)
+        {
+            foreach (IniKey spec in Spec)
+                if (string.Equals(spec.Key, key, StringComparison.OrdinalIgnoreCase)) return spec;
+            return null;
+        }
+
         public static List<string> Report(string gameDir)
         {
             var outp = new List<string>();
-            string ini = IniPath(gameDir);
-            outp.Add("mgs4_dlss.ini: " + ini);
-            if (!Paths.Exists(ini))
+            string addonIni = IniPath(gameDir), gameIni = PathFor(IniSource.Game, gameDir);
+            string group = null;
+            IniSource? shown = null;
+            foreach (IniKey spec in Spec)
             {
-                outp.Add("  (not there - copy dlss-addon\\mgs4_dlss.ini next to mgs4.exe)");
-                return outp;
-            }
-            string group = "";
-            foreach (IniKey s in Spec)
-            {
-                if (s.Group != group)
+                if (shown != spec.Source)
                 {
-                    group = s.Group;
+                    shown = spec.Source;
+                    string file = spec.Source == IniSource.Addon ? addonIni : gameIni;
+                    outp.Add("");
+                    outp.Add(SourceLabel(spec.Source) + ": " + (file ?? "not found"));
+                    if (spec.Source == IniSource.Addon && !Paths.Exists(addonIni))
+                        outp.Add("  (not there - the Setup tab installs the add-on and its ini together)");
+                    if (spec.Source == IniSource.Game && string.IsNullOrEmpty(gameIni))
+                        outp.Add("  (not there - run the game once and it writes them)");
+                    group = null;
+                }
+                if (spec.Group != group)
+                {
+                    group = spec.Group;
                     outp.Add("");
                     outp.Add("[" + group + "]");
                 }
-                string v = Checks.IniValue(ini, s.Key) ?? "(unset)";
-                outp.Add(string.Format("  {0,-22} {1,-12} {2}", s.Key, v, s.Label));
+                outp.Add(string.Format("  {0,-22} {1,-12} {2}", spec.Key, Read(spec, addonIni, gameIni) ?? "(unset)", spec.Label));
             }
             if (Checks.GameRunning())
             {
                 outp.Add("");
-                outp.Add("The game is running: it owns this file, so leave the writing to the add-on until it exits.");
+                outp.Add("The game is running: it owns both of these, so leave the writing until it exits.");
             }
             return outp;
         }
 
+        // Key=Value from the command line, each one written to whichever file holds that key. A key the spec does
+        // not know goes to the add-on's ini, which is where every key used to go.
         public static int SetFromCli(string gameDir, List<string> sets, Action<string> say)
         {
-            string ini = IniPath(gameDir);
             if (Checks.GameRunning())
             {
-                say("mgs4.exe is running - it rewrites mgs4_dlss.ini through the profile API and would undo this. Close it first.");
+                say("mgs4.exe is running - it rewrites these through the profile API and would undo this. Close it first.");
                 return 1;
             }
-            var vals = new List<KeyValuePair<string, string>>();
-            foreach (string s in sets)
+            var byFile = new Dictionary<IniSource, List<KeyValuePair<string, string>>>();
+            foreach (string set in sets)
             {
-                Match m = Regex.Match(s, "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$");
-                if (!m.Success) { say("not a Key=Value: " + s); return 1; }
-                vals.Add(new KeyValuePair<string, string>(m.Groups[1].Value, m.Groups[2].Value.Trim()));
+                Match m = Regex.Match(set, "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$");
+                if (!m.Success) { say("not a Key=Value: " + set); return 1; }
+                IniKey spec = Find(m.Groups[1].Value);
+                IniSource source = spec != null ? spec.Source : IniSource.Addon;
+                if (!byFile.ContainsKey(source)) byFile[source] = new List<KeyValuePair<string, string>>();
+                byFile[source].Add(new KeyValuePair<string, string>(m.Groups[1].Value, m.Groups[2].Value.Trim()));
             }
-            try { Checks.SetIni(ini, vals); }
-            catch (Exception e) { say(e.Message); return 1; }
-            foreach (var kv in vals) say(kv.Key + "=" + kv.Value);
-            say("written to " + ini);
+            foreach (var kv in byFile)
+            {
+                string file = PathFor(kv.Key, gameDir);
+                if (string.IsNullOrEmpty(file) || !Paths.Exists(file))
+                {
+                    say("no " + SourceLabel(kv.Key) + " to write to" +
+                        (kv.Key == IniSource.Game ? " - run the game once and it writes one" : ""));
+                    return 1;
+                }
+                try { Checks.SetIni(file, kv.Value); }
+                catch (Exception e) { say(e.Message); return 1; }
+                foreach (var set in kv.Value) say(set.Key + "=" + set.Value);
+                say("written to " + file);
+            }
             return 0;
         }
     }

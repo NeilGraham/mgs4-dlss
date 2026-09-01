@@ -10,7 +10,8 @@ namespace Mgs4Launcher
 {
     partial class MainWindow
     {
-        readonly Dictionary<string, Func<string>> _settingReaders = new Dictionary<string, Func<string>>();
+        // One entry per row: the key it belongs to (which knows its file) and how to read the control back.
+        readonly List<KeyValuePair<IniKey, Func<string>>> _settingReaders = new List<KeyValuePair<IniKey, Func<string>>>();
 
         void WireSettings()
         {
@@ -38,28 +39,35 @@ namespace Mgs4Launcher
             }
             else _lockBanner.Visibility = Visibility.Collapsed;
 
-            string ini = IniForm.IniPath(_gameDir);
-            if (!Paths.Exists(ini))
+            string addonIni = IniForm.IniPath(_gameDir);
+            string gameIni = IniForm.PathFor(IniSource.Game, _gameDir);
+            if (!Paths.Exists(addonIni))
             {
                 StackPanel body;
                 _settingsHost.Children.Add(Widgets.Card("No mgs4_dlss.ini",
                     "There is no mgs4_dlss.ini next to mgs4.exe. The Setup tab installs the add-on and its ini together.",
                     "warn", "not there", out body));
-                return;
             }
 
             string group = null;
             StackPanel current = null;
             foreach (IniKey spec in IniForm.Spec)
             {
+                bool missing = spec.Source == IniSource.Addon ? !Paths.Exists(addonIni) : string.IsNullOrEmpty(gameIni);
+                if (spec.Source == IniSource.Addon && missing) continue;   // the card above already says so
                 if (spec.Group != group)
                 {
                     group = spec.Group;
                     StackPanel body;
-                    _settingsHost.Children.Add(Widgets.Card(group, null, "info", null, out body));
+                    // Each card says which file it writes, because they are two files with two owners.
+                    string blurb = IniForm.SourceLabel(spec.Source);
+                    if (missing) blurb += " - not there yet; run the game once and it writes them";
+                    _settingsHost.Children.Add(Widgets.Card(group, blurb, missing ? "warn" : "info",
+                                                            missing ? "not there" : null, out body));
                     current = body;
                 }
-                current.Children.Add(SettingRow(spec, Checks.IniValue(ini, spec.Key)));
+                if (missing) continue;
+                current.Children.Add(SettingRow(spec, IniForm.Read(spec, addonIni, gameIni)));
             }
         }
 
@@ -86,8 +94,12 @@ namespace Mgs4Launcher
             {
                 case "bool":
                 {
-                    var cb = new CheckBox { IsChecked = value == "1", VerticalAlignment = VerticalAlignment.Center };
-                    _settingReaders[spec.Key] = () => cb.IsChecked == true ? "1" : "0";
+                    var cb = new CheckBox
+                    {
+                        IsChecked = string.Equals(value, spec.TrueWord, StringComparison.OrdinalIgnoreCase),
+                        VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    Remember(spec, () => cb.IsChecked == true ? spec.TrueWord : spec.FalseWord);
                     editor = cb;
                     break;
                 }
@@ -99,7 +111,7 @@ namespace Mgs4Launcher
                                         ? spec.ChoiceLabels[i] : spec.Choices[i]);
                     int idx = Array.IndexOf(spec.Choices, value ?? "");
                     combo.SelectedIndex = idx >= 0 ? idx : -1;
-                    _settingReaders[spec.Key] = () => combo.SelectedIndex >= 0 ? spec.Choices[combo.SelectedIndex] : value;
+                    Remember(spec, () => combo.SelectedIndex >= 0 ? spec.Choices[combo.SelectedIndex] : value);
                     editor = combo;
                     break;
                 }
@@ -113,7 +125,7 @@ namespace Mgs4Launcher
                 default:
                 {
                     var tb = new TextBox { Text = value ?? "", MinWidth = 90, VerticalAlignment = VerticalAlignment.Center };
-                    _settingReaders[spec.Key] = () => tb.Text.Trim();
+                    Remember(spec, () => tb.Text.Trim());
                     editor = tb;
                     break;
                 }
@@ -124,22 +136,38 @@ namespace Mgs4Launcher
             return b;
         }
 
+        void Remember(IniKey spec, Func<string> read)
+        {
+            _settingReaders.Add(new KeyValuePair<IniKey, Func<string>>(spec, read));
+        }
+
+        // Both files at once, each row going to the one its key lives in. The game owns mgs4.savedsettings while it
+        // runs and the add-on owns mgs4_dlss.ini, so neither is written until it is closed.
         void SaveSettings()
         {
-            if (Checks.GameRunning()) { Say("close the game first - it owns mgs4_dlss.ini while it runs"); return; }
-            string ini = IniForm.IniPath(_gameDir);
-            var values = new List<KeyValuePair<string, string>>();
-            foreach (var kv in _settingReaders)
+            if (Checks.GameRunning()) { Say("close the game first - it owns both of these while it runs"); return; }
+            var written = new List<string>();
+            foreach (IniSource source in new[] { IniSource.Addon, IniSource.Game })
             {
-                string v = kv.Value();
-                if (v != null) values.Add(new KeyValuePair<string, string>(kv.Key, v));
+                var values = new List<KeyValuePair<string, string>>();
+                foreach (var row in _settingReaders)
+                {
+                    if (row.Key.Source != source) continue;
+                    string v = row.Value();
+                    if (v != null) values.Add(new KeyValuePair<string, string>(row.Key.Key, v));
+                }
+                if (values.Count == 0) continue;
+                string file = IniForm.PathFor(source, _gameDir);
+                if (string.IsNullOrEmpty(file) || !Paths.Exists(file)) continue;
+                try
+                {
+                    Checks.SetIni(file, values);
+                    written.Add(values.Count + " to " + IniForm.SourceLabel(source));
+                }
+                catch (Exception e) { Say("could not write " + IniForm.SourceLabel(source) + ": " + e.Message); return; }
             }
-            try
-            {
-                Checks.SetIni(ini, values);
-                Say("written to " + ini);
-            }
-            catch (Exception e) { Say("could not write mgs4_dlss.ini: " + e.Message); }
+            Say(written.Count > 0 ? "written: " + string.Join(", ", written) : "nothing to write");
+            ShowSetup();      // the Setup tab's view of the game's settings just changed
         }
     }
 }

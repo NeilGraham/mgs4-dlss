@@ -58,7 +58,7 @@ out of an unzipped release.
 | tab | what it is for |
 | --- | --- |
 | **Play** | start the game, or any one of the 423 launchable scenes, with the automation the tests use |
-| **Settings** | `MGS4\mgs4_dlss.ini` as a form |
+| **Settings** | every setting as a form: the add-on's `mgs4_dlss.ini` and the game's own `mgs4.savedsettings` |
 | **Setup** | the game folder, which files are in place, what the settings say, what the add-on did on its last run |
 
 ```bat
@@ -231,13 +231,29 @@ on the Master Collection screen first, so a plain "run the game" shortcut needs 
 
 ### Settings
 
-`MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image keys
-(`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each row naming its key and what it does.
-`mgs4-dlss-launcher --settings` prints the same thing; `--set Key=Value` writes without opening a window.
+**Every setting either half of this touches, in one form.** Two files, each row naming its key, what it does, and
+which file it belongs to:
 
-Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
-Windows profile API, whose cache will quietly undo an outside edit. While the game *is* up, the same keys are live in
-ReShade's overlay, Add-ons tab.
+- **`MGS4\mgs4_dlss.ini`** — the add-on's own: DLSS mode and preset, frame generation and its target fps, the image
+  keys (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics.
+- **`mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`** — *the game's own*, the same file its in-game menu
+  writes: renderer (`api`), display index, vsync, frame limiter, the four quality levels and FXAA. Four of them are
+  what the add-on needs set a particular way, and the Setup tab keeps its one-click **Set them for me** for exactly
+  those four; the rest are here because this is where settings live.
+
+The two files spell booleans differently — the add-on writes `1` / `0`, the game writes `true` / `false` — so each
+key carries its own spelling and a tick box writes whichever its file expects. **Save settings** writes both at
+once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a key the game has not
+written yet leaves that group showing *not there* until the game has run once.
+
+`mgs4-dlss-launcher --settings` prints both files the way the tab shows them. `--set Key=Value` writes without
+opening a window and **routes each key to the file that holds it**, so `--set api=dx12 --set Sharpness=42` writes
+one value to each; a key neither spec knows goes to the add-on's ini, which is where every key used to go.
+
+Saving is blocked while the game is running, because both files have an owner then: the add-on rewrites
+`mgs4_dlss.ini` through the Windows profile API, whose cache will quietly undo an outside edit, and the game
+rewrites `mgs4.savedsettings` when it exits. While the game *is* up, the add-on's keys are live in ReShade's
+overlay, Add-ons tab, and the game's are live in its own options menu.
 
 ### Setup
 
