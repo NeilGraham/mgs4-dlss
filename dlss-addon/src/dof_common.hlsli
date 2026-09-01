@@ -1,6 +1,9 @@
 // Depth of field re-applied after DLSS / DLSS 5 NR: an exact transcription of the port's own three DoF passes
 // (pixel shaders bf2a546d733f4efc = circle of confusion, 9feb2d2e92bbc108 = spiral bokeh gather, 01978e62bca9c941 =
 // blend of the blurred layer over the sharp image), run on the DLSS output with the game's constants for this frame.
+// The circle of confusion is evaluated at the game's own CoC draw (dof_coc_cs, depth -> CoC, while the depth copy is
+// exactly what the game's pass would have sampled); the colour is added at the DLSS insertion (dof_pack_cs), then the
+// gather and the composite run on the DLSS output.
 cbuffer CB : register(b0)
 {
     float4 c[10];        // the game's constants at its CoC pass, rows cb0[8..17] (c[i] = cb0[8+i])

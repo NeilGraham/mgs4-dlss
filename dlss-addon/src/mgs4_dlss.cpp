@@ -27,7 +27,8 @@
 #include "resample_cs.h"
 #include "depth_stretch_cs.h"   // g_depth_stretch_cs
 #include "probe_cs.h"          // g_probe_cs: per-frame 240x135 luminance readback of pipeline stages (Probe=1)
-#include "dof_coc_cs.h"        // g_dof_coc_cs / g_dof_gather_cs / g_dof_composite_cs: the game's DoF re-applied after DLSS (PostDof=1)
+#include "dof_coc_cs.h"        // g_dof_coc_cs / g_dof_pack_cs / g_dof_gather_cs / g_dof_composite_cs: the game's DoF re-applied after DLSS (PostDof=1)
+#include "dof_pack_cs.h"
 #include "dof_gather_cs.h"
 #include "dof_composite_cs.h"
 #include "uimask_cs.h"          // g_uimask_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
@@ -126,6 +127,34 @@ static bool is_scaled(resource r)
     return g_scaledTex.count(r.handle) != 0;
 }
 
+// ---- CPU access to the game's upload-heap constant buffers ---------------------------------------------------------
+// bgfx writes its draw constants into upload-heap buffers that stay alive for the run. Every scene draw used to Map /
+// Unmap its region (hundreds of pairs per frame on the render thread); the buffers are now mapped once and the pointer
+// kept until the resource is destroyed (D3D12 allows nested maps, and upload memory on PC is coherent). nullptr = not
+// CPU-readable (default heap) - remembered too, so the heap query happens once per buffer as well.
+struct mapped_buf { uint8_t* ptr; uint64_t size; };
+static std::unordered_map<uint64_t, mapped_buf> g_mapped;
+static std::mutex g_mapMutex;
+static uint8_t* map_upload(ID3D12Resource* r, uint64_t* size)
+{
+    const uint64_t key = reinterpret_cast<uint64_t>(r);
+    {
+        std::lock_guard<std::mutex> lock(g_mapMutex);
+        auto it = g_mapped.find(key);
+        if (it != g_mapped.end()) { *size = it->second.size; return it->second.ptr; }
+    }
+    mapped_buf mb = { nullptr, r->GetDesc().Width };
+    D3D12_HEAP_PROPERTIES hp = {}; D3D12_HEAP_FLAGS hf = {};
+    const HRESULT hr = r->GetHeapProperties(&hp, &hf);
+    const bool readable = SUCCEEDED(hr) && (hp.Type == D3D12_HEAP_TYPE_UPLOAD || (hp.Type == D3D12_HEAP_TYPE_CUSTOM && hp.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE));
+    if (readable) { void* p = nullptr; if (SUCCEEDED(r->Map(0, nullptr, &p))) mb.ptr = static_cast<uint8_t*>(p); }
+    std::lock_guard<std::mutex> lock(g_mapMutex);
+    g_mapped[key] = mb;
+    *size = mb.size;
+    return mb.ptr;
+}
+static void forget_mapped(uint64_t handle) { std::lock_guard<std::mutex> lock(g_mapMutex); g_mapped.erase(handle); }
+
 // ---- descriptor resolution ----------------------------------------------------------------------------------------
 // ReShade registers views created with Create*View under their ORIGINAL CPU descriptor handle, but for CBV/SRV/UAV heaps
 // its CopyDescriptors hooks do NOT register the destination slots (they only fire copy_descriptor_tables). bgfx fills its
@@ -141,11 +170,26 @@ static bool table_to_cpu(device* dev, descriptor_table t, uint32_t binding, uint
     dev->get_descriptor_heap_offset(t, 0, 0, &heap, &off);
     if (!heap.handle) { if (diag) snprintf(diag, diagLen, "heap? handle=%llx", (unsigned long long)t.handle); return false; }
     ID3D12DescriptorHeap* h = reinterpret_cast<ID3D12DescriptorHeap*>(heap.handle);
-    const D3D12_DESCRIPTOR_HEAP_DESC hd = h->GetDesc();
-    *type = hd.Type;
-    *size = g_d3d->GetDescriptorHandleIncrementSize(hd.Type);
-    *cpu = h->GetCPUDescriptorHandleForHeapStart().ptr + (uint64_t(off) + binding) * (*size);
-    if (diag) snprintf(diag, diagLen, "heap=%p type=%u n=%u off=%u cpu=%llx", (void*)h, (unsigned)hd.Type, (unsigned)hd.NumDescriptors, off, (unsigned long long)*cpu);
+    // Heap type, increment and CPU start are fixed for the life of a heap; this runs for every one of bgfx's ~700
+    // descriptor copies per frame and for every SRV resolved from a draw's table, so they are looked up once per heap.
+    struct heap_info { D3D12_DESCRIPTOR_HEAP_TYPE type; uint32_t inc, num; uint64_t cpuStart; };
+    static std::unordered_map<uint64_t, heap_info> cache; static std::mutex cacheMutex;
+    heap_info hi;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        auto it = cache.find(heap.handle);
+        if (it != cache.end()) hi = it->second;
+        else {
+            const D3D12_DESCRIPTOR_HEAP_DESC hd = h->GetDesc();
+            hi = { hd.Type, g_d3d->GetDescriptorHandleIncrementSize(hd.Type), hd.NumDescriptors, (uint64_t)h->GetCPUDescriptorHandleForHeapStart().ptr };
+            if (cache.size() > 256) cache.clear();   // heaps are few and long-lived; a destroyed heap's handle is simply refreshed
+            cache[heap.handle] = hi;
+        }
+    }
+    *type = hi.type;
+    *size = hi.inc;
+    *cpu = hi.cpuStart + (uint64_t(off) + binding) * (*size);
+    if (diag) snprintf(diag, diagLen, "heap=%p type=%u n=%u off=%u cpu=%llx", (void*)h, (unsigned)hi.type, (unsigned)hi.num, off, (unsigned long long)*cpu);
     return true;
 }
 static bool is_live(uint64_t h);
@@ -245,8 +289,17 @@ static bool g_probeReady = false, g_probeInitTried = false;
 static uint32_t g_probeFlags[4] = {}, g_probeFrames = 0, g_probeLogs = 0;
 static const uint32_t PROBE_W = 240, PROBE_H = 135, PROBE_PITCH = 256, PROBE_SLOT_BYTES = 35328;   // 512-aligned slot
 static void probe_dispatch(command_list* cmd, resource src, resource_usage srcState, int stage);
-static bool g_dofReady = false, g_dofInitTried = false;   // frames left to the game's DoF because the scene was a dynamic-resolution sub-rect   // last frame DLSS ran on the final texture before the HUD (not a 3D window): the re-apply will run, so the draws may be skipped
+static bool g_dofReady = false, g_dofInitTried = false;
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
+// The circle of confusion is evaluated at the game's own CoC draw (the depth copy, constants and viewport are exactly
+// the game's at that moment) into a half-res R16F texture on the full grid; the insertion only adds the colour.
+static resource g_dofCocOnly = { 0 }; static resource_usage g_dofCocOnlyState = resource_usage::unordered_access;
+static bool g_dofCocReadyThisFrame = false; static uint32_t g_dofCocFrame = 0;   // this frame's CoC was written (and for which frame)
+static uint32_t g_dofFallbacks = 0;                                              // frames whose inputs could not be gathered at the CoC draw: the game's DoF ran
+// Every per-frame GPU input of the DoF passes (constants, descriptors) is ring-buffered: the CPU records frame N+1
+// (and with frame generation N+2) while the GPU still runs frame N's passes, so nothing frame N reads may be rewritten.
+static const uint32_t DOF_RING = 8, DOF_CB_STRIDE = 512, DOF_CB_PER_FRAME = 2, DOF_DESC_PER_FRAME = 16;
+static const uint32_t MV_HEAP_SLOTS = 24;   // 4-descriptor slots of the motion-vector / utility passes in the shared heap; the DoF ring follows them
 static uint32_t g_lateSceneWrites = 0;
 static bool g_frameKStep = false;        // this frame the dynamic-resolution scale stepped or the chain disagreed about it
 static int g_cfgDofStepFreeze = 1;       // 1 = on such frames skip the evaluation and show the previous DLSS output (one-frame hold instead of the game's inconsistent frame)
@@ -319,6 +372,7 @@ static uint32_t g_autoRecreateAt = 0;       // an NGX-hooking add-on installed i
 static NVSDK_NGX_Handle* g_oldFeature = nullptr;
 static uint32_t g_oldFeatureFrame = 0;
 static ULONGLONG g_evalRateT0 = 0; static uint32_t g_evalRateN = 0; static float g_evalRate = 0;
+static float g_lastFrameDeltaMs = 0.0f;   // the most recent game-frame interval (measured at the rollover): DLSS's frame-time hint, 0 = unknown
 
 // ---- Phase 1b: camera jitter ---------------------------------------------------------------------------------------
 // Scene draws carry a row-major clip matrix (rows = clip x,y,z,w) in their vertex constants: c[0..3] for the main
@@ -368,6 +422,7 @@ static resource g_mask = { 0 };
 static resource_usage g_maskState = resource_usage::unordered_access;
 static uint64_t g_lastDepth = 0;             // depth buffer DLSS used last frame (only draws with it bound are replayed)
 static int g_cfgObjectMV = 1;                // per-object motion vectors (stream-out of the game's vertex shaders), see objmv.h
+static int g_cfgObjMvProps = 0;              // ObjectMVProps: also capture rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes
 static viewport g_sceneVp = {};              // viewport of the last dynamic scene draw (the port can render into a sub-viewport of its targets)
 static std::unordered_map<uint64_t, uint32_t> g_drawOccurrence;   // this frame: geometry key -> times drawn so far (pass / instance index)
 static bool g_sceneVpValid = false;
@@ -471,12 +526,11 @@ static int jitter_scene_draw(const cl_state& s)
     auto ins = g_patchedRegions.emplace(key, -1);
     if (!ins.second) { g_jitStat[2]++; return ins.first->second; }   // this constant region was already handled
     ID3D12Resource* r = reinterpret_cast<ID3D12Resource*>(s.cbv_res[2].handle);
-    const UINT64 size = r->GetDesc().Width;
+    uint64_t size = 0; uint8_t* base = map_upload(r, &size);
+    if (!base) { g_jitStat[3]++; return -1; }
     const size_t nread = (s.cbv_off[2] + 36 * 4 <= size) ? 36 : 20;
     if (s.cbv_off[2] + nread * 4 > size) { g_jitStat[3]++; return -1; }
-    void* p = nullptr; D3D12_RANGE rr = { (SIZE_T)s.cbv_off[2], (SIZE_T)(s.cbv_off[2] + nread * 4) };
-    if (FAILED(r->Map(0, &rr, &p)) || !p) { g_jitStat[3]++; return -1; }
-    float* c = reinterpret_cast<float*>(static_cast<char*>(p) + s.cbv_off[2]);
+    float* c = reinterpret_cast<float*>(base + s.cbv_off[2]);
     float m[36] = {}; memcpy(m, c, nread * 4);     // read once (write-combined memory)
     int k = -1;
     for (int cand = 0; cand + 16 <= (int)nread; cand += 4) if (looks_like_clip_matrix(m + cand)) { k = cand; break; }
@@ -502,7 +556,6 @@ static int jitter_scene_draw(const cl_state& s)
         g_matrixMisses++; g_jitStat[5]++;
         if (g_missLogBudget > 0) { g_missLogBudget--; logmsg("no clip matrix (pso=%p rt=%p): c0=(%.3f %.3f %.3f %.2f) c1=(%.3f %.3f %.3f %.2f) c2=(%.3f %.3f %.3f %.2f) c3=(%.3f %.3f %.3f %.2f) c4=(%.3f %.3f %.3f %.2f)", (void*)s.pso, (void*)s.rt.handle, m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15], m[16], m[17], m[18], m[19]); }
     }
-    D3D12_RANGE wr = { (SIZE_T)s.cbv_off[2], (SIZE_T)(s.cbv_off[2] + nread * 4) }; r->Unmap(0, &wr);
     ins.first->second = cls;
     return cls;
 }
@@ -619,7 +672,10 @@ static bool mv_init()
     pso.CS = { g_uimask_cs, sizeof(g_uimask_cs) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_uimaskPso));
     if (FAILED(hr)) { logmsg("MV: UI mask PSO failed 0x%08lX", (unsigned long)hr); return false; }
-    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 96, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // 24 slots x [srv0, srv1, uav0, uav1]: mv 0-3, vis 8-11, hudless 12-15, resample 16-19
+    // One shader-visible heap for every add-on pass, so the insertion switches heaps once (bgfx -> ours) and once back
+    // rather than per pass: 24 slots x [srv0, srv1, uav0, uav1] (mv 0-3, uimask 4-7, vis 8-11, hudless 12-15, resample
+    // 16-19, depth stretch 20-23, resume mask 23), then the DoF passes' 8-frame ring (DOF_RING x DOF_DESC_PER_FRAME).
+    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, MV_HEAP_SLOTS * 4 + DOF_RING * DOF_DESC_PER_FRAME, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
     hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_mvHeap));
     if (FAILED(hr)) { logmsg("MV: CreateDescriptorHeap failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
@@ -831,13 +887,28 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
 }
 
 // ---- DoF after DLSS (PostDof) --------------------------------------------------------------------------------------
-static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
-static ID3D12DescriptorHeap* g_dofHeap = nullptr; static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr; static uint32_t g_dofCbSlot = 0;
+static ID3D12RootSignature* g_dofRootSig = nullptr; static ID3D12PipelineState* g_dofCocPso = nullptr; static ID3D12PipelineState* g_dofPackPso = nullptr; static ID3D12PipelineState* g_dofGatherPso = nullptr; static ID3D12PipelineState* g_dofCompositePso = nullptr;
+static ID3D12Resource* g_dofCbRes = nullptr; static uint8_t* g_dofCbPtr = nullptr;   // descriptors live in the shared g_mvHeap (after the MV_HEAP_SLOTS)
 struct DofCB { float c[10][4]; float g[10][4]; float halfSize[2], fullSize[2], depthScale[2], depthSize[2], stepUV[2], cocUnorm, radiusScale, depthOff[2], debugView, hasMask, depthJitter[2], maskScale[2]; };
+static_assert(sizeof(DofCB) <= DOF_CB_STRIDE, "DofCB must fit one constant-buffer ring slot");
+static void restore_state(device* dev, command_list* cmd, const cl_state& s);
+// Ring entry of the frame being recorded: constants (DOF_CB_PER_FRAME slots: 0 = the CoC pass, 1 = the insertion passes)
+// and descriptors (DOF_DESC_PER_FRAME = 4 passes x [srv0, srv1, uav0, uav1]). Frame N's entry is not touched again
+// until frame N + DOF_RING, long after the GPU has run it.
+static uint32_t dof_ring() { return g_frame % DOF_RING; }
+static D3D12_GPU_VIRTUAL_ADDRESS dof_cb_write(const DofCB& cb, uint32_t which)
+{
+    const uint32_t slot = dof_ring() * DOF_CB_PER_FRAME + which;
+    memcpy(g_dofCbPtr + slot * DOF_CB_STRIDE, &cb, sizeof(cb));
+    return g_dofCbRes->GetGPUVirtualAddress() + UINT64(slot) * DOF_CB_STRIDE;
+}
+static D3D12_CPU_DESCRIPTOR_HANDLE dof_cpu(uint32_t i) { D3D12_CPU_DESCRIPTOR_HANDLE h = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); h.ptr += SIZE_T(MV_HEAP_SLOTS * 4 + dof_ring() * DOF_DESC_PER_FRAME + i) * g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h; }
+static D3D12_GPU_DESCRIPTOR_HANDLE dof_gpu(uint32_t i) { D3D12_GPU_DESCRIPTOR_HANDLE h = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); h.ptr += UINT64(MV_HEAP_SLOTS * 4 + dof_ring() * DOF_DESC_PER_FRAME + i) * g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h; }
 static bool dof_init()
 {
     if (g_dofInitTried) return g_dofReady;
     g_dofInitTried = true;
+    if (!mv_init()) { logmsg("PostDof: the shared descriptor heap is unavailable"); return false; }   // descriptors live in g_mvHeap
     D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
     D3D12_DESCRIPTOR_RANGE uavRange = { D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
     D3D12_ROOT_PARAMETER params[3] = {};
@@ -853,73 +924,124 @@ static bool dof_init()
     if (FAILED(hr)) { logmsg("PostDof: CreateRootSignature failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_COMPUTE_PIPELINE_STATE_DESC pso = {}; pso.pRootSignature = g_dofRootSig;
     pso.CS = { g_dof_coc_cs, sizeof(g_dof_coc_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofCocPso)); if (FAILED(hr)) { logmsg("PostDof: CoC PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    pso.CS = { g_dof_pack_cs, sizeof(g_dof_pack_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofPackPso)); if (FAILED(hr)) { logmsg("PostDof: pack PSO failed 0x%08lX", (unsigned long)hr); return false; }
     pso.CS = { g_dof_gather_cs, sizeof(g_dof_gather_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofGatherPso)); if (FAILED(hr)) { logmsg("PostDof: gather PSO failed 0x%08lX", (unsigned long)hr); return false; }
     pso.CS = { g_dof_composite_cs, sizeof(g_dof_composite_cs) }; hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_dofCompositePso)); if (FAILED(hr)) { logmsg("PostDof: composite PSO failed 0x%08lX", (unsigned long)hr); return false; }
-    D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 16, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // 3 passes x [srv0, srv1, uav0, uav1]
-    hr = g_d3d->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_dofHeap)); if (FAILED(hr)) { logmsg("PostDof: descriptor heap failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
-    D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = 4 * 256; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    D3D12_RESOURCE_DESC bd = {}; bd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; bd.Width = UINT64(DOF_RING) * DOF_CB_PER_FRAME * DOF_CB_STRIDE; bd.Height = 1; bd.DepthOrArraySize = 1; bd.MipLevels = 1; bd.SampleDesc = { 1, 0 }; bd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     hr = g_d3d->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &bd, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_dofCbRes)); if (FAILED(hr)) { logmsg("PostDof: constant buffer failed 0x%08lX", (unsigned long)hr); return false; }
     D3D12_RANGE none = { 0, 0 }; g_dofCbRes->Map(0, &none, reinterpret_cast<void**>(&g_dofCbPtr));
+    if (g_dofCbPtr) memset(g_dofCbPtr, 0, (size_t)bd.Width);
     g_dofReady = g_dofCbPtr != nullptr;
-    logmsg("PostDof: compute passes ready (%s)", g_dofReady ? "ok" : "map failed");
+    logmsg("PostDof: compute passes ready (%s; %u-frame ring of constants and descriptors)", g_dofReady ? "ok" : "map failed", DOF_RING);
     return g_dofReady;
 }
-// Runs the game's DoF on g_out (in unordered_access state, left in that state). kx/ky = dynamic-resolution scale of the
-// depth copy (its scene sub-rect over the full grid). Returns false when a required input is missing.
+// The half-resolution textures for a fullW x fullH output: colour + CoC (the gather input), the CoC alone (written at
+// the game's CoC draw), the blurred layer. Re-created on a size change.
+static bool dof_ensure_textures(device* dev, uint32_t fullW, uint32_t fullH)
+{
+    const uint32_t hw = (fullW + 1) / 2, hh = (fullH + 1) / 2;
+    if (g_dofW == hw && g_dofH == hh && g_dofCoc.handle && g_dofCocOnly.handle && g_dofBlur.handle) return true;
+    for (resource* r : { &g_dofCoc, &g_dofCocOnly, &g_dofBlur }) if (r->handle) { dev->destroy_resource(*r); *r = { 0 }; }
+    const resource_desc td(hw, hh, 1, 1, format::r16g16b16a16_float, 1, memory_heap::default_, resource_usage::shader_resource | resource_usage::unordered_access);
+    const resource_desc cd(hw, hh, 1, 1, format::r16_float, 1, memory_heap::default_, resource_usage::shader_resource | resource_usage::unordered_access);
+    if (!dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofCoc) || !dev->create_resource(cd, nullptr, resource_usage::unordered_access, &g_dofCocOnly) || !dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofBlur)) {
+        logmsg("PostDof: half-res textures %ux%u failed", hw, hh);
+        for (resource* r : { &g_dofCoc, &g_dofCocOnly, &g_dofBlur }) if (r->handle) { dev->destroy_resource(*r); *r = { 0 }; }
+        g_dofW = g_dofH = 0; return false;
+    }
+    dev->set_resource_name(g_dofCoc, "MGS4DLSS DoF colour+CoC"); dev->set_resource_name(g_dofCocOnly, "MGS4DLSS DoF CoC"); dev->set_resource_name(g_dofBlur, "MGS4DLSS DoF blur");
+    g_dofCocState = g_dofCocOnlyState = g_dofBlurState = resource_usage::unordered_access; g_dofW = hw; g_dofH = hh;
+    logmsg("PostDof: half-res textures %ux%u", hw, hh);
+    return true;
+}
+static DXGI_FORMAT dof_depth_srv_format(device* dev, resource depth, resource_desc* dd)
+{
+    *dd = dev->get_resource_desc(depth);
+    DXGI_FORMAT f = static_cast<DXGI_FORMAT>(dd->texture.format);
+    if (f == DXGI_FORMAT_R32_TYPELESS) f = DXGI_FORMAT_R32_FLOAT; else if (f == DXGI_FORMAT_R16_TYPELESS) f = DXGI_FORMAT_R16_UNORM; else if (f == DXGI_FORMAT_R24G8_TYPELESS) f = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    return f;
+}
+// Pass 1a, at the game's CoC draw (which is then skipped): the circle of confusion of the full half-res grid from the
+// depth copy that draw was about to sample, with that draw's constants - the same inputs at the same moment as the
+// game's own pass, so nothing the game does to the depth copy later in the frame can reach the blur. fullW/H = the
+// scene target (the DLSS output size), kx/ky = this frame's dynamic-resolution scale (the CoC viewport is half the
+// scene sub-rect). The game's command-list state is restored afterwards. Returns false if nothing was written.
+static bool dof_coc_dispatch(command_list* cmd, device* dev, const cl_state& s, resource depth, uint32_t fullW, uint32_t fullH, float kx, float ky)
+{
+    if (!dof_init() || !dof_ensure_textures(dev, fullW, fullH)) return false;
+    resource_desc dd; const DXGI_FORMAT depthFmt = dof_depth_srv_format(dev, depth, &dd);
+    DofCB cb = {}; memcpy(cb.c, g_dofCb, sizeof(cb.c));
+    cb.halfSize[0] = float(g_dofW); cb.halfSize[1] = float(g_dofH); cb.fullSize[0] = float(fullW); cb.fullSize[1] = float(fullH);
+    // depth sampling exactly as the game's CoC pass: uv = (2 * halfResPixel + c12.xy) / c16.xy, the game's half-res pixel
+    // being on the sub-rect grid (ours * k)
+    const float* c12 = g_dofCb + 4 * 4; const float* c16 = g_dofCb + 8 * 4;
+    cb.depthScale[0] = kx; cb.depthScale[1] = ky; cb.depthOff[0] = c12[0]; cb.depthOff[1] = c12[1];
+    cb.depthSize[0] = c16[0] >= 1.0f ? c16[0] : float(dd.texture.width); cb.depthSize[1] = c16[1] >= 1.0f ? c16[1] : float(dd.texture.height);
+    cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius;
+    // the projection jitter shifts the rendered (depth) image by (signX*jx, -signY*jy) full-grid pixels; a depth-copy
+    // texel is a sub-rect pixel, i.e. k full-grid pixels
+    cb.depthJitter[0] = g_cfgJitter ? float(g_cfgDofJitterSign) * g_cfgJitterSignX * g_jitterX * kx : 0.0f;
+    cb.depthJitter[1] = g_cfgJitter ? float(g_cfgDofJitterSign) * -g_cfgJitterSignY * g_jitterY * ky : 0.0f;
+    const D3D12_GPU_VIRTUAL_ADDRESS cbAddr = dof_cb_write(cb, 0);
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDep = {}; srvDep.Format = depthFmt; srvDep.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srvDep.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srvDep.Texture2D.MipLevels = 1;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavCoc = {}; uavCoc.Format = DXGI_FORMAT_R16_FLOAT; uavCoc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    ID3D12Resource* depRes = reinterpret_cast<ID3D12Resource*>(depth.handle); ID3D12Resource* cocRes = reinterpret_cast<ID3D12Resource*>(g_dofCocOnly.handle);
+    // pass 1a: [depth srv, depth srv, coc uav, coc uav]
+    g_d3d->CreateShaderResourceView(depRes, &srvDep, dof_cpu(0)); g_d3d->CreateShaderResourceView(depRes, &srvDep, dof_cpu(1));
+    g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavCoc, dof_cpu(2)); g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavCoc, dof_cpu(3));
+    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
+    cmd->barrier(depth, resource_usage::shader_resource_pixel, resource_usage::shader_resource_non_pixel);   // bound as the skipped draw's SRV
+    if (g_dofCocOnlyState != resource_usage::unordered_access) { cmd->barrier(g_dofCocOnly, g_dofCocOnlyState, resource_usage::unordered_access); g_dofCocOnlyState = resource_usage::unordered_access; }
+    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
+    native->SetDescriptorHeaps(1, heaps);
+    native->SetComputeRootSignature(g_dofRootSig);
+    native->SetComputeRootConstantBufferView(0, cbAddr);
+    native->SetPipelineState(g_dofCocPso); native->SetComputeRootDescriptorTable(1, dof_gpu(0)); native->SetComputeRootDescriptorTable(2, dof_gpu(2));
+    native->Dispatch((g_dofW + 7) / 8, (g_dofH + 7) / 8, 1);
+    cmd->barrier(depth, resource_usage::shader_resource_non_pixel, resource_usage::shader_resource_pixel);
+    cmd->barrier(g_dofCocOnly, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_dofCocOnlyState = resource_usage::shader_resource_non_pixel;
+    restore_state(dev, cmd, s);
+    g_dofCocReadyThisFrame = true; g_dofCocFrame = g_frame;
+    return true;
+}
+// Passes 1b..3 on g_out (in unordered_access state, left in that state): the half-res colour of the DLSS output is
+// packed with this frame's CoC, the spiral gather runs, and the blurred layer is blended over the output. kx/ky = this
+// frame's dynamic-resolution scale (spiral step, and the overlay mask was replayed at the sub-rect viewport). Returns
+// false when this frame's CoC is missing or on another grid.
 static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t outH, DXGI_FORMAT outFmt, float kx, float ky)
 {
-    if (!dof_init() || !g_out.handle || !g_dofDepth || !is_live(g_dofDepth)) return false;
+    if (!dof_init() || !g_out.handle) return false;
+    if (!g_dofCocReadyThisFrame || g_dofCocFrame != g_frame || !g_dofCocOnly.handle) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: f%u has no CoC of its own (ready %d, from frame %u) - not re-applied", g_frame, (int)g_dofCocReadyThisFrame, g_dofCocFrame); return false; }
     const uint32_t hw = (outW + 1) / 2, hh = (outH + 1) / 2;
-    if (g_dofW != hw || g_dofH != hh) {
-        if (g_dofCoc.handle) { dev->destroy_resource(g_dofCoc); g_dofCoc = { 0 }; }
-        if (g_dofBlur.handle) { dev->destroy_resource(g_dofBlur); g_dofBlur = { 0 }; }
-        const resource_desc td(hw, hh, 1, 1, format::r16g16b16a16_float, 1, memory_heap::default_, resource_usage::shader_resource | resource_usage::unordered_access);
-        if (!dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofCoc) || !dev->create_resource(td, nullptr, resource_usage::unordered_access, &g_dofBlur)) { logmsg("PostDof: half-res textures failed"); return false; }
-        dev->set_resource_name(g_dofCoc, "MGS4DLSS DoF CoC"); dev->set_resource_name(g_dofBlur, "MGS4DLSS DoF blur");
-        g_dofCocState = g_dofBlurState = resource_usage::unordered_access; g_dofW = hw; g_dofH = hh;
-        logmsg("PostDof: half-res textures %ux%u", hw, hh);
-    }
-    const resource depth = { g_dofDepth };
-    const resource_desc dd = dev->get_resource_desc(depth);
-    DXGI_FORMAT depthFmt = static_cast<DXGI_FORMAT>(dd.texture.format);
-    if (depthFmt == DXGI_FORMAT_R32_TYPELESS) depthFmt = DXGI_FORMAT_R32_FLOAT; else if (depthFmt == DXGI_FORMAT_R16_TYPELESS) depthFmt = DXGI_FORMAT_R16_UNORM; else if (depthFmt == DXGI_FORMAT_R24G8_TYPELESS) depthFmt = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    if (g_dofW != hw || g_dofH != hh) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: f%u CoC grid %ux%u is not the output's %ux%u - not re-applied", g_frame, g_dofW, g_dofH, outW, outH); return false; }
     // constants: the game's rows + ours. Spiral step: the game steps c17.x/(1280,720) in the UV of a 3840-wide texture
     // whose top-left quadrant holds the half-res image, i.e. 2x that in the half-res image's own UV; a dynamic-resolution
     // sub-rect is stretched to the full grid afterwards, so the step grows by 1/k there.
     DofCB cb = {}; memcpy(cb.c, g_dofCb, sizeof(cb.c)); memcpy(cb.g, g_dofCbG, sizeof(cb.g));
     cb.halfSize[0] = float(hw); cb.halfSize[1] = float(hh); cb.fullSize[0] = float(outW); cb.fullSize[1] = float(outH);
-    // depth sampling exactly as the game's CoC pass: uv = (2 * halfResPixel + c12.xy) / c16.xy
-    const float* c12 = g_dofCb + 4 * 4; const float* c16 = g_dofCb + 8 * 4;
-    cb.depthScale[0] = kx; cb.depthScale[1] = ky; cb.depthOff[0] = c12[0]; cb.depthOff[1] = c12[1];
-    cb.depthSize[0] = c16[0] >= 1.0f ? c16[0] : float(dd.texture.width); cb.depthSize[1] = c16[1] >= 1.0f ? c16[1] : float(dd.texture.height);
+    cb.depthScale[0] = kx; cb.depthScale[1] = ky;
     const float c17x = g_dofCbG[9 * 4];
     cb.stepUV[0] = g_cfgDofStep * c17x / (1280.0f * (kx > 0.05f ? kx : 1.0f)); cb.stepUV[1] = g_cfgDofStep * c17x / (720.0f * (ky > 0.05f ? ky : 1.0f));
     cb.cocUnorm = g_dofCocUnorm ? 1.0f : 0.0f; cb.radiusScale = g_cfgDofRadius; cb.maskScale[0] = kx; cb.maskScale[1] = ky;   // overlays were replayed at the sub-rect viewport
-    // the projection jitter shifts the rendered (depth) image by (signX*jx, -signY*jy) render pixels; the depth copy has render-grid texels
-    cb.depthJitter[0] = g_cfgJitter ? float(g_cfgDofJitterSign) * g_cfgJitterSignX * g_jitterX : 0.0f; cb.depthJitter[1] = g_cfgJitter ? float(g_cfgDofJitterSign) * -g_cfgJitterSignY * g_jitterY : 0.0f;
     cb.debugView = g_cfgDebugMode == 10 ? 1.0f : (g_cfgDebugMode == 11 ? 2.0f : (g_cfgDebugMode == 12 ? 3.0f : 0.0f));   // DoF layer views
-    const uint32_t cbIdx = g_dofCbSlot++ % 4;
-    memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
-    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu0 = g_dofHeap->GetCPUDescriptorHandleForHeapStart(); D3D12_GPU_DESCRIPTOR_HANDLE gpu0 = g_dofHeap->GetGPUDescriptorHandleForHeapStart();
-    auto cpu = [&](int i) { D3D12_CPU_DESCRIPTOR_HANDLE h = cpu0; h.ptr += SIZE_T(i) * inc; return h; };
-    auto gpu = [&](int i) { D3D12_GPU_DESCRIPTOR_HANDLE h = gpu0; h.ptr += UINT64(i) * inc; return h; };
+    const bool haveMask = g_cfgDofMask && g_dofMask.handle && g_dofMaskRtv.handle;
+    cb.hasMask = haveMask ? 1.0f : 0.0f;
+    const D3D12_GPU_VIRTUAL_ADDRESS cbAddr = dof_cb_write(cb, 1);
     D3D12_SHADER_RESOURCE_VIEW_DESC srvOut = {}; srvOut.Format = outFmt; srvOut.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srvOut.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srvOut.Texture2D.MipLevels = 1;
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDep = srvOut; srvDep.Format = depthFmt;
     D3D12_SHADER_RESOURCE_VIEW_DESC srvHalf = srvOut; srvHalf.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvCoc = srvOut; srvCoc.Format = DXGI_FORMAT_R16_FLOAT;
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavHalf = {}; uavHalf.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; uavHalf.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavOut = uavHalf; uavOut.Format = outFmt;
-    ID3D12Resource* outRes = reinterpret_cast<ID3D12Resource*>(g_out.handle); ID3D12Resource* depRes = reinterpret_cast<ID3D12Resource*>(depth.handle);
+    ID3D12Resource* outRes = reinterpret_cast<ID3D12Resource*>(g_out.handle); ID3D12Resource* cocOnlyRes = reinterpret_cast<ID3D12Resource*>(g_dofCocOnly.handle);
     ID3D12Resource* cocRes = reinterpret_cast<ID3D12Resource*>(g_dofCoc.handle); ID3D12Resource* blurRes = reinterpret_cast<ID3D12Resource*>(g_dofBlur.handle);
-    // pass 1: [out srv, depth srv, coc uav, coc uav]
-    g_d3d->CreateShaderResourceView(outRes, &srvOut, cpu(0)); g_d3d->CreateShaderResourceView(depRes, &srvDep, cpu(1));
-    g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, cpu(2)); g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, cpu(3));
-    // pass 2: [coc srv, coc srv, blur uav, blur uav]
-    g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(4)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(5));
-    g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(6)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, cpu(7));
-    // pass 3: [blur srv, overlay mask srv (or the CoC texture when there is no mask layer), out uav, out uav]
-    const bool haveMask = g_cfgDofMask && g_dofMask.handle && g_dofMaskRtv.handle;
+    // pass 1b: [out srv, coc-only srv, colour+coc uav, colour+coc uav]
+    g_d3d->CreateShaderResourceView(outRes, &srvOut, dof_cpu(4)); g_d3d->CreateShaderResourceView(cocOnlyRes, &srvCoc, dof_cpu(5));
+    g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, dof_cpu(6)); g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, dof_cpu(7));
+    // pass 2: [colour+coc srv, colour+coc srv, blur uav, blur uav]
+    g_d3d->CreateShaderResourceView(cocRes, &srvHalf, dof_cpu(8)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, dof_cpu(9));
+    g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, dof_cpu(10)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, dof_cpu(11));
+    // pass 3: [blur srv, overlay mask srv (or the colour+coc texture when there is no mask layer), out uav, out uav]
     if (haveMask) {
         if (!g_dofMaskCleared) {   // no overlay this frame: an empty mask
             if (g_dofMaskState != resource_usage::render_target) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::render_target); g_dofMaskState = resource_usage::render_target; }
@@ -927,31 +1049,29 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
         }
         if (g_dofMaskState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::shader_resource_non_pixel); g_dofMaskState = resource_usage::shader_resource_non_pixel; }
         D3D12_SHADER_RESOURCE_VIEW_DESC srvMask = srvOut; srvMask.Format = static_cast<DXGI_FORMAT>(g_dofMaskFmt);
-        g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_dofMask.handle), &srvMask, cpu(9));
-    } else { g_d3d->CreateShaderResourceView(blurRes, &srvHalf, cpu(8)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, cpu(9)); }
-    cb.hasMask = haveMask ? 1.0f : 0.0f; memcpy(g_dofCbPtr + cbIdx * 256, &cb, sizeof(cb));
-    g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(10)); g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, cpu(11));
+        g_d3d->CreateShaderResourceView(blurRes, &srvHalf, dof_cpu(12)); g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_dofMask.handle), &srvMask, dof_cpu(13));
+    } else { g_d3d->CreateShaderResourceView(blurRes, &srvHalf, dof_cpu(12)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, dof_cpu(13)); }
+    g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, dof_cpu(14)); g_d3d->CreateUnorderedAccessView(outRes, nullptr, &uavOut, dof_cpu(15));
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
-    ID3D12DescriptorHeap* heaps[1] = { g_dofHeap };
+    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
     native->SetDescriptorHeaps(1, heaps);
     native->SetComputeRootSignature(g_dofRootSig);
-    native->SetComputeRootConstantBufferView(0, g_dofCbRes->GetGPUVirtualAddress() + cbIdx * 256);
-    // pass 1
+    native->SetComputeRootConstantBufferView(0, cbAddr);
+    // pass 1b
     cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel);
-    cmd->barrier(depth, resource_usage::shader_resource_pixel, resource_usage::shader_resource_non_pixel);
+    if (g_dofCocOnlyState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_dofCocOnly, g_dofCocOnlyState, resource_usage::shader_resource_non_pixel); g_dofCocOnlyState = resource_usage::shader_resource_non_pixel; }
     if (g_dofCocState != resource_usage::unordered_access) { cmd->barrier(g_dofCoc, g_dofCocState, resource_usage::unordered_access); g_dofCocState = resource_usage::unordered_access; }
-    native->SetPipelineState(g_dofCocPso); native->SetComputeRootDescriptorTable(1, gpu(0)); native->SetComputeRootDescriptorTable(2, gpu(2));
+    native->SetPipelineState(g_dofPackPso); native->SetComputeRootDescriptorTable(1, dof_gpu(4)); native->SetComputeRootDescriptorTable(2, dof_gpu(6));
     native->Dispatch((hw + 7) / 8, (hh + 7) / 8, 1);
-    cmd->barrier(depth, resource_usage::shader_resource_non_pixel, resource_usage::shader_resource_pixel);
     // pass 2
     cmd->barrier(g_dofCoc, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_dofCocState = resource_usage::shader_resource_non_pixel;
     if (g_dofBlurState != resource_usage::unordered_access) { cmd->barrier(g_dofBlur, g_dofBlurState, resource_usage::unordered_access); g_dofBlurState = resource_usage::unordered_access; }
-    native->SetPipelineState(g_dofGatherPso); native->SetComputeRootDescriptorTable(1, gpu(4)); native->SetComputeRootDescriptorTable(2, gpu(6));
+    native->SetPipelineState(g_dofGatherPso); native->SetComputeRootDescriptorTable(1, dof_gpu(8)); native->SetComputeRootDescriptorTable(2, dof_gpu(10));
     native->Dispatch((hw + 7) / 8, (hh + 7) / 8, 1);
     // pass 3
     cmd->barrier(g_dofBlur, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_dofBlurState = resource_usage::shader_resource_non_pixel;
     cmd->barrier(g_out, resource_usage::shader_resource_non_pixel, resource_usage::unordered_access);
-    native->SetPipelineState(g_dofCompositePso); native->SetComputeRootDescriptorTable(1, gpu(8)); native->SetComputeRootDescriptorTable(2, gpu(10));
+    native->SetPipelineState(g_dofCompositePso); native->SetComputeRootDescriptorTable(1, dof_gpu(12)); native->SetComputeRootDescriptorTable(2, dof_gpu(14));
     native->Dispatch((outW + 7) / 8, (outH + 7) / 8, 1);
     cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::unordered_access);   // UAV -> UAV: make the writes visible to the copy that follows
     return true;
@@ -1064,18 +1184,10 @@ static bool read_cbv(const cl_state& s, int param, float* out, size_t nfloats)
     static int fails = 0;
     if (!s.cbv_set[param] || !s.cbv_res[param].handle) { if (fails++ < 3) logmsg("read_cbv: root[%d] not a CBV / no buffer (set=%d res=%p)", param, (int)s.cbv_set[param], (void*)s.cbv_res[param].handle); return false; }
     ID3D12Resource* r = reinterpret_cast<ID3D12Resource*>(s.cbv_res[param].handle);
-    const D3D12_RESOURCE_DESC d = r->GetDesc();
-    if (s.cbv_off[param] + nfloats * 4 > d.Width) { if (fails++ < 3) logmsg("read_cbv: offset %llu + %zu > buffer size %llu", (unsigned long long)s.cbv_off[param], nfloats * 4, (unsigned long long)d.Width); return false; }
-    D3D12_HEAP_PROPERTIES hp = {}; D3D12_HEAP_FLAGS hf = {};
-    HRESULT hr = r->GetHeapProperties(&hp, &hf);
-    if (FAILED(hr) || (hp.Type != D3D12_HEAP_TYPE_UPLOAD && !(hp.Type == D3D12_HEAP_TYPE_CUSTOM && hp.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE))) {
-        if (fails++ < 3) logmsg("read_cbv: buffer %p heap type %u (hr=0x%08lX) is not CPU-readable", (void*)r, (unsigned)hp.Type, (unsigned long)hr); return false;
-    }
-    void* p = nullptr; D3D12_RANGE rr = { (SIZE_T)s.cbv_off[param], (SIZE_T)(s.cbv_off[param] + nfloats * 4) };
-    hr = r->Map(0, &rr, &p);
-    if (FAILED(hr) || !p) { if (fails++ < 3) logmsg("read_cbv: Map failed 0x%08lX", (unsigned long)hr); return false; }
-    memcpy(out, static_cast<char*>(p) + s.cbv_off[param], nfloats * 4);
-    D3D12_RANGE wr = { 0, 0 }; r->Unmap(0, &wr);
+    uint64_t size = 0; uint8_t* base = map_upload(r, &size);
+    if (!base) { if (fails++ < 3) logmsg("read_cbv: buffer %p is not CPU-readable (not an upload heap)", (void*)r); return false; }
+    if (s.cbv_off[param] + nfloats * 4 > size) { if (fails++ < 3) logmsg("read_cbv: offset %llu + %zu > buffer size %llu", (unsigned long long)s.cbv_off[param], nfloats * 4, (unsigned long long)size); return false; }
+    memcpy(out, base + s.cbv_off[param], nfloats * 4);
     return true;
 }
 static void analyse_scene_draw(const cl_state& s)
@@ -1183,10 +1295,11 @@ static void release_dlss_resources(device* dev)
     if (g_hudless.handle) { dev->destroy_resource(g_hudless); g_hudless = { 0 }; }
     if (g_scratch.handle) { dev->destroy_resource(g_scratch); g_scratch = { 0 }; }
     if (g_dofCoc.handle) { dev->destroy_resource(g_dofCoc); g_dofCoc = { 0 }; }
+    if (g_dofCocOnly.handle) { dev->destroy_resource(g_dofCocOnly); g_dofCocOnly = { 0 }; }
     if (g_dofBlur.handle) { dev->destroy_resource(g_dofBlur); g_dofBlur = { 0 }; }
     if (g_dofMaskRtv.handle) { dev->destroy_resource_view(g_dofMaskRtv); g_dofMaskRtv = { 0 }; }
     if (g_dofMask.handle) { dev->destroy_resource(g_dofMask); g_dofMask = { 0 }; }
-    g_dofW = g_dofH = 0;
+    g_dofW = g_dofH = 0; g_dofCocReadyThisFrame = false;
 }
 
 // Whether an NGX-hooking add-on (renodx-dlss5) has detoured the NGX D3D12 CreateFeature export: Detours rewrites the
@@ -1507,6 +1620,9 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     if (!frozenPass) { if (g_windowMode) { g_lastWinRect = g_windowVp; g_lastWinRectValid = true; } else if (g_haveFrameVP) { memcpy(g_liveVP, g_frameVP, 64); g_haveLiveVP = true; if (!resumeKept) g_lastWinRectValid = false; } }
     ep.InMVScaleX = 1.0f; ep.InMVScaleY = 1.0f;
     ep.InPreExposure = 1.0f; ep.InExposureScale = 1.0f;
+    // The frame-time hint lets the model relate vector magnitudes to speed (the guide asks for it; 0 = unknown). Game
+    // frames only: with frame generation the rollover runs on the game's present, not on the generated ones.
+    ep.InFrameTimeDeltaInMsec = g_lastFrameDeltaMs;
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
     if (g_cfgProbe && !upscale) probe_dispatch(cmd, color, resource_usage::shader_resource_non_pixel, 0);
     const uint32_t visInW = (g_cfgDRS == 2) ? subW : outW, visInH = (g_cfgDRS == 2) ? subH : outH;   // full grid: the MV texture and the output map 1:1
@@ -1754,6 +1870,7 @@ static void on_destroy_pipeline(device*, pipeline p)
 }
 static void on_destroy_resource(device*, resource res)
 {
+    forget_mapped(res.handle);
     {
         std::lock_guard<std::mutex> lock(g_scaledMutex);
         g_scaledTex.erase(res.handle);
@@ -2121,7 +2238,8 @@ static void handle_draw(command_list* cmd, const draw_args& da)
         if (s.rt_w >= 640 && s.rt_h >= 360) {
             if (++g_sceneDrawsThisFrame == 1) { fg::frame_begin(g_frame); objmv::mark_frame_begin(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native())); }
             g_drawsPerRt[s.rt.handle]++;
-            const bool depthTested = pso_depth_enabled(s.pso);
+            const pso_info psoInfo = pso_get(s.pso);   // one lookup per draw (depth test enabled, skinned)
+            const bool depthTested = psoInfo.depth;
             // frozen screens (Codec / pause): log the full-frame draw chain so the snapshot the background is built
             // from can be identified (source texture -> blur target -> the blit into the final image)
             if ((g_cfgTraceFreeze || tracing()) && s.rt_w >= 1280 && s.rt_h >= 720) {
@@ -2138,12 +2256,13 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             }
             if (g_cfgPostDof && !g_cfgPrePost && g_dofPrevOk && da.count <= 8 && s.rt_w >= 1280 && g_cfgEnabled) {
                 // The game's DoF: CoC pass (half-res viewport, samples the depth copy) -> spiral gather -> blend over the
-                // sharp image. Skip all three; keep the constants and the depth texture for our own pass after DLSS.
+                // sharp image. Skip all three; the CoC is evaluated right here from the same depth copy and constants
+                // (dof_coc_dispatch), the gather and the blend run on the DLSS output at the insertion (dof_apply).
                 const uint64_t ph = objmv::pso_ps_hash(s.pso);
                 if (ph == PS_DOF_COC || ph == PS_DOF_GATHER || ph == PS_DOF_COMPOSITE) {
                     if (ph == PS_DOF_COC) {
-                        // Dynamic resolution: the game's DoF runs on the scene sub-rect (this pass's viewport is half of it).
-                        // The re-apply assumes the full grid, so sub-rect frames keep the game's own DoF (v1.1.1 behaviour).
+                        // Dynamic resolution: the game's DoF runs on the scene sub-rect (this pass's viewport is half of it);
+                        // that gives this frame's exact scale k for the depth read, the spiral step and the overlay mask.
                         const float kx = s.vp_valid ? s.vp.width * 2.0f / float(s.rt_w) : 1.0f, ky = s.vp_valid ? s.vp.height * 2.0f / float(s.rt_h) : 1.0f;
                         const bool subRect = !s.vp_valid || kx < 0.999f || ky < 0.999f;
                         g_dofKx = (s.vp_valid && kx > 0.05f) ? (kx > 1.0f ? 1.0f : kx) : 1.0f; g_dofKy = (s.vp_valid && ky > 0.05f) ? (ky > 1.0f ? 1.0f : ky) : 1.0f;
@@ -2163,24 +2282,46 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                             g_dofSubRectFrames++;
                             static uint32_t nlog = 0; if (nlog++ < 5) logmsg("PostDof: f%u dynamic-resolution sub-rect (CoC viewport %.0fx%.0f of %ux%u -> k %.3f x %.3f) - %s", g_frame, s.vp.width, s.vp.height, s.rt_w, s.rt_h, g_dofKx, g_dofKy, g_dofSkipFrame ? "handled at that scale" : "the game's DoF stays");
                         }
+                        if (g_dofSkipFrame) {
+                            // This frame's inputs, all taken from this draw: the constants, the depth copy it samples, and the CoC
+                            // itself, evaluated now (the depth copy is exactly what the game's pass would have read). Anything
+                            // missing -> the game's own DoF runs this frame, consistently for all three passes.
+                            float cb[18 * 4]; const bool cbOk = read_cbv(s, 2, cb, 18 * 4);
+                            const resource dep = s.table_set[1] ? resolve_descriptor(dev, s.tables[1], 1) : resource{ 0 };
+                            const bool depOk = dep.handle && is_live(dep.handle);
+                            bool cocOk = false, ok = cbOk && depOk;
+                            if (ok) {
+                                memcpy(g_dofCb, cb + 8 * 4, sizeof(g_dofCb)); g_dofCbValid = true;
+                                const resource_desc rd = dev->get_resource_desc(s.rt);
+                                g_dofCocUnorm = rd.texture.format == format::r8g8b8a8_unorm || rd.texture.format == format::b8g8r8a8_unorm || rd.texture.format == format::r8g8b8a8_unorm_srgb;
+                                {   // diagnostics: the depth copy or its addressing changing is where a mis-scaled blur layer would come from
+                                    static uint64_t lastDep = 0; static float lastC16[2] = { 0, 0 }; static uint32_t nlog = 0;
+                                    const float* c16 = g_dofCb + 8 * 4; const float* c12 = g_dofCb + 4 * 4;
+                                    if ((dep.handle != lastDep || c16[0] != lastC16[0] || c16[1] != lastC16[1]) && nlog++ < 24)
+                                        logmsg("PostDof: f%u depth copy %s, c16 %.0fx%.0f, c12 %.3f,%.3f, k %.4f x %.4f (CoC viewport %.0fx%.0f into %ux%u)", g_frame, desc_str(dev, dep).c_str(), c16[0], c16[1], c12[0], c12[1], g_dofKx, g_dofKy, s.vp.width, s.vp.height, s.rt_w, s.rt_h);
+                                    lastDep = dep.handle; lastC16[0] = c16[0]; lastC16[1] = c16[1];
+                                }
+                                g_dofDepth = dep.handle;
+                                cocOk = ok = dof_coc_dispatch(cmd, dev, s, dep, s.rt_w, s.rt_h, g_dofKx, g_dofKy);
+                            }
+                            if (!ok) {
+                                g_dofSkipFrame = false; g_dofFallbacks++;
+                                static uint32_t nf = 0; if (nf++ < 20) logmsg("PostDof: f%u inputs missing at the CoC draw (constants %d, depth copy %d, CoC pass %d) - the game's DoF for this frame", g_frame, (int)cbOk, (int)depOk, (int)cocOk);
+                            }
+                        }
                     }
                     if (!g_dofSkipFrame) { if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++; goto dof_not_skipped; }
                     if (ph == PS_DOF_COC) {
-                        float cb[18 * 4];
-                        if (read_cbv(s, 2, cb, 18 * 4)) { memcpy(g_dofCb, cb + 8 * 4, sizeof(g_dofCb)); g_dofCbValid = true; }
-                        resource dep = s.table_set[1] ? resolve_descriptor(dev, s.tables[1], 1) : resource{ 0 };
-                        if (dep.handle && is_live(dep.handle)) g_dofDepth = dep.handle;
-                        resource_desc rd = dev->get_resource_desc(s.rt);
-                        g_dofCocUnorm = rd.texture.format == format::r8g8b8a8_unorm || rd.texture.format == format::b8g8r8a8_unorm || rd.texture.format == format::r8g8b8a8_unorm_srgb;
                         g_dofCocSeen = true;
                         static uint32_t nlog = 0;
                         if (nlog++ < 3) {
-                            logmsg("PostDof: CoC pass f%u into %s vp=(%.0f,%.0f %.0fx%.0f), depth copy %s, cb rows 8..17:", g_frame, desc_str(dev, s.rt).c_str(), s.vp.x, s.vp.y, s.vp.width, s.vp.height, dep.handle ? desc_str(dev, dep).c_str() : "none");
+                            logmsg("PostDof: CoC pass f%u into %s vp=(%.0f,%.0f %.0fx%.0f), depth copy %s, cb rows 8..17:", g_frame, desc_str(dev, s.rt).c_str(), s.vp.x, s.vp.y, s.vp.width, s.vp.height, desc_str(dev, resource{ g_dofDepth }).c_str());
                             for (int r = 0; r < 10 && g_dofCbValid; ++r) logmsg("   c%d = (%.4f %.4f %.4f %.4f)", 8 + r, g_dofCb[r * 4], g_dofCb[r * 4 + 1], g_dofCb[r * 4 + 2], g_dofCb[r * 4 + 3]);
                         }
                     } else if (ph == PS_DOF_GATHER) {
                         float cb[18 * 4];
                         if (read_cbv(s, 2, cb, 18 * 4)) { memcpy(g_dofCbG, cb + 8 * 4, sizeof(g_dofCbG)); g_dofCbGValid = true; }
+                        else { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: f%u gather constants unreadable - the previous frame's are kept", g_frame); }
                         static uint32_t nlog = 0;
                         if (nlog++ < 2 && g_dofCbGValid) { logmsg("PostDof: gather pass f%u into %s vp=(%.0f,%.0f %.0fx%.0f), cb rows 8..17:", g_frame, desc_str(dev, s.rt).c_str(), s.vp.x, s.vp.y, s.vp.width, s.vp.height); for (int r = 0; r < 10; ++r) logmsg("   c%d = (%.5f %.5f %.5f %.5f)", 8 + r, g_dofCbG[r * 4], g_dofCbG[r * 4 + 1], g_dofCbG[r * 4 + 2], g_dofCbG[r * 4 + 3]); }
                     } else if (ph == PS_DOF_COMPOSITE) g_dofSeenThisFrame = true;
@@ -2222,7 +2363,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
             }
             if (s.ds.handle) {
-                if (tracing()) { static uint32_t nf = 0, lastf = 0; if (lastf != g_frame) { lastf = g_frame; nf = 0; } if (nf++ < 12) logmsg("f%u depth-draw rt=%p %ux%u ds=%p vp=(%.0f,%.0f %.0fx%.0f) count=%u depthOn=%d", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h, (void*)s.ds.handle, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (int)pso_depth_enabled(s.pso)); }
+                if (tracing()) { static uint32_t nf = 0, lastf = 0; if (lastf != g_frame) { lastf = g_frame; nf = 0; } if (nf++ < 12) logmsg("f%u depth-draw rt=%p %ux%u ds=%p vp=(%.0f,%.0f %.0fx%.0f) count=%u depthOn=%d", g_frame, (void*)s.rt.handle, s.rt_w, s.rt_h, (void*)s.ds.handle, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (int)depthTested); }
                 g_dsForRt[s.rt.handle] = s.ds.handle; g_drawsPerDs[s.ds.handle]++;
                 if (s.dsv.handle) g_dsvForDs[s.ds.handle] = s.dsv;
                 if (depthTested && s.vp_valid && s.rt_w >= 640 && s.vp.width <= s.rt_w && (g_dlssW == 0 || s.rt_w == g_dlssW)
@@ -2242,15 +2383,18 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     if (!g_winVpFrameValid || e.first > g_winVpHist[(uint64_t)(uint32_t)(g_winVpFrame.x + 0.5f) << 48 | (uint64_t)(uint32_t)(g_winVpFrame.y + 0.5f) << 32 | (uint32_t)(g_winVpFrame.width + 0.5f) << 16 | (uint32_t)(g_winVpFrame.height + 0.5f)].first) { g_winVpFrame = e.second; g_winVpFrameValid = true; }
                 }
                 if (dumping()) analyse_scene_draw(s);
-                const bool skinned = pso_get(s.pso).skinned;
+                const bool skinned = psoInfo.skinned;
                 int cls = -1;
                 if (g_cfgEnabled && g_cfgDebugMode != 2) cls = jitter_scene_draw(s);
                 if (skinned) g_skinnedDrawsThisFrame++;
                 // Phase 2: dynamic draws = skinned meshes (optionally props with their own model matrix).
                 const bool dynamic = skinned || (g_cfgDynMaskProps && cls >= 1);
+                // Object motion vectors also for rigid movers with their own model matrix (ObjectMVProps=1): vehicles, the
+                // Mk. II, doors - camera-only vectors ghost those under DLSS. Costs one stream-out draw per such prop.
+                const bool dynamicMv = dynamic || (g_cfgObjMvProps && cls >= 1);
                 // Per-object motion: stream out this draw's clip positions with one extra draw under the game's own state
                 // (root signature, root arguments, IA buffers all as bound; only the pipeline and SO targets change).
-                if (g_cfgObjectMV && dynamic && objmv::ready() && !g_injectedThisFrame && s.ds.handle == g_lastDepth && da.count > 6 && s.pso) {
+                if (g_cfgObjectMV && dynamicMv && objmv::ready() && !g_injectedThisFrame && s.ds.handle == g_lastDepth && da.count > 6 && s.pso) {
                     // Identity across frames: the geometry (buffers, index range) plus the n-th time it is drawn this frame
                     // (pass / instance). Not the PSO: bgfx hands the same draw a different pipeline object every frame.
                     uint64_t key = 1469598103934665603ull;
@@ -2280,7 +2424,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // most of this frame's depth-tested draws are in, DLSS runs on it at whichever comes first:
             //  (a) the first 2D (depth-disabled) draw into it - scenes that draw geometry straight into the final texture,
             //  (b) the first draw that samples it - scenes with a separate geometry target read by the post chain.
-            const bool depthOn = pso_depth_enabled(s.pso);
+            const bool depthOn = depthTested;
             if (s.ds.handle) {
                 const uint32_t n = ++g_depthDrawsPerRt[s.rt.handle];
                 if (s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1]) g_depthDrawsIntoFinal++;
@@ -2647,6 +2791,7 @@ static void reload_config()
         }
     }
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 1, g_iniPath);
+    g_cfgObjMvProps = GetPrivateProfileIntA("DLSS", "ObjectMVProps", 0, g_iniPath);
     g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 1, g_iniPath);
     g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);
     {
@@ -2690,7 +2835,7 @@ static void frame_rollover()
     {
         static LARGE_INTEGER freq = {}, last = {}; LARGE_INTEGER now; QueryPerformanceCounter(&now);
         if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
-        if (last.QuadPart) g_frameMs.push_back(float(double(now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart)));
+        if (last.QuadPart) { const float ms = float(double(now.QuadPart - last.QuadPart) * 1000.0 / double(freq.QuadPart)); g_frameMs.push_back(ms); g_lastFrameDeltaMs = (ms > 0.0f && ms < 500.0f) ? ms : 0.0f; }
         last = now;
         if (g_frameMs.size() >= 600) {
             std::vector<float> v = g_frameMs; std::sort(v.begin(), v.end());
@@ -2729,7 +2874,7 @@ static void frame_rollover()
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
     if (g_probeReady) { const uint32_t nxt = (g_probeSlot + 1) % 8; for (int st = 0; st < 4; ++st) probe_analyze(st, nxt); g_probeSlot = nxt; g_probeFrames++; }
-    g_frameKStep = false; g_noSceneFrames = g_depthOnDrawsThisFrame < 20 ? g_noSceneFrames + 1 : 0; g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
+    g_frameKStep = false; g_noSceneFrames = g_depthOnDrawsThisFrame < 20 ? g_noSceneFrames + 1 : 0; g_dofSeenThisFrame = false; g_dofCocSeen = false; g_dofSkipFrame = false; g_dofCocReadyThisFrame = false; g_dofCombineSeen = false; g_dofMaskCleared = false; g_dofOverlaysThisFrame = 0; g_uiDrawsLast = g_uiDrawsThisFrame; g_uiDrawsThisFrame = 0; g_uiPostSkippedLast = g_uiPostSkippedThisFrame; g_uiPostSkippedThisFrame = 0; g_uiClearedThisFrame = false; g_finalSceneWritten = false; g_finalSceneRt = 0; g_finalSceneSrc = 0; g_freshWrite = false; g_uiPreSceneThisFrame = 0; g_preHudCaptured = false;
     // scene state: 0 = in-game cutscene (3D, no HUD), 1 = gameplay (3D + HUD), 2 = no 3D scene (menu / loading / video)
     if (g_cfgSceneLog) {
         const int raw = (g_sceneDrawsLast < 20) ? 2 : (g_hudDrawsLast >= (uint32_t)g_cfgHudMin ? 1 : 0);
@@ -2779,7 +2924,7 @@ static void frame_rollover()
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, sub-rect frames left to the game %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, input fallbacks to the game's DoF %u, sub-rect frames handled %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofFallbacks, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
@@ -2844,6 +2989,12 @@ static void on_destroy_device(device* dev)
     if (g_visPso) { g_visPso->Release(); g_visPso = nullptr; }
     if (g_mvRootSig) { g_mvRootSig->Release(); g_mvRootSig = nullptr; }
     g_mvReady = false; g_mvInitTried = false;
+    if (g_dofCbRes) { g_dofCbRes->Unmap(0, nullptr); g_dofCbRes->Release(); g_dofCbRes = nullptr; g_dofCbPtr = nullptr; }
+    for (ID3D12PipelineState** p : { &g_dofCocPso, &g_dofPackPso, &g_dofGatherPso, &g_dofCompositePso, &g_probePso }) if (*p) { (*p)->Release(); *p = nullptr; }
+    if (g_probeHeap) { g_probeHeap->Release(); g_probeHeap = nullptr; }
+    if (g_dofRootSig) { g_dofRootSig->Release(); g_dofRootSig = nullptr; }
+    g_dofReady = false; g_dofInitTried = false; g_probeReady = false; g_probeInitTried = false;
+    { std::lock_guard<std::mutex> lock(g_mapMutex); g_mapped.clear(); }
     if (g_ngxParams) { NVSDK_NGX_D3D12_DestroyParameters(g_ngxParams); g_ngxParams = nullptr; }
     if (g_ngxReady) { NVSDK_NGX_D3D12_Shutdown1(g_d3d); g_ngxReady = false; }
     fg::shutdown();
@@ -2983,7 +3134,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.1.1 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.1.2 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);

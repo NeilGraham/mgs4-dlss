@@ -169,3 +169,42 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
   `CreateCommandQueue`/`CreateCommandQueue1` and routes calls that do not come from ReShade's own module through
   ReShade's device proxy (return-address check). Result: ReShade overlay/add-ons keep working under DLSS-G.
 - Streamline is loaded only when `FrameGen != 0` at startup; the default build is the pre-FG behaviour.
+
+## PostDof findings (2026-09-01)
+
+- The DoF passes' constant buffer struct is 400 bytes; it was written into 256-byte ring slots of a 1 KB upload buffer.
+  Frame N+1's write overlapped bytes 256..400 of frame N's slot - `halfSize/fullSize/depthScale/depthSize/stepUV/
+  depthJitter/hasMask/maskScale`, i.e. every layout-critical parameter - and slot 3 ran 144 bytes past the resource.
+  With the GPU a frame or two behind the CPU (frame generation, DRS stepping under load) a frame could run its DoF
+  with the next frame's depth scale and jitter: the blur layer flickering into the top-left sub-rect. The DoF descriptor
+  heap (12 descriptors) was likewise rewritten every frame with no ring. Both are ring-buffered now (8 frames).
+- The circle of confusion is evaluated at the game's own CoC draw (the draw is still skipped), from the depth copy and
+  constants of that draw, into a half-res R16F texture on the full grid; the insertion only adds the DLSS output's
+  colour (`dof_pack_cs`) before the gather and the blend. Any missing input at the CoC draw (constants, depth copy,
+  dispatch) leaves the game's own DoF in place for that whole frame.
+- The depth de-jitter offset is in depth-copy texels (sub-rect pixels): scaled by k on dynamic-resolution frames.
+- The game's upload-heap constant buffers are mapped once and kept (a map per scene draw before); `read_cbv` and the
+  jitter patch share the cache, dropped when the resource is destroyed.
+- Still open: on resolution-step frames the game's own chain disagrees with itself for a frame (measured before: the
+  native frame flashes too); `DofStepFreeze=1` holds the previous DLSS output for that frame. If flashes remain at
+  steps, the next experiment is to read the depth at the *scene viewport's* scale on those frames rather than the CoC
+  viewport's (the `PostDof: fN depth copy ...` log lines show whether the two disagree).
+
+## Main-path pass (2026-09-01)
+
+Reviewed: jitter (Halton 2,3, 8 phases at DLAA, added to the clip rows in full-grid pixels, reported to DLSS in the same
+units; sign tuned empirically), camera vectors (full-grid pixels from the sub-res depth, unjittered VP, direction at
+infinity for the far plane), object vectors (stream-out, de-jittered with this and last frame's offsets, manual depth
+test against the stretched depth), the NGX contract (MVLowRes + DepthInverted, MVs in pixels, exposure 1, LDR input,
+sub-rect = the full texture on the full grid) and DLSS-G's constants. Nothing structurally wrong. Changed:
+- `InFrameTimeDeltaInMsec` is now filled from the game-frame interval measured at the rollover (was 0 = unknown); the
+  programming guide asks for it - the model uses it to relate vector magnitudes to speed.
+- One shader-visible descriptor heap for every add-on pass (the DoF ring follows the utility slots in `g_mvHeap`):
+  the insertion switches heaps once each way instead of per pass. objmv keeps its own (SRVs fixed per parity).
+- `table_to_cpu` caches heap type / increment / CPU start per heap: it runs for each of bgfx's ~700 descriptor copies
+  per frame and for every SRV resolved from a draw's table.
+- Upload constant buffers mapped once (jitter patch + `read_cbv`), one pipeline-state lookup per draw.
+- `ObjectMVProps=1`: object vectors also for draws whose clip matrix is not the camera's (own model matrix).
+Not changed, worth trying: verify the jitter sign with a static camera by phase-correlating consecutive raw DLSS inputs
+against the reported offsets; the 33 MB copy-back per frame could go if the DoF blend wrote the game's texture via an
+RTV draw instead of a UAV (the game's targets lack UAV access).

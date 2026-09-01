@@ -1,5 +1,7 @@
 # mgs4-dlss
 
+**v1.1.2 (2026-09-01)** — PostDof: the circle of confusion is evaluated at the game's own CoC draw (same depth copy, constants and moment as the game's pass) instead of at the DLSS insertion, and every per-frame GPU input of the DoF passes is ring-buffered. The DoF constant buffer had been written 400 bytes into 256-byte ring slots, so a frame in flight could pick up the next frame's depth scale, jitter and mask flags - the blur layer flickering into the top-left sub-rect. Also, on the main path: DLSS receives the frame-time hint (`InFrameTimeDeltaInMsec`, from the game-frame interval), every add-on pass shares one descriptor heap (one heap switch per insertion instead of one per pass), descriptor-heap metadata is cached on the per-copy hot path, the game's constant buffers are mapped once instead of per draw, the pipeline-state lookups are one per draw, the depth de-jitter is scaled by the dynamic-resolution factor, and `ObjectMVProps=1` extends object motion vectors to rigid props.
+
 **v1.1.1 (2026-08-30)** — DLAA/DLSS with camera jitter, camera + per-object motion vectors, DLSS 5 Neural Rendering compatibility, DLSS-G frame generation (2x/3x/4x/dynamic), correct handling of the port's dynamic resolution, DLSS inserted before the HUD (no HUD ghosting, clean HUD-less/UI layers for frame generation), and the pause-menu / Codec backgrounds kept as the DLSS (+NR) image. Download the add-on and the ini from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases); install steps below.
 
 Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2), built as a ReShade add-on. The NGX feature it creates can be hooked by NGX-based add-ons — **directly compatible with the DLSS 5 Neural Rendering add-on (`renodx-dlss5.addon64`)**, which is auto-detected: with it loaded, DLAA runs on the final image so NR works at full strength.
@@ -461,6 +463,7 @@ FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTarge
 FGTargetFps=240          ; match your display's refresh rate; the game itself runs at 60
 Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
+ObjectMVProps=0          ; live: 1 = object vectors also for rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes; one extra stream-out draw per such prop
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
@@ -805,9 +808,15 @@ that samples the linear depth copy, a golden-angle spiral bokeh gather, and an a
 sharp image) before the tonemap / upscale into the final texture. DLSS and the DLSS 5 NR add-on therefore only ever see
 the defocused image: an out-of-focus character carries no NR detail and the NR look "pops in" on every rack focus.
 With `PostDof=1` (live key, panel checkbox) the three draws are skipped - identified by the FNV-1a hash of their pixel
-shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - the CoC constants (`cb0[8..17]`) and the depth copy are taken
-from the skipped CoC pass, and an exact HLSL transcription of the three passes (`dof_coc_cs`, `dof_gather_cs`,
-`dof_composite_cs`) runs on the DLSS output before it is copied back, so the blur is applied to the NR-processed image.
+shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - and an exact HLSL transcription of the three passes runs on the
+DLSS output instead, so the blur is applied to the NR-processed image. The circle of confusion (`dof_coc_cs`) is
+evaluated **at the game's CoC draw**, from the depth copy that draw was about to sample and with that draw's constants
+(`cb0[8..17]`), into a half-resolution R16F texture on the full grid; at the DLSS insertion the half-res colour of the
+DLSS output is packed with it (`dof_pack_cs`), the spiral gather (`dof_gather_cs`) and the blend (`dof_composite_cs`)
+run, and the result is copied back before the HUD. Evaluating the CoC at the draw means the depth copy is exactly what
+the game's pass would have read - whatever the game does to that texture later in the frame cannot reach the blur -
+and if any input is missing at that draw (constants unreadable, depth copy unresolved) the game's own DoF runs for
+that frame, consistently for all three passes (`input fallbacks` in the stats line).
 Three things the game does around its DoF are handled explicitly: (1) dynamic-resolution sub-rect frames (scene
 starts, heavy load) are handled at the exact per-frame scale (see below); a frame where the scale *steps* keeps the
 game's DoF for that one frame (measured on the cemetery-entry ramp: the fallback flashes at +0.30 relative sharpness
@@ -829,7 +838,17 @@ Dynamic resolution: the CoC pass's viewport is exactly half the scene sub-rect, 
 without the add-on's 20-frame viewport hysteresis; the depth sample, the spiral step and the overlay mask are scaled by
 it and PostDof stays on through sub-rect frames (`DofSubRect=0` leaves them to the game's DoF instead). The CoC depth
 sample is read at the frame's camera-jitter offset (`DofJitterSign`): the depth copy is jittered, the DLSS output is not,
-and without that every blur boundary wobbled by a sub-pixel per frame.
+and without that every blur boundary wobbled by a sub-pixel per frame (the offset is in depth-copy texels, i.e. scaled
+by k on sub-rect frames).
+
+v1.1.2 fixed the blur layer flickering into the top-left sub-rect. The DoF passes' constant buffer (400 bytes) was
+written into 256-byte ring slots of a 1 KB buffer: frame N+1's write overlapped the tail of frame N's constants - the
+half/full sizes, **the depth scale**, the spiral step, the depth de-jitter and the overlay-mask flags - while the GPU
+could still be running frame N's passes (with frame generation the CPU records one or two frames ahead), and the
+fourth slot ran past the end of the buffer. The single set of descriptors was rewritten every frame for the same reason.
+Every per-frame GPU input of the DoF passes is now ring-buffered over 8 frames (constants at a 512-byte stride,
+16 descriptors per frame), the CoC is evaluated at the game's CoC draw as described above, and the stats line reports
+the depth copy's identity and addressing whenever they change (`PostDof: fN depth copy ...`).
 
 ### Pre-warm (`PreWarm=1`)
 
