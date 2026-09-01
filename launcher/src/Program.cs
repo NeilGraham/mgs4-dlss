@@ -14,11 +14,39 @@ namespace Mgs4Launcher
     static class Program
     {
         [DllImport("kernel32.dll")] static extern bool AttachConsole(int processId);
-        [DllImport("kernel32.dll")] static extern bool AllocConsole();
-        [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
+        [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int which);
+        [DllImport("kernel32.dll")] static extern bool SetStdHandle(int which, IntPtr handle);
+        [DllImport("kernel32.dll")] static extern uint GetFileType(IntPtr handle);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
         const int ATTACH_PARENT_PROCESS = -1;
+        const int STD_OUTPUT = -11, STD_ERROR = -12;
+        const uint FILE_TYPE_UNKNOWN = 0;
+
+        static bool Usable(IntPtr h)
+        {
+            return h != IntPtr.Zero && h != new IntPtr(-1) && GetFileType(h) != FILE_TYPE_UNKNOWN;
+        }
+
+        // Whatever the caller gave us to write to, keep it.
+        //
+        // AttachConsole hands the process the parent's console AND replaces its standard handles with that
+        // console's - which throws away a redirect the caller set up. Measured: `app.exe --report > out.txt` from
+        // cmd arrives with stdout on the file (FILE_TYPE_DISK) and leaves AttachConsole with stdout on a console
+        // (FILE_TYPE_CHAR), so the file caught nothing. cmd passes its handles to a windowed program and waits for
+        // it like any other, so nothing else was needed: only this call was in the way.
+        //
+        // So: attach only when the caller left us nothing usable - a double-click, where there is no console and
+        // no redirect and the right amount of output is none - and put the caller's own handles back afterwards.
+        static void KeepCallersOutput()
+        {
+            IntPtr outHandle = GetStdHandle(STD_OUTPUT), errHandle = GetStdHandle(STD_ERROR);
+            bool haveOut = Usable(outHandle), haveErr = Usable(errHandle);
+            if (haveOut && haveErr) return;
+            AttachConsole(ATTACH_PARENT_PROCESS);
+            if (haveOut) SetStdHandle(STD_OUTPUT, outHandle);
+            if (haveErr) SetStdHandle(STD_ERROR, errHandle);
+        }
 
         // Just write. Attached to a console the text lands there; redirected to a pipe or a file it lands there;
         // double-clicked, with neither, .NET hands Console.Out a null stream and it goes nowhere - which is what
@@ -33,9 +61,9 @@ namespace Mgs4Launcher
         [STAThread]
         static int Main(string[] argv)
         {
-            // Started from a terminal, this behaves like a command and prints where it was typed; double-clicked,
-            // it is a window and never flashes a console of its own.
-            AttachConsole(ATTACH_PARENT_PROCESS);
+            // Started from a terminal, this behaves like a command and prints where it was typed; redirected, it
+            // writes to the redirect; double-clicked, it is a window and never flashes a console of its own.
+            KeepCallersOutput();
 
             Options opt;
             try { opt = Options.Parse(argv); }

@@ -74,26 +74,23 @@ mgs4-dlss-launcher --set FrameGen=0        :: write ini keys without opening any
 mgs4-dlss-launcher --help                  :: every option
 ```
 
-**Three files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works: on its first run
-it builds the app, once, and every run after that just starts it. The build produces two binaries from the one set
-of sources, the way `python.exe` and `pythonw.exe` are two:
-
-| | |
-| --- | --- |
-| `mgs4-dlss-launcher.exe` | the window. A Windows-subsystem program, so a double-click never flashes a console the way a `.bat` must, and it wears the game's icon - in the title bar and on the file. |
-| `mgs4-dlss-launcher-cli.exe` | the command. A console program, so `cmd` waits for it and `mgs4-dlss-launcher.bat --report > out.txt` catches what it writes. |
-
-A windowed program cannot be both: cmd does not wait for one, and `start /b /wait` - which does wait - hands the
-child its own handles, so a redirect catches nothing (measured: 0 bytes). Scripts should call the `.bat`, which
-calls the console twin; a failing run prints why and exits non-zero without pausing, so nothing hangs waiting for a
-keypress.
-
-Neither exe is in the repo: the icon inside them is read from the `mgs4.exe` on this machine, and that artwork is
-Konami's, so they are built locally rather than redistributed. To rebuild by hand:
+**Two files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works: on its first run
+it builds `mgs4-dlss-launcher.exe`, once, and every run after that just starts it. The exe is not in the repo,
+because the icon inside it is read from the `mgs4.exe` on this machine and that artwork is Konami's. To rebuild by
+hand:
 
 ```bat
 powershell -ExecutionPolicy Bypass -File launcher\build.ps1
 ```
+
+**One exe, both jobs.** It is a Windows-subsystem program, so a double-click never flashes a console the way a
+`.bat` must - and it still behaves like a command: cmd waits for it, passes its handles through, and
+`mgs4-dlss-launcher --report > out.txt` catches what it writes. The thing that makes both true is a single rule in
+`Program.KeepCallersOutput`: **attach to the parent's console only when the caller left nothing usable, and put the
+caller's own handles back afterwards.** `AttachConsole` replaces the standard handles with the console's, which
+silently throws away a redirect - measured as stdout arriving on the file (`FILE_TYPE_DISK`) and leaving on a
+console (`FILE_TYPE_CHAR`), with the file catching nothing. A console twin was built for one commit to work around
+that, before the cause was understood; it is gone.
 
 **Why C# and not PowerShell.** It was a PowerShell app until 2026-08-31, and the port kept every flag, every file
 it reads and writes, and the window's own XAML. What changed is what PowerShell cost: **1.66 s** to put the window

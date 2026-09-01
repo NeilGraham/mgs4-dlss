@@ -1,5 +1,4 @@
-# Builds mgs4-dlss-launcher.exe (the window) and mgs4-dlss-launcher-cli.exe (the command) from
-# launcher\src, both wearing the game's own icon.
+# Builds mgs4-dlss-launcher.exe from launcher\src, wearing the game's own icon.
 #
 #   powershell -ExecutionPolicy Bypass -File launcher\build.ps1
 #
@@ -61,23 +60,14 @@ $resources = @(
     ("/resource:" + (Join-Path $src "SceneRow.xaml"))
 )
 
-# Two binaries from the one set of sources, the way python.exe and pythonw.exe are two:
-#
-#   mgs4-dlss-launcher.exe      /target:winexe - what a double-click runs. No console, ever, so the window opens
-#                               with nothing flashing behind it.
-#   mgs4-dlss-launcher-cli.exe  /target:exe - what mgs4-dlss-launcher.bat runs. A console program, so cmd waits
-#                               for it and `--report > out.txt` catches what it writes.
-#
-# A windowed program cannot be both: cmd does not wait for one, and `start /b /wait` - which does wait - hands the
-# child its own handles, so a redirect on the command line catches nothing. The console twin is the way to have a
-# command that behaves like a command.
-$cli = [IO.Path]::ChangeExtension($Out, $null).TrimEnd('.') + "-cli.exe"
-foreach ($build in @(@{ Target = "winexe"; Path = $Out }, @{ Target = "exe"; Path = $cli })) {
-    $cscArgs = @("/nologo", "/target:$($build.Target)", "/platform:anycpu", "/optimize+", "/warn:3",
-                 "/out:$($build.Path)") + $refs + $resources + $icoArg + $sources
-    & $csc @cscArgs
-    if ($LASTEXITCODE -ne 0) { throw "csc failed ($LASTEXITCODE)" }
-    $size = [math]::Round((Get-Item -LiteralPath $build.Path).Length / 1KB)
-    Write-Host "built $($build.Path) ($size KB)"
-}
+# One binary, windowed. It behaves like a command anyway: cmd waits for it and passes its handles through, so
+# `mgs4-dlss-launcher --report > out.txt` catches what it writes. That only works because Program.KeepCallersOutput
+# does not let AttachConsole throw the caller's redirect away - see the comment there. A console twin was built
+# here for one commit before that was understood; it is not needed.
+$cscArgs = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/warn:3", "/out:$Out") +
+           $refs + $resources + $icoArg + $sources
+& $csc @cscArgs
+if ($LASTEXITCODE -ne 0) { throw "csc failed ($LASTEXITCODE)" }
+$size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1KB)
+Write-Host "built $Out ($size KB)"
 Remove-Item -LiteralPath $ico -ErrorAction SilentlyContinue

@@ -17,10 +17,9 @@
 :: installed for that.
 setlocal
 set "EXE=%~dp0mgs4-dlss-launcher.exe"
-set "CLI=%~dp0mgs4-dlss-launcher-cli.exe"
 set "BUILD=%~dp0launcher\build.ps1"
 
-if not exist "%CLI%" (
+if not exist "%EXE%" (
     if not exist "%BUILD%" (
         echo Could not find launcher\build.ps1 next to this file.
         echo Run mgs4-dlss-launcher.bat from the folder it was unzipped into.
@@ -37,10 +36,9 @@ if not exist "%CLI%" (
     )
 )
 
-:: The console twin, not the windowed exe: cmd does not wait for a windowed program, and `start /b /wait`, which
-:: does wait, hands the child its own handles - so a redirect here would catch nothing. Same code, same arguments,
-:: same exit code; it just behaves like a command.
-"%CLI%" %*
+:: Straight through: cmd waits for the app and hands it this file's own handles, so `mgs4-dlss-launcher.bat
+:: --report > out.txt` catches what it writes and %ERRORLEVEL% below is the app's.
+"%EXE%" %*
 set "RC=%ERRORLEVEL%"
 
 :: No pause on a failing run: the app has already printed why, or - when it was the window that failed - said so in
