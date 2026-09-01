@@ -41,6 +41,17 @@ function Get-Mgs4SteamLibraries {
         } catch {}
     }
     $roots += @("C:\Program Files (x86)\Steam", "C:\Program Files\Steam")
+
+    # Steam's own registry entry and libraryfolders.vdf cover the normal case, but a library on a drive Steam has
+    # forgotten (or a copied install) is still worth finding, so every ready drive is tried in letter order for the
+    # handful of places a library actually sits.
+    foreach ($drive in ([IO.DriveInfo]::GetDrives() | Where-Object { $_.IsReady } | Sort-Object Name)) {
+        $letter = $drive.Name.TrimEnd('\')
+        foreach ($sub in @("", "\SteamLibrary", "\Steam", "\Games\Steam", "\Program Files (x86)\Steam", "\Program Files\Steam")) {
+            $roots += ($letter + $sub)
+        }
+    }
+
     $libs = @()
     foreach ($root in $roots) {
         $root = $root -replace '/', '\'

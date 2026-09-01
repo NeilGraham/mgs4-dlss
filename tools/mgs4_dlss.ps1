@@ -1593,7 +1593,41 @@ function New-Card($title, $blurb, $tagKind, $tagLabel) {
     return @{ Card = $card; Body = $stack }
 }
 
-# One row of the install check: glyph, name + detail, the value found, and a link to where a missing one comes from.
+# What a group's files are and where they come from, above the files themselves. This is the part that turns a list
+# of filenames into something you can act on: one link, one instruction, then the paths it produces.
+function New-GuideRow($sec) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = ConvertTo-Brush "#12151D"
+    $b.BorderBrush = ConvertTo-Brush "#20242E"
+    $b.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $b.Padding = New-Object System.Windows.Thickness 18, 12, 18, 12
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $t = New-TextBlock $sec.Guide 11 "#9AA3B4" $false $false
+    $t.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $t.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$g.Children.Add($t)
+    if ($sec.Url) {
+        $link = New-Object System.Windows.Controls.Button
+        $link.Content = $(if ($sec.UrlLabel) { $sec.UrlLabel } else { "Get the files" }) + "  " + [char]0x2192
+        $link.Style = $script:LinkStyle
+        $link.Tag = $sec.Url
+        $link.ToolTip = $sec.Url
+        $link.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+        $link.Add_Click({ Start-Process $this.Tag })
+        [System.Windows.Controls.Grid]::SetColumn($link, 1)
+        [void]$g.Children.Add($link)
+    }
+    $b.Child = $g
+    return $b
+}
+
+# One row of the install check: the path, what it is, the value found, and a link when that one file comes from
+# somewhere other than its group.
 function New-CheckRow($row, $first) {
     $st = $script:StatusStyle[$row.Status]
     $rb = New-Object System.Windows.Controls.Border
@@ -1615,7 +1649,7 @@ function New-CheckRow($row, $first) {
     $mid = New-Object System.Windows.Controls.StackPanel
     $mid.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $mid.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
-    [void]$mid.Children.Add((New-TextBlock $row.Name 13 "#E7EAF0" $false $false))
+    [void]$mid.Children.Add((New-TextBlock $row.Name 13 "#E7EAF0" $false $true))
     if ($row.Detail) {
         $d = New-TextBlock $row.Detail 11 "#858D9E" $false $false
         $d.Margin = New-Object System.Windows.Thickness 0, 2, 0, 0
@@ -2152,12 +2186,12 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.Status.Text = "no game folder set"
             return
         }
-        [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
         $sections = Invoke-InstallChecks -Game $state.GameDir
         $state.Sections = $sections
         $v = Get-Verdict $sections
         $vc = New-Card ("Install check: " + $v.Text) $v.Note $v.Kind $v.Text
         [void]$ui.InstallHost.Children.Add($vc.Card)
+        [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
         foreach ($sec in $sections) {
             $bad = @($sec.Rows | Where-Object { $_.Status -eq "bad" }).Count
             $warn = @($sec.Rows | Where-Object { $_.Status -eq "warn" }).Count
@@ -2166,11 +2200,13 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             if ($bad -gt 0) { $kind = "bad"; $label = "$bad missing" }
             if (@($sec.Rows).Count -eq 0) { $kind = "info"; $label = "nothing to check" }
             $card = New-Card $sec.Title $sec.Blurb $kind $label
+            if ($sec.Guide -or $sec.Url) { [void]$card.Body.Children.Add((New-GuideRow $sec)) }
             $first = $true
             foreach ($row in $sec.Rows) {
                 [void]$card.Body.Children.Add((New-CheckRow $row $first))
                 $first = $false
             }
+
             [void]$ui.InstallHost.Children.Add($card.Card)
         }
         $ui.Status.Text = "checked at " + (Get-Date -Format "HH:mm:ss") + "  -  file list: tools\install_manifest.json"

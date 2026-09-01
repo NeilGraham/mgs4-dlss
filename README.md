@@ -190,14 +190,21 @@ ReShade's overlay, Add-ons tab.
 
 Most of the files this add-on needs cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and
 ReShade all have to be fetched from their own projects, so an install is assembled by hand and it is easy to end up
-one file short. The Setup tab leads with the game folder everything is checked against - the path, where it came from, and a Browse button that records your choice as `MGS4_DIR` in `config.ini`. Below that it lists every required and optional file, what version it is, and a link to where each
-missing one comes from. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
+one file short. The Setup tab opens with the verdict, then the game folder everything is checked against — the path, where it came
+from, a Browse button that records your choice as `MGS4_DIR` in `config.ini`, and Detect to stop pinning one and
+search the Steam libraries again. Auto-detection reads Steam's registry entry and `libraryfolders.vdf`, then tries
+every drive in letter order for the handful of places a library sits, so a library Steam has forgotten is still
+found without pressing anything. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
 second monitor while files are dropped into the game folder, and **Copy report** puts the text form on the clipboard.
 
 What it reports, beyond whether a file exists:
 
-- **Files**, grouped by the feature each one unlocks (required / DLSS 5 NR / frame generation / extras), with the
-  version found next to the version this was verified against.
+- **Files, grouped by where they come from** rather than by feature, because that is the order the work happens in:
+  open one link, follow one sentence, drop that group's files in. Each group carries the source it came from as a
+  button — Steam, reshade.me, the releases page, the DLSS SDK, the **RenoDX Discord** (the DLSS 5 files live under
+  its Pinned Messages), the Streamline SDK — and each row is the **path relative to the game folder**, which is the
+  thing you actually have to get right, with what it is underneath and the version found on the right. A file that
+  comes from somewhere other than its group keeps its own link.
 - **Settings** that the Settings tab does not cover, plus anything that reads as wrong. The game's own options
   (`api=dx12`, vsync, the frame limiter, FXAA), whether ReShade has the add-on disabled, whether the virtual
   controller the Play tab wants is there — and `FrameGen` checked against the display's actual refresh rate, which

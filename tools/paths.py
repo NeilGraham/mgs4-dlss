@@ -80,6 +80,16 @@ def _steam_libraries():
         pass
     roots += [r"C:\Program Files (x86)\Steam", r"C:\Program Files\Steam"]
 
+    # Steam's registry entry and libraryfolders.vdf cover the normal case; a library on a drive Steam has forgotten
+    # is still worth finding, so every drive is tried in letter order for the handful of places a library sits.
+    for letter in "CDEFGHIJKLMNOPQRSTUVWXYZAB":
+        drive = letter + ":"
+        if not os.path.isdir(drive + os.sep):
+            continue
+        for sub in ("", "SteamLibrary", "Steam", os.path.join("Games", "Steam"),
+                    os.path.join("Program Files (x86)", "Steam"), os.path.join("Program Files", "Steam")):
+            roots.append(os.path.join(drive + os.sep, sub) if sub else drive + os.sep)
+
     libs = []
     for root in roots:
         root = os.path.normpath(root)

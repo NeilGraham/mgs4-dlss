@@ -145,7 +145,7 @@ function Invoke-InstallChecks {
             $full = Join-Mgs4Path $Game $f.path
             $present = Test-Mgs4Path $full
             $detail = $f.detail
-            $value = $f.path
+            $value = "not found"
             if ($present) {
                 $ver = Get-PeVersion $full
                 $status = "ok"
@@ -159,7 +159,7 @@ function Invoke-InstallChecks {
                     if ($bytes -ge 1024) { $value = "{0:n0} KB" -f [math]::Round($bytes / 1KB) } else { $value = "$bytes bytes" }
                 }
             } else {
-                if ($sec.id -eq "required") { $status = "bad" } else { $status = "warn" }
+                if ($sec.required) { $status = "bad" } else { $status = "warn" }
                 $value = "not found"
                 # DLSS itself can come from the driver instead of a file in the game folder.
                 if ($f.optionalIfDriverOverride -and $run.NvngxProxy -and $run.NvngxProxy -ne "0000000000000000") {
@@ -173,9 +173,14 @@ function Invoke-InstallChecks {
                 $status = "warn"
                 $detail = "ReShade loaded but never searched for add-ons - this looks like the build WITHOUT add-on support"
             }
-            $rows += New-Row $status $f.name $detail $value $f.url
+            $ownUrl = $null
+            if ($f.url -and $f.url -ne $sec.url) { $ownUrl = $f.url }
+            $rows += New-Row $status $f.path $detail $value $ownUrl
         }
-        $sections += [pscustomobject]@{ Id = $sec.id; Title = $sec.title; Blurb = $sec.blurb; Rows = $rows }
+        $sections += [pscustomobject]@{
+            Id = $sec.id; Title = $sec.title; Blurb = $sec.blurb; Rows = $rows
+            Required = [bool]$sec.required; Url = $sec.url; UrlLabel = $sec.urlLabel; Guide = $sec.guide
+        }
     }
 
     # ------------------------------------------------------------------ settings
@@ -320,11 +325,12 @@ function Invoke-InstallChecks {
 }
 
 function Get-Verdict($sections) {
-    $req = $sections | Where-Object { $_.Id -eq "required" }
     $bad = @($sections.Rows | Where-Object { $_.Status -eq "bad" }).Count
     $warn = @($sections.Rows | Where-Object { $_.Status -eq "warn" }).Count
     $reqBad = 0
-    if ($req) { $reqBad = @($req.Rows | Where-Object { $_.Status -ne "ok" }).Count }
+    foreach ($sec in ($sections | Where-Object { $_.Required })) {
+        $reqBad += @($sec.Rows | Where-Object { $_.Status -ne "ok" }).Count
+    }
     if ($reqBad -gt 0) { return @{ Text = "Not ready"; Kind = "bad"; Note = "$reqBad required item(s) missing" } }
     if ($bad -gt 0) { return @{ Text = "Needs a fix"; Kind = "bad"; Note = "$bad problem(s) found" } }
     if ($warn -gt 0) { return @{ Text = "Ready"; Kind = "warn"; Note = "$warn thing(s) worth a look" } }
@@ -341,9 +347,10 @@ function Format-TextReport($game, $sections) {
     foreach ($sec in $sections) {
         [void]$sb.AppendLine("")
         [void]$sb.AppendLine("[$($sec.Title)]")
+        if ($sec.Url) { [void]$sb.AppendLine("  " + $sec.Url) }
         foreach ($r in $sec.Rows) {
             $mark = switch ($r.Status) { "ok" { "ok  " } "warn" { "warn" } "bad" { "MISS" } default { "    " } }
-            [void]$sb.AppendLine(("  {0}  {1,-30} {2}" -f $mark, $r.Name, $r.Value))
+            [void]$sb.AppendLine(("  {0}  {1,-28} {2}" -f $mark, $r.Name, $r.Value))
             if ($r.Status -ne "ok" -and $r.Detail) { [void]$sb.AppendLine("        $($r.Detail)") }
             if ($r.Status -ne "ok" -and $r.Url) { [void]$sb.AppendLine("        $($r.Url)") }
         }
