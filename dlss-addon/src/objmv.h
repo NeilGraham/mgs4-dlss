@@ -25,6 +25,7 @@ namespace objmv {
         uint32_t psosSeen = 0, rootSigsSeen = 0, rootSigsSoEnabled = 0, soPsos = 0, soPsoFailures = 0, velPsos = 0;
         uint32_t captured = 0, withPrev = 0, skipped = 0, overflow = 0;      // this frame (copied to *Last at new_frame)
         uint32_t capturedLast = 0, withPrevLast = 0, skippedLast = 0, overflowLast = 0;
+        uint32_t reorderedLast = 0;   // last frame: pairings with a previous occurrence other than the same-index one (instances of one mesh changed draw order)
         uint32_t slotsUsed = 0, velocityFrames = 0;
         // timing, averaged over the last second: GPU ms of the stream-out draws, of the velocity pass, of the whole
         // scene (first scene draw -> after DLSS), and CPU ms spent in capture()/velocity()
@@ -47,7 +48,9 @@ namespace objmv {
     // frame's sub-pixel jitter. Leaves the game's PSO bound again. Returns true if the draw was captured.
     // ownVp: the draw's own viewport when it is not the frame's scene viewport (a 3D window such as the pause-menu
     // model); the velocity pass then rasterises this object into that rectangle instead of the pass viewport.
-    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp);
+    // key identifies the geometry only (several instances of one mesh share it); anchor[anchorN] = the head of the
+    // draw's vertex constants, the per-instance signature used to pair this occurrence with last frame's same instance.
+    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN);
 
     // At the injection point after the camera motion vectors were written: rasterise every captured object that was
     // also captured last frame into mvRtv (R16G16_FLOAT, pixels, prev - cur), depth-tested (reversed-Z, greater-equal)

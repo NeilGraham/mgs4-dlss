@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -298,8 +299,17 @@ static double g_accSo = 0, g_accVel = 0, g_accFrame = 0, g_accCpu = 0; static ui
 static double g_cpuThisFrame = 0; static LARGE_INTEGER g_qpf = {};
 static bool g_velRan = false;
 
-struct Slot { uint32_t lastFrame; uint32_t off[2], bound[2], ctr[2]; uint64_t velKey[2]; bool jit[2]; bool ownVp[2]; D3D12_VIEWPORT vp[2]; };
+// One geometry key (buffers + index range) is drawn several times a frame when several instances share a mesh - every
+// PMC soldier is the same mesh. Pairing this frame's n-th occurrence with last frame's n-th went wrong whenever their
+// draw order changed (depth sorting as the camera walks around them): a soldier got another soldier's previous
+// positions and a frame of bogus vectors on its body. Each occurrence therefore carries a signature - the head of its
+// vertex constants (per-instance transform / first bones) - and is paired with the previous frame's unclaimed
+// occurrence whose signature is nearest (frame-to-frame drift is small against the distance between two instances).
+static const uint32_t kAnchorN = 32;
+struct Occ { uint32_t off, bound, ctr; bool jit, ownVp, claimed; D3D12_VIEWPORT vp; float anchor[kAnchorN]; };
+struct Slot { uint32_t lastFrame[2] = { UINT32_MAX, UINT32_MAX }; std::vector<Occ> occ[2]; };   // per frame parity
 static std::unordered_map<uint64_t, Slot> g_slots;
+static uint32_t g_reordered = 0;   // pairings that were not the same occurrence index (diagnostics)
 struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; bool ownVp; D3D12_VIEWPORT vp; };
 static std::vector<VelEntry> g_vel;
 
@@ -468,8 +478,8 @@ static void read_timing(uint32_t frame)
 
 void new_frame(uint32_t frame)
 {
-    g_st.capturedLast = g_st.captured; g_st.withPrevLast = g_st.withPrev; g_st.skippedLast = g_st.skipped; g_st.overflowLast = g_st.overflow;
-    g_st.captured = g_st.withPrev = g_st.skipped = g_st.overflow = 0;
+    g_st.capturedLast = g_st.captured; g_st.withPrevLast = g_st.withPrev; g_st.skippedLast = g_st.skipped; g_st.overflowLast = g_st.overflow; g_st.reorderedLast = g_reordered;
+    g_st.captured = g_st.withPrev = g_st.skipped = g_st.overflow = 0; g_reordered = 0;
     g_accCpu += g_cpuThisFrame; g_cpuThisFrame = 0;
     read_timing(frame);
     const ULONGLONG t = GetTickCount64();
@@ -481,7 +491,7 @@ void new_frame(uint32_t frame)
     g_vel.clear();
     g_st.slotsUsed = (uint32_t)g_slots.size();
     if (g_slots.size() > 4096) {   // drop entries not seen recently
-        for (auto it = g_slots.begin(); it != g_slots.end();) { if (frame - it->second.lastFrame > 120) it = g_slots.erase(it); else ++it; }
+        for (auto it = g_slots.begin(); it != g_slots.end();) { const uint32_t a = it->second.lastFrame[0], b = it->second.lastFrame[1]; const uint32_t last = (a == UINT32_MAX) ? b : (b == UINT32_MAX ? a : (a > b ? a : b)); if (last == UINT32_MAX || frame - last > 120) it = g_slots.erase(it); else ++it; }
         if (g_slots.size() > 4096) g_slots.clear();
     }
 }
@@ -514,7 +524,7 @@ static void begin_captures(ID3D12GraphicsCommandList* cl)
     transition(cl, g_soBuf[p], &g_soState[p], D3D12_RESOURCE_STATE_STREAM_OUT);
 }
 
-bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp)
+bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN)
 {
     if (!g_st.ready || !gamePso) return false;
     const double t0 = cpu_now_ms();
@@ -538,10 +548,34 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
     g_soBytesThisFrame += bytes;
 
     Slot& s = g_slots[key];
-    const bool havePrev = s.lastFrame == g_curFrame - 1 && s.bound[p ^ 1] == bound;
+    if (s.lastFrame[p] != g_curFrame) { s.occ[p].clear(); s.lastFrame[p] = g_curFrame; }
+    // Diagnostics: a geometry drawn more than once a frame, and a change in how often, is where a wrong pairing comes from
+    if (!s.occ[p].empty()) {
+        static uint32_t nlog = 0;
+        const size_t prevN = s.lastFrame[p ^ 1] == g_curFrame - 1 ? s.occ[p ^ 1].size() : 0;
+        if (s.occ[p].size() + 1 != prevN && nlog < 60) { nlog++; LOG("objmv: f%u geometry %016llx drawn %zu+ times this frame (%zu last frame): occurrence %zu vs %016llx ps %016llx, %u vertices%s", g_curFrame, (unsigned long long)key, s.occ[p].size() + 1, prevN, s.occ[p].size(), (unsigned long long)rec->vsHash, (unsigned long long)rec->psHash, bound, rec->skinned ? ", skinned" : ""); }
+    }
+    Occ cur = {}; cur.off = off; cur.bound = bound; cur.ctr = idx; cur.jit = jittered; cur.ownVp = ownVp != nullptr; if (ownVp) cur.vp = *ownVp;
+    for (uint32_t i = 0; i < kAnchorN && i < anchorN; ++i) { const float v = anchor ? anchor[i] : 0.0f; cur.anchor[i] = (v == v && fabsf(v) < 1e12f) ? v : 0.0f; }   // NaN / packed values -> 0
     uint64_t velKey = 0, velKeyM = 0; vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, false, &velKey); vel_pso(rec, DXGI_FORMAT_D24_UNORM_S8_UINT, true, &velKeyM);   // creates the variants lazily
-    if (havePrev) { VelEntry e = { velKey, velKeyM, off, s.off[p ^ 1], idx, s.ctr[p ^ 1], bound, (jittered ? 1u : 0u) | (s.jit[p ^ 1] ? 2u : 0u), ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{} }; g_vel.push_back(e); g_st.withPrev++; }
-    s.lastFrame = g_curFrame; s.off[p] = off; s.bound[p] = bound; s.ctr[p] = idx; s.jit[p] = jittered; s.velKey[p] = velKey; s.ownVp[p] = ownVp != nullptr; if (ownVp) s.vp[p] = *ownVp;
+    if (s.lastFrame[p ^ 1] == g_curFrame - 1) {
+        // the previous frame's occurrence of this geometry with the nearest signature (same vertex count), not yet paired
+        std::vector<Occ>& prev = s.occ[p ^ 1];
+        Occ* best = nullptr; float bestD = 0.0f; size_t bestI = 0;
+        for (size_t i = 0; i < prev.size(); ++i) {
+            Occ& o = prev[i];
+            if (o.claimed || o.bound != bound) continue;
+            float d = 0.0f; for (uint32_t k = 0; k < kAnchorN; ++k) { const float t = o.anchor[k] - cur.anchor[k]; d += t * t; }
+            if (!best || d < bestD) { best = &o; bestD = d; bestI = i; }
+        }
+        if (best) {
+            best->claimed = true;
+            if (bestI != s.occ[p].size()) g_reordered++;
+            VelEntry e = { velKey, velKeyM, off, best->off, idx, best->ctr, bound, (jittered ? 1u : 0u) | (best->jit ? 2u : 0u), ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{} };
+            g_vel.push_back(e); g_st.withPrev++;
+        }
+    }
+    s.occ[p].push_back(cur);
 
     if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 4 + 2 * idx);
     cl->SetPipelineState(so);

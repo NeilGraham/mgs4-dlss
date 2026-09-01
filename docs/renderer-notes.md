@@ -208,3 +208,62 @@ sub-rect = the full texture on the full grid) and DLSS-G's constants. Nothing st
 Not changed, worth trying: verify the jitter sign with a static camera by phase-correlating consecutive raw DLSS inputs
 against the reported offsets; the 33 MB copy-back per frame could go if the DoF blend wrote the game's texture via an
 RTV draw instead of a UAV (the game's targets lack UAV access).
+
+## Gameplay flicker on PMC soldiers (2026-09-01, afternoon)
+
+Read from a 13-minute gameplay log (Act 1, Snake among PMC soldiers, FrameGen dynamic to 240, PostDof switched off from
+the overlay mid-run to test):
+- 94 history resets; 31 of them with rotation delta 0.0000-0.007 and a position jump of 1600-2600 units, one every
+  ~30 s in gameplay. The game's units are millimetres (near plane ~49, camera ~30 m from the origin), so these are 2 m
+  camera snaps - aiming in/out, cover - not cuts. Every one cleared the DLSS + NR history for a frame. `CutPosLimit`
+  (default 6000) replaces the hard-coded 1500; real cuts in the same log had rotation deltas of 0.5-2.0 and are still caught.
+- Object vectors looked healthy (captured == with history, no overflow), but the pairing across frames was geometry key +
+  n-th occurrence. Every PMC soldier is the same mesh; as the camera walks around them their draw order changes and a
+  soldier inherits another soldier's previous positions: a frame of bogus vectors exactly on the body. Occurrences now
+  carry the head of their vertex constants (32 floats: per-instance transform / first bones) and pair with the nearest
+  unclaimed previous occurrence of the same geometry and vertex count. The stats line reports `re-paired by signature N`.
+- 165-174 scene draws per frame have no clip matrix in their first 9 registers; the logged samples into the geometry
+  target are screen-space effects (colour constants, 3784x2128 / 1892x1064 sizes), not characters.
+- Remaining suspects if the on-body flicker persists: DLSS-G's interpolated frames (switch Frame generation to Off in
+  the overlay - live - and compare), and `DebugMode=9` to see whether the vector silhouette of a soldier sits on the
+  soldier every frame.
+- Follow-up the same afternoon: the on-body flicker only shows with frame generation on. Since the windowed state
+  (3619x2036 backbuffer, 3784x2128 render) fg.cpp had been *dropping* the HUD-less and UI hints because DLSS-G only takes
+  them at the colour size - so DLSS-G was guessing the HUD from the backbuffer every frame, and its UI heuristics act on
+  any high-contrast detail (a soldier's gear). The hints are now rescaled (resample_cs, bilinear supersample) into
+  backbuffer-sized copies at the composite draw - when the frame's HUD layer is complete - and tagged valid-until-present
+  (`FG: HUD-less / UI hints rescaled to the backbuffer size` in the log). DebugMode 9 (vector field over the image) and
+  the DoF views are in the overlay's Debug combo now.
+- Same afternoon, from the live log's `no clip matrix` samples: one PSO family carries **bone matrices from register 0 on**
+  (three-row affine blocks, translation rows with w = 1) - the skinned character shaders keep their view-projection
+  after the palette, far past the 9 registers the jitter patch searched. Those draws were never jittered: characters sat
+  still while DLSS assumed the frame's jitter (a sub-pixel wobble on every character), and with frame generation the
+  interpolated frames (exact object vectors) alternate with the wobbling real frames at 240 Hz - the FG-only flicker on
+  the PMC soldiers. The patch now learns the matrix offset once per vertex shader (scan of up to 1024 floats for the
+  clip-matrix signature, validated as the camera against last frame's VP, retried every 600 frames) and jitters at that
+  offset. Log: `clip matrix of vertex shader ... found at c[N]`; stats: `patched N (M at a learned deep offset)`.
+- Recording `gold/raw/rec_20260901_134224.mkv` with DebugMode=9 (vector field over the image), 4K60: frame 776 Snake's
+  suit saturated green, 777 saturated red (a sign flip = two captures of one geometry swapping roles between frames:
+  the same mesh drawn twice a frame in two spaces, with the order or the count changing); frame 779 the lying soldier's
+  torso + arm saturated magenta for one frame (previous positions from another instance of the same mesh or another
+  space). DLSS SR hides such a frame behind its colour validation; DLSS-G warps geometry with it - the FG-only flicker.
+  Two nets now: (a) objmv pairs occurrences of one geometry by the head of their vertex constants (instances), and
+  (b) object vectors are rasterised into their own texture over a sentinel and merged into the camera vectors only
+  where |object - camera| <= ObjectMVMaxDelta (64 px; wrong pairings are tens to hundreds of pixels) - mvmerge_cs.
+  objmv logs `geometry X drawn N+ times this frame (M last frame)` with VS/PS hashes to identify the second pass.
+- The first build with the merge pass (14:00) was broken: an appended comment had swallowed the tail of the shared
+  constant buffer's one-line resource description, `MV: constant buffer creation failed 0x80070057`, the motion-vector
+  pass never initialised and every evaluation ran with reset = 1 - raw jitter visibly shaking on a paused screen. Fixed
+  14:13. From that run's log: the bone-first vertex shaders (3f0517db..., 975b7a68..., c9e1924f..., f00558961...) have
+  **no camera matrix in their first 256 registers** either - the VP is deeper than 1 KB or those shaders get the view
+  and projection some other way (a projection at a fixed register with bones pre-multiplied by the view?). Only 2-4
+  draws per frame pick up a learned deep offset. The objmv diagnostics show many skinned geometries drawn 2-4 times per
+  frame under different vertex/pixel shaders (e.g. vs b3c51eb9... with ps cf56ac1f / c6a19156 / d777cc29, vs
+  f143b014..., 918379677..., 29fd7f25...): multi-pass character rendering, which is what the merge's plausibility bound
+  is there for.
+- Performance vs 9d87c29 (user report, 15:00): game pacing unchanged at 16.6 ms but the scene GPU window rose (12.4-12.9
+  -> 13.1-15.3 ms, different scene content included) and generated frames live in what is left of the 16.7 ms. Cut back:
+  the FG hint rescale is opt-in (`FGHintRescale=0`), `ObjectMVMaxDelta=0` restores the direct velocity path (no extra
+  texture, clear or merge pass), and the pairing signature comes from the constants the jitter patch already read per
+  region (no second write-combined read per capture). Default-on GPU delta vs 9d87c29 is now the merge pass alone
+  (~0.1 ms); DebugMode=9 itself adds a 4K blend pass every frame and must be off for any A/B.
