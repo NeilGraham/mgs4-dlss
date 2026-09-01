@@ -49,6 +49,40 @@ function Get-IniValue($path, $key) {
     return $null
 }
 
+# In place, keeping the order and the comments. The add-on owns this file while the game runs - its writes go through
+# the Windows profile API, whose cache will happily undo an outside edit - so every caller checks that first.
+function Set-Ini([string]$path, [hashtable]$values) {
+    if (-not (Test-Mgs4Path $path)) { throw "no mgs4_dlss.ini at $path" }
+    $lines = @(Get-Content -LiteralPath $path -Encoding ASCII)
+    $left = @{}
+    foreach ($k in $values.Keys) { $left[$k] = $values[$k] }
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
+            $k = $Matches[1]
+            if ($left.ContainsKey($k)) {
+                $comment = ""
+                if ($lines[$i] -match '(\s+;.*)$') { $comment = $Matches[1] }
+                $lines[$i] = "$k=$($left[$k])$comment"
+                $left.Remove($k)
+            }
+        }
+    }
+    foreach ($k in @($left.Keys)) { $lines = @($lines) + "$k=$($left[$k])" }
+    Set-Content -LiteralPath $path -Value $lines -Encoding ASCII
+}
+
+# What the game's own options have to say for the add-on to work. The check reads them and Set-GameSettings writes
+# them, from this one list.
+$script:WantedGameSettings = [ordered]@{ api = "dx12"; vsync = "false"; fpsLimiter = "60"; enableFXAA = "false" }
+
+# Writes those four into mgs4.savedsettings, leaving everything else in the file alone. The game owns this file
+# while it runs, so the caller checks that first.
+function Set-GameSettings([string]$savedSettings) {
+    if (-not (Test-Mgs4Path $savedSettings)) { throw "no mgs4.savedsettings to write to" }
+    Set-Ini $savedSettings ([hashtable]$script:WantedGameSettings)
+    return $savedSettings
+}
+
 function Get-SavedSettingsPath($game) {
     $root = Split-Path -Parent $game           # ...\METAL GEAR SOLID 4
     $saves = Join-Mgs4Path $root "mgs4_savedata_win"
@@ -182,18 +216,20 @@ function Invoke-InstallChecks {
         $sections += [pscustomobject]@{
             Id = $sec.id; Title = $sec.title; Blurb = $sec.blurb; Rows = $rows
             Required = [bool]$sec.required; Url = $sec.url; UrlLabel = $sec.urlLabel; Guide = $sec.guide
-            Accepts = @($sec.accepts)
+            Accepts = @($sec.accepts); Drop = @($sec.drop)
         }
     }
 
     # ------------------------------------------------------------------ settings
     $rows = @()
     $ss = Get-SavedSettingsPath $Game
+    $wrong = @()
     if ($ss) {
-        $want = [ordered]@{ api = "dx12"; vsync = "false"; fpsLimiter = "60"; enableFXAA = "false" }
+        $want = $script:WantedGameSettings
         $why = @{ api = "DLSS needs the D3D12 backend"; vsync = "off, the frame limiter paces instead";
                   fpsLimiter = "the port is built around 60"; enableFXAA = "DLAA replaces it; both together smears" }
         foreach ($k in $want.Keys) {
+            if ((Get-IniValue $ss $k) -ne $want[$k]) { $wrong += $k }
             $have = Get-IniValue $ss $k
             if ($null -eq $have) {
                 $rows += New-Row "warn" "Game: $k" "not written yet - set it once in the in-game options" "unset" $null
@@ -263,7 +299,7 @@ function Invoke-InstallChecks {
 
     $sections += [pscustomobject]@{ Id = "settings"; Title = "Settings"
         Blurb = "The ones the Settings tab does not cover - the game's own options, ReShade's, and anything that reads as wrong."
-        Rows = $rows }
+        Rows = $rows; SavedSettings = $ss; WrongKeys = @($wrong) }
 
     # ------------------------------------------------------------------ last run
     $rows = @()
@@ -369,6 +405,14 @@ function Get-DropTarget($sections, [string]$name) {
         }
     }
     return $null
+}
+
+# The file names the drop area names, straight from the manifest so the two cannot drift.
+function Get-DropNames {
+    $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $names = @()
+    foreach ($sec in $manifest.sections) { foreach ($d in @($sec.drop)) { if ($d) { $names += $d } } }
+    return $names
 }
 
 # Where a dropped or unpacked file belongs. Most sit next to mgs4.exe; anything the archive already put in a

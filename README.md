@@ -221,15 +221,19 @@ What it reports, beyond whether a file exists:
      winmm at startup, which is what makes `scripts\` load at all) and the limiter into `scripts\`.
   7. **D3D12 fallback**, only for a build whose Options -> Graphics has no DirectX 12 entry.
 
-  **Drag and drop does most of it.** Drop `streamline.zip`, `MGSFPSUnlock.zip`, `renodx-dlss5.addon64`,
-  `mgs4_dlss.addon64` or the ReShade setup onto the Setup tab: archives are unpacked into the game folder keeping
+  **Drag and drop does most of it.** The Setup tab has a drop area naming exactly what it takes —
+  `ReShade_Setup_*.exe`, `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, `MGSFPSUnlock.zip`, read
+  straight out of the manifest so the two cannot drift. Drop any of them anywhere on the tab: archives are unpacked
+  into the game folder keeping
   the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the
   ReShade setup is started for you, and the check re-runs. Only files the install actually uses are written —
   anything else in a dropped archive is left alone and named in the status line.
 
 - **Settings** that the Settings tab does not cover, plus anything that reads as wrong. The game's own options
-  (`api=dx12`, vsync, the frame limiter, FXAA), whether ReShade has the add-on disabled, whether the virtual
-  controller the Play tab wants is there — and `FrameGen` checked against the display's actual refresh rate, which
+  (`api=dx12`, vsync, the frame limiter, FXAA) — with a **Set them for me** button that writes all four into
+  `mgs4.savedsettings`, leaving the rest of that file alone, and refuses while the game is running because the game
+  owns it then. Also whether ReShade has the add-on disabled, whether the virtual controller the Play tab wants is
+  there — and `FrameGen` checked against the display's actual refresh rate, which
   is the one add-on key a form cannot judge on its own. The add-on's own keys live on the Settings tab and only
   appear here when they are a problem (`Enabled=0`, a diagnostic left on), so this is not a second read-only copy
   of that tab.

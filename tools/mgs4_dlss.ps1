@@ -398,28 +398,6 @@ $script:IniSpec = @(
        Help = "write every pipeline's bytecode to logs\shaders" }
 )
 
-# In place, keeping the order and the comments. The add-on owns this file while the game runs - its writes go through
-# the Windows profile API, whose cache will happily undo an outside edit - so every caller checks that first.
-function Set-Ini([string]$path, [hashtable]$values) {
-    if (-not (Test-Mgs4Path $path)) { throw "no mgs4_dlss.ini at $path" }
-    $lines = @(Get-Content -LiteralPath $path -Encoding ASCII)
-    $left = @{}
-    foreach ($k in $values.Keys) { $left[$k] = $values[$k] }
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') {
-            $k = $Matches[1]
-            if ($left.ContainsKey($k)) {
-                $comment = ""
-                if ($lines[$i] -match '(\s+;.*)$') { $comment = $Matches[1] }
-                $lines[$i] = "$k=$($left[$k])$comment"
-                $left.Remove($k)
-            }
-        }
-    }
-    foreach ($k in @($left.Keys)) { $lines = @($lines) + "$k=$($left[$k])" }
-    Set-Content -LiteralPath $path -Value $lines -Encoding ASCII
-}
-
 function Test-GameRunning { return [bool](Get-Process mgs4 -ErrorAction SilentlyContinue) }
 
 # Where the game folder came from, for the Setup tab to say so.
@@ -817,12 +795,13 @@ function Write-SceneList($filter) {
 }
 
 function Write-SettingsReport($gameDir) {
+    $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
     Write-Host "mgs4_dlss.ini: $ini"
     if (-not (Test-Mgs4Path $ini)) { Write-Host "  (not there - copy dlss-addon\mgs4_dlss.ini next to mgs4.exe)"; return }
     $group = ""
     foreach ($s in $script:IniSpec) {
         if ($s.Group -ne $group) { $group = $s.Group; Write-Host ""; Write-Host "[$group]" }
-        $v = Get-IniValue (Join-Mgs4Path $state.GameDir "mgs4_dlss.ini") $s.Key
+        $v = Get-IniValue $ini $s.Key
         if ($null -eq $v) { $v = "(unset)" }
         Write-Host ("  {0,-22} {1,-12} {2}" -f $s.Key, $v, $s.Label)
     }
@@ -833,6 +812,7 @@ function Write-SettingsReport($gameDir) {
 }
 
 function Set-SettingsFromCli($gameDir, $sets) {
+    $ini = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
     if (Test-GameRunning) {
         Write-Host "mgs4.exe is running - it rewrites mgs4_dlss.ini through the profile API and would undo this. Close it first." -ForegroundColor Yellow
         return 1
@@ -1465,6 +1445,24 @@ function ConvertTo-Brush($hex) {
     return New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex))
 }
 
+# A line with some of its words picked out - the file names you can actually drag in.
+function New-MixedLine($size, $color, $segments) {
+    $t = New-Object System.Windows.Controls.TextBlock
+    $t.FontSize = $size
+    $t.Foreground = ConvertTo-Brush $color
+    $t.TextWrapping = [System.Windows.TextWrapping]::Wrap
+    foreach ($seg in $segments) {
+        $run = New-Object System.Windows.Documents.Run $seg.Text
+        if ($seg.Strong) {
+            $run.FontWeight = [System.Windows.FontWeights]::SemiBold
+            $run.Foreground = ConvertTo-Brush "#CBD8FF"
+            $run.FontFamily = New-Object System.Windows.Media.FontFamily "Consolas"
+        }
+        [void]$t.Inlines.Add($run)
+    }
+    return $t
+}
+
 function New-TextBlock($text, $size, $color, $bold, $mono) {
     $t = New-Object System.Windows.Controls.TextBlock
     $t.Text = [string]$text
@@ -1482,6 +1480,47 @@ $script:StatusStyle = @{
     warn = @{ Glyph = [char]0x25B2; Fg = "#F2C14E"; Bg = "#251E10"; Br = "#7A6027" }
     bad  = @{ Glyph = [char]0x2716; Fg = "#FF7B72"; Bg = "#2A1618"; Br = "#7E3B3B" }
     info = @{ Glyph = [char]0x25CF; Fg = "#7C9CFF"; Bg = "#161B2A"; Br = "#33436E" }
+}
+
+# The game's own four options, and a button that writes them. They live in mgs4.savedsettings, which the game owns
+# while it runs, so the button says so rather than writing into a file that will be overwritten.
+function New-GameSettingsRow($sec, $state) {
+    $wrong = @($sec.WrongKeys)
+    $running = Test-GameRunning
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = ConvertTo-Brush "#12151D"
+    $b.BorderBrush = ConvertTo-Brush "#20242E"
+    $b.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $b.Padding = New-Object System.Windows.Thickness 18, 12, 18, 12
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $text = $(if ($wrong.Count) { "The game is set to " + ($wrong -join ", ") + " differently from what the add-on needs." }
+              else { "DirectX 12, vsync off, FXAA off and the 60 fps limiter are all set as the add-on wants them." })
+    if ($running) { $text += " The game is running - close it before writing to its settings." }
+    $t = New-TextBlock $text 11 "#9AA3B4" $false $false
+    $t.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $t.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$g.Children.Add($t)
+
+    $btn = New-Object System.Windows.Controls.Button
+    $btn.Content = "Set them for me"
+    $btn.Style = $(if ($wrong.Count -and -not $running) { $script:PrimaryStyle } else { $script:FlatStyle })
+    $btn.IsEnabled = ($wrong.Count -gt 0) -and (-not $running)
+    $btn.ToolTip = "Writes api=dx12, vsync=false, enableFXAA=false and fpsLimiter=60 into " + $sec.SavedSettings
+    $btn.Tag = @{ Path = $sec.SavedSettings; State = $state }
+    $btn.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $btn.Add_Click({
+        $tag = $this.Tag
+        & $tag.State.ApplyGameSettings $tag.Path
+    })
+    [System.Windows.Controls.Grid]::SetColumn($btn, 1)
+    [void]$g.Children.Add($btn)
+    $b.Child = $g
+    return $b
 }
 
 # The Setup tab's first card, and the only one that is not a step: how the check came out, the folder it was run
@@ -1552,16 +1591,51 @@ function New-StatusCard($state, $verdict) {
     $row.Child = $g
     [void]$c.Body.Children.Add($row)
 
-    $drop = New-Object System.Windows.Controls.Border
-    $drop.BorderBrush = ConvertTo-Brush "#20242E"
-    $drop.BorderThickness = New-Object System.Windows.Thickness 0, 1, 0, 0
-    $drop.Padding = New-Object System.Windows.Thickness 18, 12, 18, 13
-    $drop.Child = (New-TextBlock ("Drag the downloads onto this tab and each one goes where it belongs - " +
-                                  "streamline.zip and MGSFPSUnlock.zip are unpacked into the game folder, " +
-                                  "renodx-dlss5.addon64 and mgs4_dlss.addon64 land beside mgs4.exe, and the " +
-                                  "ReShade setup is started for you. Anything that is not part of the install is " +
-                                  "left alone and named below.") 11 "#9AA3B4" $false $false)
-    [void]$c.Body.Children.Add($drop)
+    $outer = New-Object System.Windows.Controls.Border
+    $outer.BorderBrush = ConvertTo-Brush "#20242E"
+    $outer.BorderThickness = New-Object System.Windows.Thickness 0, 1, 0, 0
+    $outer.Padding = New-Object System.Windows.Thickness 18, 14, 18, 16
+    [void]$c.Body.Children.Add($outer)
+
+    # A marked-out area rather than a sentence, so it reads as somewhere to drop things. The dashes are a Rectangle
+    # behind the text; Border has no dashed stroke of its own.
+    $zone = New-Object System.Windows.Controls.Grid
+    $rect = New-Object System.Windows.Shapes.Rectangle
+    $rect.Stroke = ConvertTo-Brush "#3E4A66"
+    $rect.StrokeThickness = 1
+    $rect.RadiusX = 8; $rect.RadiusY = 8
+    $rect.Fill = ConvertTo-Brush "#111520"
+    $dash = New-Object System.Windows.Media.DoubleCollection
+    $dash.Add(4); $dash.Add(3)
+    $rect.StrokeDashArray = $dash
+    [void]$zone.Children.Add($rect)
+
+    $inner = New-Object System.Windows.Controls.StackPanel
+    $inner.Margin = New-Object System.Windows.Thickness 18, 14, 18, 14
+    $title = New-TextBlock "Drop files here" 12 "#E7EAF0" $true $false
+    $title.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    [void]$inner.Children.Add($title)
+
+    $names = @(Get-DropNames)
+    $segs = @(@{ Text = "" })
+    for ($i = 0; $i -lt $names.Count; $i++) {
+        if ($i -gt 0) { $segs += @{ Text = $(if ($i -eq $names.Count - 1) { "  or  " } else { "   " }) } }
+        $segs += @{ Text = $names[$i]; Strong = $true }
+    }
+    $list = New-MixedLine 11 "#9AA3B4" $segs
+    $list.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $list.TextAlignment = [System.Windows.TextAlignment]::Center
+    $list.Margin = New-Object System.Windows.Thickness 0, 6, 0, 0
+    [void]$inner.Children.Add($list)
+
+    $note = New-TextBlock "Zips are unpacked, everything else is copied into place. Anything else is left alone." 11 "#5C6478" $false $false
+    $note.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+    $note.Margin = New-Object System.Windows.Thickness 0, 6, 0, 0
+    [void]$inner.Children.Add($note)
+
+    [void]$zone.Children.Add($inner)
+    $outer.Child = $zone
+    $state.DropZone = $rect
     return $c.Card
 }
 
@@ -1757,6 +1831,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     }
     $script:LinkStyle = $win.FindResource("Link")
     $script:FlatStyle = $win.FindResource("Flat")
+    $script:PrimaryStyle = $win.FindResource("Primary")
     Set-WindowIcon $win $state.GameDir
 
     $refreshGamePath = {
@@ -2219,6 +2294,9 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             if (@($sec.Rows).Count -eq 0) { $kind = "info"; $label = "nothing to check" }
             $card = New-Card $sec.Title $sec.Blurb $kind $label
             if ($sec.Guide -or $sec.Url) { [void]$card.Body.Children.Add((New-GuideRow $sec)) }
+            if ($sec.Id -eq "settings" -and $sec.SavedSettings) {
+                [void]$card.Body.Children.Add((New-GameSettingsRow $sec $state))
+            }
             $first = $true
             foreach ($row in $sec.Rows) {
                 [void]$card.Body.Children.Add((New-CheckRow $row $first))
@@ -2293,10 +2371,20 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     # Files dropped on the Setup tab are put where the manifest says they go, then everything is checked again.
     $ui.InstallView.Add_DragOver({
         param($sender, $e)
-        $e.Effects = $(if ($e.Data.GetDataPresent([System.Windows.DataFormats]::FileDrop)) {
-            [System.Windows.DragDropEffects]::Copy } else { [System.Windows.DragDropEffects]::None })
+        $over = $e.Data.GetDataPresent([System.Windows.DataFormats]::FileDrop)
+        $e.Effects = $(if ($over) { [System.Windows.DragDropEffects]::Copy } else { [System.Windows.DragDropEffects]::None })
+        if ($over -and $state.DropZone) {
+            $state.DropZone.Stroke = ConvertTo-Brush "#7C9CFF"
+            $state.DropZone.Fill = ConvertTo-Brush "#182034"
+        }
         $e.Handled = $true
-    })
+    }.GetNewClosure())
+    $ui.InstallView.Add_DragLeave({
+        if ($state.DropZone) {
+            $state.DropZone.Stroke = ConvertTo-Brush "#3E4A66"
+            $state.DropZone.Fill = ConvertTo-Brush "#111520"
+        }
+    }.GetNewClosure())
     $ui.InstallView.Add_Drop({
         param($sender, $e)
         $e.Handled = $true
@@ -2311,6 +2399,18 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         & $showInstall
     }.GetNewClosure())
+
+    $state.ApplyGameSettings = {
+        param($path)
+        if (Test-GameRunning) { $ui.Status.Text = "close the game first - it owns mgs4.savedsettings"; return }
+        try {
+            [void](Set-GameSettings $path)
+            $ui.Status.Text = "set api=dx12, vsync=false, enableFXAA=false, fpsLimiter=60 in $path"
+        } catch {
+            $ui.Status.Text = "could not write the game settings: $($_.Exception.Message)"
+        }
+        & $showInstall
+    }.GetNewClosure()
 
     $ui.RecheckBtn.Add_Click($showInstall)
     $ui.CopyBtn.Add_Click({
