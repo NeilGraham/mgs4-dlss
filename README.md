@@ -255,7 +255,7 @@ second monitor while files are dropped into the game folder, and **Copy report**
 
 What it reports, beyond whether a file exists:
 
-- **The install, in the order you do it.** Seven numbered groups, each one download and one instruction, with the
+- **The install, in the order you do it.** Five numbered groups, each one download and one instruction, with the
   source as a button and every row a path relative to the game folder:
 
   1. **The game** — Steam. Set Graphics -> API to DirectX 12, FXAA off, vsync off, limiter 60.
@@ -271,13 +271,17 @@ What it reports, beyond whether a file exists:
   5. **This add-on** — `mgs4_dlss.addon64` next to `mgs4.exe`, last, so it loads with the rest already in place.
      This is the one group with an **Install the add-on** button, because it is the one group that ships with the
      app: see below.
-  6. **Frame limiter** — [MGSFPSUnlock](https://github.com/cipherxof/MGSFPSUnlock/releases). Its zip brings its own
-     ASI loader, so extract the whole thing into the game folder: `winmm.dll` beside `mgs4.exe` (the game imports
-     winmm at startup, which is what makes `scripts\` load at all) and the limiter into `scripts\`.
-  7. **D3D12 fallback**, only for a build whose Options -> Graphics has no DirectX 12 entry.
+
+  **Two things that used to be here are not part of the install.** A third-party **frame limiter** (MGSFPSUnlock)
+  is a separate mod, and above 60 fps it works against this port - its physics are tied to 60. The way to put more
+  frames on screen with this add-on is **frame generation**: the game keeps running at 60 and the generated frames
+  come on top, which is what `FrameGen` + `FGTargetFps` do. The **D3D12 switch ASI** is unnecessary too, because
+  the game has its own DirectX 12 option (`Options -> Graphics -> API`). Setup still *checks* for both, because a
+  copy left over from an earlier setup is worth knowing about - a limiter above 60 and an enabled ASI each get a
+  warning row.
 
   **Drag and drop does most of it.** The Setup tab has a drop area naming exactly what it takes —
-  `ReShade_Setup_*.exe`, `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, `MGSFPSUnlock.zip`, read
+  `ReShade_Setup_*.exe`, `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, read
   straight out of the manifest so the two cannot drift. Drop any of them anywhere on the tab: archives are unpacked
   into the game folder keeping
   the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the
@@ -330,11 +334,9 @@ versions `tools\install_manifest.json` checks against, so change both together):
 | component | file in `MGS4\` | version |
 | --- | --- | --- |
 | ReShade with add-on support | `dxgi.dll` | 6.8.0 |
-| Ultimate ASI Loader | `winmm.dll` | 9.7.4 |
 | DLSS / DLSS-G / DLSS NR | `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` | 310.8.0 |
 | Streamline | `sl.interposer.dll` and the other `sl.*.dll` | 2.13.0 |
 | DLSS 5 Neural Rendering add-on | `renodx-dlss5.addon64` | - |
-| frame limiter | `scripts\MGSFPSUnlock.asi` + `MGSFPSUnlock.ini` (`TargetFrameRate = 60`) | - |
 
 Settings that are not files this repo installs:
 
@@ -346,8 +348,9 @@ Settings that are not files this repo installs:
 - **`steam_appid.txt`** containing `2492670` next to `mgs4.exe`, so `--stage` boots do not bounce through Steam.
   Neither Steam nor the game ever writes it, and a reinstall never has one — the app writes it itself before a
   scene boot, and the Setup tab offers it as a button while it is missing.
-- **`scripts\MGS4_D3D12.ini`**: `Enabled = 0` when the native D3D12 option below is used — the ASI is the fallback
-  for builds without it, and running both is pointless (see "Native Direct3D 12 option").
+- **`scripts\MGS4_D3D12.ini`**, only if an old copy is still there: `Enabled = 0`. The game's own DirectX 12
+  option is what this setup uses, so the ASI is not installed any more and running both is pointless (see "Native
+  Direct3D 12 option").
 
 ### Build / install (from source)
 
@@ -433,7 +436,7 @@ Ini keys: `FrameGen` (0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic), `FGTargetFps`
 Notes:
 - Streamline is only loaded when `FrameGen` is non-zero **at startup** (it has to wrap the swapchain when the game creates it), so the first switch from Off needs a restart; after that Off/2x/3x/4x/Dynamic and the target frame rate change live. With `FrameGen=0` the add-on behaves exactly as without frame generation.
 - Verified 2026-08-28 (RTX 5090, driver 616.56, Streamline 2.12.129 runtime via the NVIDIA app override, DLSS-G 310.8): ReShade keeps its overlay and add-ons (the DLSS-G present queue is created through ReShade's device proxy on purpose), DLAA + DLSS 5 NR keep working, `DLSS-G interpolation state changed ... enabled`, dynamic mode reported as supported and accepted (`eDynamic` disables vsync/RSync by itself).
-- The game runs with vsync on (sync interval 1); DLSS-G works with it (driver reports vsync support) but latency is lower with the game's vsync off. `MGSFPSUnlock`'s limiter caps the *game* frame rate — generated frames come on top.
+- The game runs with vsync on (sync interval 1); DLSS-G works with it (driver reports vsync support) but latency is lower with the game's vsync off. The game's own limiter (`fpsLimiter=60`) caps the *game* frame rate — generated frames come on top of that, which is the whole point: the simulation stays at the 60 fps its physics are tied to.
 - **HUD on generated frames.** In pre-post insertion DLSS-G gets the anti-aliased image before the HUD as HUD-less colour. In composite insertion (DLSS 5 NR loaded) the HUD is inside the image, so the add-on (1) replays the game's HUD draws (depth-off draws into the final texture that sample no scene-sized input) into its own RGBA layer, tagged as `UIColorAndAlpha`, and (2) captures the final texture right before its first HUD draw and builds a true HUD-less colour: the DLAA output with the pre-HUD capture under the UI layer's pixels. DLSS-G uses the UI layer when its UI recomposition is available; when it is not (the NVIDIA app's frame-generation preset override disables it — `Disabling bUIRecompositionSupported due to preset override` in `logs\sl.log`) it derives the HUD from backbuffer minus HUD-less colour, which is why the HUD-less image must really lack the HUD. Debug modes "Visualise UI layer" and "Visualise HUD-less colour" show both inputs; verified in Act 1: the HUD-less view has no HUD elements while the frame does. Full-screen menus (Mk.II menu, credits) are rendered through scene-sized layers and are not treated as HUD (they are static anyway).
 - Known: on the two frames where the DLSS SR feature is (re)created (`RecreateAfter`), no inputs are tagged, so Streamline logs "Unable to find common constants" once and DLSS-G skips interpolation for that frame.
 - Alternative without this add-on: NVIDIA Smooth Motion (driver-level 2x, NVIDIA App -> Graphics -> `mgs4.exe` -> Smooth Motion).
@@ -663,7 +666,7 @@ scenes: no window switches, no mid-scene seed insertions, no pass-through frames
 
 The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12**, stored as `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`. With it bgfx creates the D3D12 device directly, so the ASI switch below is unnecessary (set `Enabled = 0` in `scripts\MGS4_D3D12.ini` or remove it). Two things to keep in mind on that path:
 
-- bgfx never loads `d3d11.dll`, so an ASI loader installed under that name would not load any more. Install Ultimate ASI Loader as **`winmm.dll`** (imported by `mgs4.exe` at startup) instead — that is what this setup uses now, and `MGSFPSUnlock.asi` keeps working.
+- bgfx never loads `d3d11.dll`, so an ASI loader installed under that name would not load any more. An ASI loader has to be installed as **`winmm.dll`** (imported by `mgs4.exe` at startup) instead. Nothing in this setup needs one any more — it is here because the note above is about a build that did.
 - The same settings file has `enableFXAA` (turn it off with DLAA — it only blurs the DLSS input) and `vsync` / `fpsLimiter` (vsync off is better for frame-generation latency).
 
 ## d3d12-switch (`MGS4_D3D12.asi`) — fallback

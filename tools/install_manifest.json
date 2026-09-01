@@ -161,56 +161,6 @@
           "detail": "its settings; the first run writes the detected InternalRes into it"
         }
       ]
-    },
-    {
-      "id": "limiter",
-      "title": "Optional: frame limiter",
-      "blurb": "The port is built around 60 fps; this is what holds it there.",
-      "url": "https://github.com/cipherxof/MGSFPSUnlock/releases",
-      "urlLabel": "MGSFPSUnlock",
-      "guide": "MGSFPSUnlock.zip brings its own ASI loader, so extract the whole thing into the folder with mgs4.exe: winmm.dll lands next to the game (it is imported at startup, which is what makes scripts\\ load at all) and the limiter lands in scripts\\. Then set TargetFrameRate = 60 in scripts\\MGSFPSUnlock.ini.",
-      "accepts": [
-        "MGSFPSUnlock*.zip",
-        "winmm.dll",
-        "wininet.dll",
-        "MGSFPSUnlock.asi",
-        "MGSFPSUnlock.ini"
-      ],
-      "drop": [
-        "MGSFPSUnlock.zip"
-      ],
-      "files": [
-        {
-          "path": "winmm.dll",
-          "verified": "9.7.4",
-          "detail": "the ASI loader that ships in the zip - the game imports winmm at startup, so this is what loads scripts\\"
-        },
-        {
-          "path": "scripts\\MGSFPSUnlock.asi",
-          "detail": "the limiter itself"
-        },
-        {
-          "path": "scripts\\MGSFPSUnlock.ini",
-          "detail": "set TargetFrameRate = 60 in it"
-        }
-      ]
-    },
-    {
-      "id": "extras",
-      "title": "Optional: D3D12 fallback",
-      "blurb": "Only for a build whose Options -> Graphics has no DirectX 12 entry.",
-      "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
-      "urlLabel": "Releases",
-      "guide": "Skip this unless the game cannot be asked for DirectX 12 in its own options. The ASI forces the D3D12 backend; where the in-game option exists, leave scripts\\MGS4_D3D12.ini at Enabled = 0.",
-      "accepts": [
-        "MGS4_D3D12.asi"
-      ],
-      "files": [
-        {
-          "path": "scripts\\MGS4_D3D12.asi",
-          "detail": "forces the D3D12 backend when the game cannot be asked for it"
-        }
-      ]
     }
   ]
 }

@@ -446,6 +446,9 @@ namespace Mgs4Launcher
                         "on, on top of this add-on's own DLAA - two upscalers in a row", up, null));
             }
 
+            // Neither of these is part of this install any more - the game has its own DirectX 12 option, and a
+            // frame limiter fights a port whose physics are tied to 60 fps. They are still checked, because a
+            // copy left over from before is exactly the kind of thing a file list cannot explain on its own.
             string asi = Paths.Join(game, "scripts\\MGS4_D3D12.ini");
             if (Paths.Exists(asi))
             {
@@ -453,7 +456,19 @@ namespace Mgs4Launcher
                 string api = ss != null ? IniValue(ss, "api") : null;
                 if (e == "1" && api == "dx12")
                     sec.Rows.Add(new Row("warn", "D3D12 switch",
-                        "the ASI forces D3D12 while the game is already set to it - leave Enabled = 0", "Enabled = 1", null));
+                        "the ASI forces D3D12 while the game is already set to it - not part of this install; leave Enabled = 0 or remove it",
+                        "Enabled = 1", null));
+            }
+
+            string limiter = Paths.Join(game, "scripts\\MGSFPSUnlock.ini");
+            if (Paths.Exists(limiter))
+            {
+                string target = (IniValue(limiter, "TargetFrameRate") ?? "").Trim();
+                int fps;
+                if (int.TryParse(target, out fps) && fps > 60)
+                    sec.Rows.Add(new Row("warn", "Frame limiter: MGSFPSUnlock",
+                        "a separate mod, not part of this install, and above 60 it works against the port - the physics are tied to 60 fps. Frame generation is how this add-on puts more frames on screen: the game keeps running at 60 and the generated ones come on top.",
+                        target + " fps", null));
             }
 
             // Not part of the add-on, but the Play tab's "Keep pressing X" needs both halves of it.

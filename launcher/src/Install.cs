@@ -142,13 +142,10 @@ namespace Mgs4Launcher
             return null;
         }
 
-        // Where a dropped or unpacked file belongs. Most sit next to mgs4.exe; anything the archive already put in
-        // a scripts folder, and any .asi, belongs in scripts\ - MGSFPSUnlock.zip ships exactly that shape.
-        static string DropFolder(string gameDir, string insideArchive, string name)
+        // Where a dropped or unpacked file belongs: next to mgs4.exe, all of it. The scripts\ folder was only
+        // ever for the ASI mods, and nothing on the allowlist above goes there any more.
+        static string DropFolder(string gameDir)
         {
-            var parts = (insideArchive ?? "").Split('\\', '/');
-            if (parts.Any(p => p == "scripts") || Path.GetExtension(name).ToLowerInvariant() == ".asi")
-                return Paths.Join(gameDir, "scripts");
             return gameDir;
         }
 
@@ -177,7 +174,7 @@ namespace Mgs4Launcher
                             {
                                 if (string.IsNullOrEmpty(entry.Name)) continue;      // a directory entry
                                 if (!DropAllowed(entry.Name)) { skipped++; continue; }
-                                string into = DropFolder(gameDir, entry.FullName, entry.Name);
+                                string into = DropFolder(gameDir);
                                 if (!Paths.Exists(into)) Directory.CreateDirectory(into);
                                 entry.ExtractToFile(Paths.Join(into, entry.Name), true);
                                 took++;
@@ -192,7 +189,7 @@ namespace Mgs4Launcher
 
                 if (!DropAllowed(name)) { log.Add("skipped " + name + " - not part of the install"); continue; }
                 Section sec = DropTarget(sections, name);
-                string dest = DropFolder(gameDir, name, name);
+                string dest = DropFolder(gameDir);
                 if (!Paths.Exists(dest)) Directory.CreateDirectory(dest);
                 try
                 {
