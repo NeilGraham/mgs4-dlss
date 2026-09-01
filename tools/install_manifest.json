@@ -1,21 +1,20 @@
 {
   "_comment": [
-    "Every file the add-on needs, grouped by where it comes from, because that is the order you do the work in:",
-    "open one link, follow one guide, drop that group's files in. Paths are relative to the folder holding mgs4.exe.",
-    "tools/install_checks.ps1 reads this and tools/mgs4_dlss.ps1 renders it, as the Setup tab and as --report.",
+    "The install, in the order you do it. Each group is one download and one instruction, and every row is a path",
+    "relative to the folder holding mgs4.exe. tools/install_checks.ps1 reads this; tools/mgs4_dlss.ps1 renders it as",
+    "the Setup tab and as --report, and its drag-and-drop uses 'accepts' to know what a dropped file is for.",
     "Versions match the 'setup this was verified on' table in README.md - change both together.",
     "",
-    "  required   a missing file here is a failure rather than a note",
-    "  url        where this group's files come from; shown as a button above the group",
-    "  urlLabel   what that button says",
-    "  guide      one or two sentences on what to do with them",
-    "  files[].path    relative to the game folder - this is the row's label",
-    "  files[].detail  the line under it; files[].url only when that one file comes from somewhere else"
+    "  required        a missing file in this group is a failure; files[].optional and files[].required override it",
+    "  url / urlLabel  where this group's files come from, as a button above them",
+    "  guide           what to do with them, in the order it is done",
+    "  accepts         file names this group takes by drag-and-drop; a .zip is unpacked into the game folder",
+    "  files[].path    relative to the game folder - the row's label"
   ],
   "sections": [
     {
       "id": "game",
-      "title": "The game",
+      "title": "1. The game",
       "required": true,
       "blurb": "Everything else goes in the folder this sits in.",
       "url": "https://store.steampowered.com/app/2492670/",
@@ -23,91 +22,75 @@
       "guide": "Metal Gear Solid 4, Master Collection Vol. 2. In its options set Graphics -> API to DirectX 12, FXAA off, vsync off and the frame limiter to 60.",
       "files": [
         { "path": "mgs4.exe", "detail": "the game itself" },
-        { "path": "steam_appid.txt", "detail": "one line containing 2492670; lets `mgs4.exe --stage` boot without bouncing through Steam" }
+        { "path": "steam_appid.txt", "optional": true, "detail": "one line containing 2492670; lets `mgs4.exe --stage` boot without bouncing through Steam" }
       ]
     },
     {
       "id": "reshade",
-      "title": "ReShade, with add-on support",
+      "title": "2. ReShade, with add-on support",
       "required": true,
       "blurb": "The host this add-on loads into. The plain build looks identical on disk and silently loads nothing.",
       "url": "https://reshade.me/",
       "urlLabel": "reshade.me",
-      "guide": "Run the ReShade setup, pick mgs4.exe and the Direct3D 10/11/12 renderer, and choose the build WITH full add-on support. It installs itself as dxgi.dll next to the game.",
+      "guide": "Download the setup marked \"with full add-on support\" and run it. Point it at mgs4.exe, pick the Direct3D 10/11/12 renderer, and tick nothing when it offers shader packs - none are needed. It installs itself as dxgi.dll next to the game.",
+      "accepts": ["ReShade_Setup_*.exe"],
       "files": [
         { "path": "dxgi.dll", "verified": "6.8.0", "detail": "ReShade itself, under the name the game loads" }
       ]
     },
     {
-      "id": "addon",
-      "title": "This add-on",
-      "required": true,
-      "blurb": "The DLSS add-on and the settings it reads.",
-      "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
-      "urlLabel": "Releases",
-      "guide": "Unzip the release and copy both files next to mgs4.exe. Building from source instead: dlss-addon\\build.bat, then sh dlss-addon/install.sh.",
-      "files": [
-        { "path": "mgs4_dlss.addon64", "detail": "the add-on" },
-        { "path": "mgs4_dlss.ini", "detail": "its settings; the first run writes the detected InternalRes into it" }
-      ]
-    },
-    {
-      "id": "dlss",
-      "title": "DLSS runtime",
-      "required": true,
-      "blurb": "The NVIDIA runtime that does the upscaling.",
-      "url": "https://github.com/NVIDIA/DLSS",
-      "urlLabel": "DLSS SDK",
-      "guide": "Copy lib/Windows_x86_64/rel/nvngx_dlss.dll from the SDK next to mgs4.exe. If the NVIDIA app's DLSS override is on for this game it supplies the runtime instead and no file is needed here.",
-      "files": [
-        {
-          "path": "nvngx_dlss.dll",
-          "verified": "310.8.0",
-          "optionalIfDriverOverride": true,
-          "detail": "DLSS Super Resolution"
-        }
-      ]
-    },
-    {
-      "id": "nr",
-      "title": "DLSS 5 Neural Rendering",
-      "blurb": "Optional. With these present the add-on runs DLAA on the final image, so NR works at full strength.",
+      "id": "runtimes",
+      "title": "3. DLSS and Streamline runtimes",
+      "blurb": "One zip holds all of these. nvngx_dlss.dll is what DLSS itself needs; the rest are for frame generation.",
       "url": "https://discord.gg/renodx",
       "urlLabel": "RenoDX Discord",
-      "guide": "Both files come from the RenoDX Discord, under Pinned Messages. Copy them next to mgs4.exe; the add-on detects renodx-dlss5.addon64 on its own and moves the DLAA pass to the composite. nvngx_dlssnr.dll can also come from the NVIDIA app.",
+      "guide": "In the Discord's Pinned Messages, take streamline.zip and extract everything in it straight into the folder with mgs4.exe. It carries the NVIDIA runtimes and the Streamline libraries together, already matched to each other - you do not need the NVIDIA or Streamline SDKs separately. If the NVIDIA app's DLSS override is on for this game it supplies nvngx_dlss.dll instead.",
+      "accepts": ["streamline.zip", "sl.*.dll", "nvngx_*.dll"],
       "files": [
-        { "path": "renodx-dlss5.addon64", "detail": "the Neural Rendering add-on" },
-        { "path": "nvngx_dlssnr.dll", "verified": "310.8.0", "detail": "the NR runtime it drives" }
-      ]
-    },
-    {
-      "id": "fg",
-      "title": "Frame generation",
-      "blurb": "Optional, and only useful above 60 Hz. Needs FrameGen set in the Settings tab.",
-      "url": "https://github.com/NVIDIA-RTX/Streamline/releases",
-      "urlLabel": "Streamline SDK",
-      "guide": "Copy these out of bin/x64 in the Streamline release (2.12 or newer) next to mgs4.exe. The last one is NVIDIA's frame-generation runtime and comes from the DLSS SDK or the NVIDIA app instead.",
-      "files": [
+        { "path": "nvngx_dlss.dll", "verified": "310.8.0", "required": true, "optionalIfDriverOverride": true, "detail": "DLSS Super Resolution - the one piece DLSS cannot run without" },
+        { "path": "nvngx_dlssnr.dll", "verified": "310.8.0", "detail": "the Neural Rendering runtime" },
+        { "path": "nvngx_dlssg.dll", "verified": "310.8.0", "detail": "the frame-generation runtime" },
         { "path": "sl.interposer.dll", "verified": "2.13.0", "detail": "the Streamline entry point the add-on loads" },
         { "path": "sl.common.dll", "verified": "2.13.0" },
         { "path": "sl.dlss_g.dll", "verified": "2.13.0", "detail": "frame generation" },
         { "path": "sl.reflex.dll", "verified": "2.13.0", "detail": "latency pacing" },
-        { "path": "sl.pcl.dll", "verified": "2.13.0" },
-        {
-          "path": "nvngx_dlssg.dll",
-          "verified": "310.8.0",
-          "detail": "the DLSS-G runtime",
-          "url": "https://github.com/NVIDIA/DLSS"
-        }
+        { "path": "sl.pcl.dll", "verified": "2.13.0" }
+      ]
+    },
+    {
+      "id": "nr",
+      "title": "4. DLSS 5 Neural Rendering add-on",
+      "blurb": "Optional. With this present the add-on runs DLAA on the final image, so NR works at full strength.",
+      "url": "https://discord.gg/renodx",
+      "urlLabel": "RenoDX Discord",
+      "guide": "From the same Pinned Messages, take the newest renodx-dlss5.addon64 and drop it next to mgs4.exe. Nothing to configure: this add-on notices it and moves the DLAA pass to the composite on its own.",
+      "accepts": ["renodx-dlss5.addon64"],
+      "files": [
+        { "path": "renodx-dlss5.addon64", "detail": "the Neural Rendering add-on" }
+      ]
+    },
+    {
+      "id": "addon",
+      "title": "5. This add-on",
+      "required": true,
+      "blurb": "Last, so it loads with everything else already in place.",
+      "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
+      "urlLabel": "Releases",
+      "guide": "Drop mgs4_dlss.addon64 next to mgs4.exe. The ini beside it is the configuration this was verified with; without it the add-on falls back to its built-in defaults. Building from source instead: dlss-addon\\build.bat, then sh dlss-addon/install.sh.",
+      "accepts": ["mgs4_dlss.addon64", "mgs4_dlss.ini"],
+      "files": [
+        { "path": "mgs4_dlss.addon64", "detail": "the add-on" },
+        { "path": "mgs4_dlss.ini", "optional": true, "detail": "its settings; the first run writes the detected InternalRes into it" }
       ]
     },
     {
       "id": "limiter",
-      "title": "Frame limiter",
-      "blurb": "Optional. The port is built around 60 fps; this is what holds it there.",
+      "title": "Optional: frame limiter",
+      "blurb": "The port is built around 60 fps; this is what holds it there.",
       "url": "https://github.com/Skyth3r/MGSFPSUnlock",
       "urlLabel": "MGSFPSUnlock",
-      "guide": "Needs an ASI loader: put winmm.dll next to mgs4.exe (the game imports winmm at startup, so that is what loads the scripts folder), then the .asi and its ini in scripts\\ with TargetFrameRate = 60.",
+      "guide": "Needs an ASI loader: winmm.dll next to mgs4.exe (the game imports winmm at startup, so that is what loads the scripts folder), then the .asi and its ini in scripts\\ with TargetFrameRate = 60.",
+      "accepts": ["winmm.dll", "MGSFPSUnlock.asi"],
       "files": [
         {
           "path": "winmm.dll",
@@ -120,11 +103,12 @@
     },
     {
       "id": "extras",
-      "title": "Fallbacks",
-      "blurb": "Only needed on a build without the in-game DirectX 12 option.",
+      "title": "Optional: D3D12 fallback",
+      "blurb": "Only for a build whose Options -> Graphics has no DirectX 12 entry.",
       "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
       "urlLabel": "Releases",
-      "guide": "Skip this unless Options -> Graphics has no DirectX 12 entry. The ASI forces the D3D12 backend; with the in-game option available, leave scripts\\MGS4_D3D12.ini at Enabled = 0.",
+      "guide": "Skip this unless the game cannot be asked for DirectX 12 in its own options. The ASI forces the D3D12 backend; where the in-game option exists, leave scripts\\MGS4_D3D12.ini at Enabled = 0.",
+      "accepts": ["MGS4_D3D12.asi"],
       "files": [
         { "path": "scripts\\MGS4_D3D12.asi", "detail": "forces the D3D12 backend when the game cannot be asked for it" }
       ]

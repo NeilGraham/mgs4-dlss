@@ -36,12 +36,16 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 
 ### Install (release)
 
+`mgs4-dlss` walks through this on its Setup tab, and takes most of these files by drag-and-drop. In order:
+
 1. In the game: **Options -> Graphics -> API = DirectX 12** (`api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`), FXAA off, frame limiter 60 (`fpsLimiter=60`), vsync off.
-2. ReShade 6.8 **with add-on support** installed for `MGS4\mgs4.exe` (it becomes `MGS4\dxgi.dll`).
-3. Copy `mgs4_dlss.addon64` and `mgs4_dlss.ini` from the release into `MGS4\` (next to `mgs4.exe`). `nvngx_dlss.dll` comes from the NVIDIA app's DLSS override or the [DLSS SDK](https://github.com/NVIDIA/DLSS) (`lib/Windows_x86_64/rel/`).
-4. Optional, DLSS 5 Neural Rendering: put `renodx-dlss5.addon64` next to the add-on; it is auto-detected and the add-on then runs DLAA on the final image so NR works at full strength.
-5. Optional, frame generation (`FrameGen` other than 0): the Streamline runtime next to `mgs4.exe` — `sl.interposer.dll`, `sl.common.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll` and `nvngx_dlssg.dll` from the [Streamline SDK](https://github.com/NVIDIA-RTX/Streamline) (`bin/x64`, 2.12+). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
+2. **ReShade with add-on support** ([reshade.me](https://reshade.me/)): run the setup marked *with full add-on support*, point it at `MGS4\mgs4.exe`, choose the Direct3D 10/11/12 renderer, and tick **no** shader packs — none are used. It installs itself as `MGS4\dxgi.dll`.
+3. **`streamline.zip`** from the [RenoDX Discord](https://discord.gg/renodx), under Pinned Messages: extract everything in it straight into `MGS4\`. One zip carries `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set, already matched to each other — the NVIDIA and Streamline SDKs are not needed separately. (If the NVIDIA app's DLSS override is on for this game it supplies `nvngx_dlss.dll` instead.)
+4. **`renodx-dlss5.addon64`** from the same Pinned Messages, next to `mgs4.exe`. Optional, and the reason to bother: with it present this add-on runs DLAA on the final image so Neural Rendering works at full strength. It is auto-detected — nothing to configure.
+5. **`mgs4_dlss.addon64`** from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases), next to `mgs4.exe`, last. `mgs4_dlss.ini` beside it is the configuration this was verified with; without it the add-on uses its built-in defaults.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
+
+Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 
 Run **`mgs4-dlss`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
 
@@ -199,12 +203,26 @@ second monitor while files are dropped into the game folder, and **Copy report**
 
 What it reports, beyond whether a file exists:
 
-- **Files, grouped by where they come from** rather than by feature, because that is the order the work happens in:
-  open one link, follow one sentence, drop that group's files in. Each group carries the source it came from as a
-  button — Steam, reshade.me, the releases page, the DLSS SDK, the **RenoDX Discord** (the DLSS 5 files live under
-  its Pinned Messages), the Streamline SDK — and each row is the **path relative to the game folder**, which is the
-  thing you actually have to get right, with what it is underneath and the version found on the right. A file that
-  comes from somewhere other than its group keeps its own link.
+- **The install, in the order you do it.** Seven numbered groups, each one download and one instruction, with the
+  source as a button and every row a path relative to the game folder:
+
+  1. **The game** — Steam. Set Graphics -> API to DirectX 12, FXAA off, vsync off, limiter 60.
+  2. **ReShade, with add-on support** — [reshade.me](https://reshade.me/). Run the setup marked *with full add-on
+     support*, point it at `mgs4.exe`, pick Direct3D 10/11/12, and tick **no** shader packs. It installs as `dxgi.dll`.
+  3. **DLSS and Streamline runtimes** — the [RenoDX Discord](https://discord.gg/renodx), Pinned Messages:
+     **`streamline.zip`**, extracted straight into the folder with `mgs4.exe`. That one zip carries `nvngx_dlss.dll`,
+     `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set already matched to each other — the NVIDIA and
+     Streamline SDKs are not needed separately.
+  4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss5.addon64`, next to
+     `mgs4.exe`. Nothing to configure; this add-on notices it.
+  5. **This add-on** — `mgs4_dlss.addon64` next to `mgs4.exe`, last, so it loads with the rest already in place.
+  6. **Frame limiter** and 7. **D3D12 fallback**, both optional.
+
+  **Drag and drop does most of it.** Drop `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64` or the
+  ReShade setup onto the Setup tab: the zip is unpacked into the game folder, `.asi` files go to `scripts\`, the
+  ReShade setup is started for you, and the check re-runs. Only files the install actually uses are written —
+  anything else in a dropped archive is left alone and named in the status line.
+
 - **Settings** that the Settings tab does not cover, plus anything that reads as wrong. The game's own options
   (`api=dx12`, vsync, the frame limiter, FXAA), whether ReShade has the add-on disabled, whether the virtual
   controller the Play tab wants is there — and `FrameGen` checked against the display's actual refresh rate, which

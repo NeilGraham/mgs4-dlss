@@ -159,7 +159,9 @@ function Invoke-InstallChecks {
                     if ($bytes -ge 1024) { $value = "{0:n0} KB" -f [math]::Round($bytes / 1KB) } else { $value = "$bytes bytes" }
                 }
             } else {
-                if ($sec.required) { $status = "bad" } else { $status = "warn" }
+                # A group says what its files are worth; a file can override that either way.
+                $mustHave = $f.required -or ($sec.required -and -not $f.optional)
+                if ($mustHave) { $status = "bad" } else { $status = "warn" }
                 $value = "not found"
                 # DLSS itself can come from the driver instead of a file in the game folder.
                 if ($f.optionalIfDriverOverride -and $run.NvngxProxy -and $run.NvngxProxy -ne "0000000000000000") {
@@ -180,6 +182,7 @@ function Invoke-InstallChecks {
         $sections += [pscustomobject]@{
             Id = $sec.id; Title = $sec.title; Blurb = $sec.blurb; Rows = $rows
             Required = [bool]$sec.required; Url = $sec.url; UrlLabel = $sec.urlLabel; Guide = $sec.guide
+            Accepts = @($sec.accepts)
         }
     }
 
@@ -327,10 +330,8 @@ function Invoke-InstallChecks {
 function Get-Verdict($sections) {
     $bad = @($sections.Rows | Where-Object { $_.Status -eq "bad" }).Count
     $warn = @($sections.Rows | Where-Object { $_.Status -eq "warn" }).Count
-    $reqBad = 0
-    foreach ($sec in ($sections | Where-Object { $_.Required })) {
-        $reqBad += @($sec.Rows | Where-Object { $_.Status -ne "ok" }).Count
-    }
+    # "bad" is exactly the set of things a working install cannot do without, per the manifest.
+    $reqBad = @($sections.Rows | Where-Object { $_.Status -eq "bad" }).Count
     if ($reqBad -gt 0) { return @{ Text = "Not ready"; Kind = "bad"; Note = "$reqBad required item(s) missing" } }
     if ($bad -gt 0) { return @{ Text = "Needs a fix"; Kind = "bad"; Note = "$bad problem(s) found" } }
     if ($warn -gt 0) { return @{ Text = "Ready"; Kind = "warn"; Note = "$warn thing(s) worth a look" } }
@@ -356,4 +357,80 @@ function Format-TextReport($game, $sections) {
         }
     }
     return $sb.ToString()
+}
+
+# ---------------------------------------------------------------------------------------------- drag and drop
+
+# What a dropped file is: which manifest group claims it, by the "accepts" patterns.
+function Get-DropTarget($sections, [string]$name) {
+    foreach ($sec in $sections) {
+        foreach ($pat in @($sec.Accepts)) {
+            if ($pat -and $name -like $pat) { return $sec }
+        }
+    }
+    return $null
+}
+
+# Everything the install can legitimately receive, so a stray file in a zip is never written into the game folder.
+# Anything not matching one of these is reported as skipped rather than copied.
+$script:DropPatterns = @("sl.*.dll", "nvngx_*.dll", "*.addon64", "mgs4_dlss.ini", "winmm.dll", "*.asi",
+                         "steam_appid.txt", "*.license.txt")
+
+function Test-DropAllowed([string]$name) {
+    foreach ($pat in $script:DropPatterns) { if ($name -like $pat) { return $true } }
+    return $false
+}
+
+# Puts dropped files where the manifest says they go. Zips are unpacked flat into the game folder, which is what
+# streamline.zip wants; a ReShade setup is an interactive installer, so it is started rather than copied.
+# Returns lines describing what happened - the caller shows them.
+function Copy-DroppedFiles($sections, [string]$gameDir, [string[]]$paths) {
+    $log = New-Object System.Collections.Generic.List[string]
+    if (-not $gameDir) { $log.Add("no game folder set - pick one above first"); return $log }
+
+    foreach ($path in $paths) {
+        if (-not (Test-Mgs4Path $path)) { $log.Add("gone: $path"); continue }
+        $name = [IO.Path]::GetFileName($path)
+
+        if ($name -like "ReShade_Setup*.exe") {
+            try {
+                Start-Process -FilePath $path | Out-Null
+                $log.Add("started $name - point it at mgs4.exe, pick Direct3D 10/11/12, and tick no shader packs")
+            } catch { $log.Add("could not start ${name}: $($_.Exception.Message)") }
+            continue
+        }
+
+        if ([IO.Path]::GetExtension($name) -eq ".zip") {
+            try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue } catch { }
+            $zip = $null
+            try {
+                $zip = [System.IO.Compression.ZipFile]::OpenRead($path)
+                $took = 0; $skipped = 0
+                foreach ($entry in $zip.Entries) {
+                    if (-not $entry.Name) { continue }                      # a directory entry
+                    if (-not (Test-DropAllowed $entry.Name)) { $skipped++; continue }
+                    $dest = Join-Mgs4Path $gameDir $entry.Name              # flattened: the game folder is flat
+                    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
+                    $took++
+                }
+                $log.Add("$name -> $took file(s) into the game folder" + $(if ($skipped) { ", $skipped skipped" } else { "" }))
+            } catch {
+                $log.Add("could not read ${name}: $($_.Exception.Message)")
+            } finally { if ($zip) { $zip.Dispose() } }
+            continue
+        }
+
+        if (-not (Test-DropAllowed $name)) { $log.Add("skipped $name - not part of the install"); continue }
+        $sec = Get-DropTarget $sections $name
+        # .asi files live in scripts\, everything else sits next to mgs4.exe
+        $dest = $(if ([IO.Path]::GetExtension($name) -eq ".asi") { Join-Mgs4Path $gameDir "scripts" } else { $gameDir })
+        if (-not (Test-Mgs4Path $dest)) { New-Item -ItemType Directory -Force $dest | Out-Null }
+        try {
+            Copy-Item -LiteralPath $path -Destination (Join-Mgs4Path $dest $name) -Force
+            $log.Add("$name -> " + $(if ($sec) { $sec.Title } else { "the game folder" }))
+        } catch {
+            $log.Add("could not copy ${name}: $($_.Exception.Message)")
+        }
+    }
+    return $log
 }

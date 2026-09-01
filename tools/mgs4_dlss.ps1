@@ -1339,7 +1339,7 @@ $script:Xaml = @'
     </Grid>
 
     <ScrollViewer x:Name="InstallView" Grid.Row="1" Margin="22,16,10,0" VerticalScrollBarVisibility="Auto"
-                  Padding="0,0,12,0" Visibility="Collapsed">
+                  Padding="0,0,12,0" Visibility="Collapsed" AllowDrop="True" Background="Transparent">
       <StackPanel x:Name="InstallHost"/>
     </ScrollViewer>
 
@@ -1482,6 +1482,20 @@ $script:StatusStyle = @{
     warn = @{ Glyph = [char]0x25B2; Fg = "#F2C14E"; Bg = "#251E10"; Br = "#7A6027" }
     bad  = @{ Glyph = [char]0x2716; Fg = "#FF7B72"; Bg = "#2A1618"; Br = "#7E3B3B" }
     info = @{ Glyph = [char]0x25CF; Fg = "#7C9CFF"; Bg = "#161B2A"; Br = "#33436E" }
+}
+
+# Says the window takes files, because nothing else would.
+function New-DropCard {
+    $c = New-Card "Drop the downloads here" "" "info" "drag and drop"
+    $b = New-Object System.Windows.Controls.Border
+    $b.Padding = New-Object System.Windows.Thickness 18, 13, 18, 13
+    $t = New-TextBlock ("Drag streamline.zip, renodx-dlss5.addon64, mgs4_dlss.addon64 or the ReShade setup onto " +
+                        "this tab and each one goes where it belongs - the zip is unpacked into the game folder, " +
+                        "the ReShade setup is started for you. Anything that is not part of the install is left " +
+                        "alone and reported.") 11 "#9AA3B4" $false $false
+    $b.Child = $t
+    [void]$c.Body.Children.Add($b)
+    return $c.Card
 }
 
 # The Setup tab's first card: which folder everything else is checked against, and how to change it.
@@ -2192,6 +2206,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $vc = New-Card ("Install check: " + $v.Text) $v.Note $v.Kind $v.Text
         [void]$ui.InstallHost.Children.Add($vc.Card)
         [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
+        [void]$ui.InstallHost.Children.Add((New-DropCard))
         foreach ($sec in $sections) {
             $bad = @($sec.Rows | Where-Object { $_.Status -eq "bad" }).Count
             $warn = @($sec.Rows | Where-Object { $_.Status -eq "warn" }).Count
@@ -2274,6 +2289,28 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         & $applyFilter
         & $showInstall
     }.GetNewClosure()
+
+    # Files dropped on the Setup tab are put where the manifest says they go, then everything is checked again.
+    $ui.InstallView.Add_DragOver({
+        param($sender, $e)
+        $e.Effects = $(if ($e.Data.GetDataPresent([System.Windows.DataFormats]::FileDrop)) {
+            [System.Windows.DragDropEffects]::Copy } else { [System.Windows.DragDropEffects]::None })
+        $e.Handled = $true
+    })
+    $ui.InstallView.Add_Drop({
+        param($sender, $e)
+        $e.Handled = $true
+        if (-not $e.Data.GetDataPresent([System.Windows.DataFormats]::FileDrop)) { return }
+        $paths = @($e.Data.GetData([System.Windows.DataFormats]::FileDrop))
+        if (-not $paths.Count) { return }
+        try {
+            $lines = Copy-DroppedFiles $state.Sections $state.GameDir $paths
+            $ui.Status.Text = ($lines -join "   |   ")
+        } catch {
+            $ui.Status.Text = "drop failed: $($_.Exception.Message)"
+        }
+        & $showInstall
+    }.GetNewClosure())
 
     $ui.RecheckBtn.Add_Click($showInstall)
     $ui.CopyBtn.Add_Click({
