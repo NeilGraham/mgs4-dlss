@@ -1,10 +1,12 @@
-// The window's own title bar is drawn by Windows, not by WPF, so it ignores everything the XAML says and comes up
-// light unless the app asks otherwise. DwmSetWindowAttribute is the ask; the desktop's own setting is what it is
-// asked for, and it is re-applied when that setting changes, so switching Windows to light or dark while the
-// window is open moves the bar with it.
+// The title bar. There is no system one any more - WindowChrome hands the whole window to WPF so the key art can
+// fill the strip the caption had - so this draws the three buttons and says what is draggable. The DWM call is
+// still made: the frame Windows draws around the window, and its shadow, follow the desktop's light or dark
+// setting, and it is re-applied when that setting changes.
 using System;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Shell;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
@@ -60,6 +62,47 @@ namespace Mgs4Launcher
             };
             SystemEvents.UserPreferenceChanged += onPref;
             win.Closed += (s, e) => SystemEvents.UserPreferenceChanged -= onPref;
+        }
+
+        // Segoe MDL2 Assets, the font Windows draws its own caption buttons from: a chevron-free minimise, the
+        // empty square for maximise and the two overlapping ones for restore, and the close cross.
+        const string Minimise = "", Maximise = "", Restore = "";
+
+        // The buttons, and the drag region. The chrome's caption is only 32 tall in the markup; it is raised here
+        // to the whole header, so the bar drags and double-clicks like the title bar it replaced - anything in it
+        // that takes clicks of its own is marked IsHitTestVisibleInChrome in the markup.
+        public static void Buttons(Window win, Button min, Button max, Button close, FrameworkElement header)
+        {
+            min.Click += (s, e) => win.WindowState = WindowState.Minimized;
+            max.Click += (s, e) => Toggle(win);
+            close.Click += (s, e) => win.Close();
+
+            Action state = () =>
+            {
+                bool up = win.WindowState == WindowState.Maximized;
+                max.Content = up ? Restore : Maximise;
+                max.ToolTip = up ? "Restore" : "Maximise";
+                // A maximised window is sized to the monitor plus its resize border, so without this the edges of
+                // the content - and the close button - sit off the screen.
+                Thickness pad = SystemParameters.WindowResizeBorderThickness;
+                win.BorderThickness = up ? new Thickness(pad.Left, pad.Top, pad.Right, pad.Bottom) : new Thickness(0);
+            };
+            win.StateChanged += (s, e) => state();
+            state();
+
+            WindowChrome chrome = WindowChrome.GetWindowChrome(win);
+            if (chrome == null || header == null) return;
+            SizeChangedEventHandler caption = (s, e) =>
+            {
+                if (header.ActualHeight > 0) chrome.CaptionHeight = header.ActualHeight;
+            };
+            header.SizeChanged += caption;
+            caption(null, null);
+        }
+
+        static void Toggle(Window win)
+        {
+            win.WindowState = win.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
         }
     }
 }

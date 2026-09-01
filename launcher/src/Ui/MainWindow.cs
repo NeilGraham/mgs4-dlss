@@ -34,19 +34,20 @@ namespace Mgs4Launcher
         // Named controls from the XAML, by the names the PowerShell app used.
         Border _headerBar, _pill, _lockBanner;
         TextBlock _titleText, _pillText, _pillNote, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
-                  _cmdPreview, _mashNote, _searchHint;
+                  _mashNote, _searchHint;
         Image _logoArt;
         System.Windows.Shapes.Rectangle _heroArt;
         RadioButton _navPlay, _navSettings, _navInstall;
-        Grid _playView;
+        Grid _playView, _artBand;
         ScrollViewer _installView;
         Grid _settingsView;
         StackPanel _installHost, _settingsHost;
         WrapPanel _filters;              // the filter chips wrap onto a second line when the window is narrow
         ListBox _sceneList;
-        TextBox _search, _holdSecs, _resW, _resH;
+        TextBox _search, _holdSecs, _resW, _resH, _cmdPreview;
         CheckBox _optAdvance, _optMashX, _optEnd, _optHold, _optRes;
-        Button _launchBtn, _stopBtn, _shortcutBtn, _copyBtn, _recheckBtn, _reloadBtn, _saveBtn;
+        Button _launchBtn, _stopBtn, _shortcutBtn, _copyBtn, _cmdCopyBtn, _recheckBtn, _reloadBtn, _saveBtn;
+        Button _minBtn, _maxBtn, _closeBtn;
         ComboBox _altPick;
         FrameworkElement _altRow;
         System.Windows.Shapes.Rectangle _dropZone;
@@ -73,10 +74,12 @@ namespace Mgs4Launcher
             Widgets.PrimaryStyle = (Style)Win.FindResource("Primary");
             Widgets.ChipStyle = (Style)Win.FindResource("Chip");
 
+            DarkenMenus();
             Bind();
             TitleBar.Follow(Win);
             Art.SetWindowIcon(Win, _gameDir);
-            Art.ApplyHeader(Win, _logoArt, _titleText, _heroArt, _headerBar);
+            Art.ApplyHeader(Win, _logoArt, _titleText, _heroArt, _headerBar, _artBand);
+            TitleBar.Buttons(Win, _minBtn, _maxBtn, _closeBtn, _headerBar);
             SmoothScroll.Attach(Win);
 
             _sceneList.ItemTemplate = (DataTemplate)XamlReader.Parse(Resource("SceneRow.xaml"));
@@ -94,10 +97,28 @@ namespace Mgs4Launcher
             Win.Closing += (s, e) => SavePrefs();
         }
 
+        // The menu WPF puts up when a text box is right-clicked is built by WPF itself and lives in a popup of its
+        // own, outside this window, so it looks its style up in the application's resources and never sees the
+        // window's - which is why it came up white over a dark window. The same styles, copied one level up.
+        static readonly object[] MenuKeys = { typeof(ContextMenu), typeof(MenuItem), MenuItem.SeparatorStyleKey };
+
+        void DarkenMenus()
+        {
+            Application app = Application.Current;
+            if (app == null) return;      // --report and the other console routes never make one
+            foreach (object key in MenuKeys)
+                if (Win.Resources.Contains(key) && !app.Resources.Contains(key))
+                    app.Resources[key] = Win.Resources[key];
+        }
+
         void Bind()
         {
             Func<string, object> f = n => Win.FindName(n);
             _headerBar = (Border)f("HeaderBar");
+            _artBand = (Grid)f("ArtBand");
+            _minBtn = (Button)f("MinBtn");
+            _maxBtn = (Button)f("MaxBtn");
+            _closeBtn = (Button)f("CloseBtn");
             _titleText = (TextBlock)f("TitleText");
             _logoArt = (Image)f("LogoArt");
             _heroArt = (System.Windows.Shapes.Rectangle)f("HeroArt");
@@ -134,7 +155,8 @@ namespace Mgs4Launcher
             _optRes = (CheckBox)f("OptRes");
             _resW = (TextBox)f("ResW");
             _resH = (TextBox)f("ResH");
-            _cmdPreview = (TextBlock)f("CmdPreview");
+            _cmdPreview = (TextBox)f("CmdPreview");
+            _cmdCopyBtn = (Button)f("CmdCopyBtn");
             _launchBtn = (Button)f("LaunchBtn");
             _stopBtn = (Button)f("StopBtn");
             _shortcutBtn = (Button)f("ShortcutBtn");

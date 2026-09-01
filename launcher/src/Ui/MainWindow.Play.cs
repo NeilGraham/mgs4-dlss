@@ -200,6 +200,17 @@ namespace Mgs4Launcher
                 if (!string.IsNullOrEmpty(id)) { _pickedId = id; UpdatePreview(); }
             };
 
+            // The preview is selectable text, so a click in it should not have to fight the caret; the button is
+            // there for the common case of wanting the whole line.
+            _cmdCopyBtn.Click += (s, e) =>
+            {
+                try { Clipboard.SetText(_cmdPreview.Text); } catch { }
+                _cmdCopyBtn.Content = "Copied";
+                var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.6) };
+                t.Tick += (s2, e2) => { _cmdCopyBtn.Content = "Copy"; t.Stop(); };
+                t.Start();
+            };
+
             _launchBtn.Click += (s, e) => Launch();
             _stopBtn.Click += (s, e) => { Runner.StopGame(); Say("closed mgs4.exe"); RefreshState(); };
             _shortcutBtn.Click += (s, e) => MakeShortcut();

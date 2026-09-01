@@ -101,13 +101,18 @@ namespace Mgs4Launcher
             catch { return src; }
         }
 
-        // The logo in place of the title, and the key art in the header band: on the left, filling the bar's
-        // height, showing the middle 70% of its own. The bar is black and so is the art's right-hand half, so the
-        // two meet with nothing to blend.
-        public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText, System.Windows.Shapes.Rectangle heroArt, Border headerBar)
+        // The logo in place of the title, and the key art behind the header: on the left, the full height of the
+        // band, uncropped. The band is the header plus a strip that reaches down into the content, and its bottom
+        // is faded out, so the art keeps the height it always had on screen while showing all of itself and
+        // dissolving into the window instead of stopping on a line.
+        const double Bleed = 64;        // how far past the header the art carries on, before it has faded away
+        const double Caption = 32;      // the strip at the top that used to be the system title bar
+
+        public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText,
+                                       System.Windows.Shapes.Rectangle heroArt, Border headerBar, Grid artBand)
         {
             Dictionary<string, string> art;
-            try { art = Find(); } catch { return; }
+            try { art = Find(); } catch { art = new Dictionary<string, string>(); }
 
             string logoPath, heroPath;
             art.TryGetValue("Logo", out logoPath);
@@ -122,33 +127,50 @@ namespace Mgs4Launcher
             }
 
             BitmapImage hero = Load(heroPath);
-            if (hero == null) return;
-            const double shown = 0.70;
-            var brush = new ImageBrush(hero)
+            double aspect = 0;
+            if (hero != null && hero.PixelHeight > 0)
             {
-                Viewbox = new Rect(0, (1.0 - shown) / 2, 1, shown),
-                Stretch = Stretch.Uniform,
-                AlignmentX = AlignmentX.Left,
-                AlignmentY = AlignmentY.Center,
-            };
-            brush.Freeze();
-            heroArt.Fill = brush;
-            heroArt.Visibility = Visibility.Visible;
+                var brush = new ImageBrush(hero)
+                {
+                    Stretch = Stretch.Uniform,
+                    AlignmentX = AlignmentX.Left,
+                    AlignmentY = AlignmentY.Center,
+                };
+                brush.Freeze();
+                heroArt.Fill = brush;
+                heroArt.Visibility = Visibility.Visible;
+                aspect = (double)hero.PixelWidth / hero.PixelHeight;
+            }
 
-            // How far right the logo has to start to clear Snake's face depends on how wide the art comes out,
-            // which depends on the bar's height - so it is measured and redone on resize.
-            double aspect = hero.PixelWidth / (hero.PixelHeight * shown);
+            // The band has no height of its own - it is rectangles over a row that sizes to the header beside it -
+            // so it is measured from the header and redone on resize. How far right the logo has to start to clear
+            // Snake's face rides on the same number: it is a fraction of how wide the art comes out.
             SizeChangedEventHandler layout = (s, e) =>
             {
                 double h = headerBar.ActualHeight;
                 if (h <= 0) return;
-                double push = Math.Max(0.0, h * aspect * 0.32);   // clear of the face, over the shoulder
-                double lift = h * 0.12;                           // a little above the bar's centre line
+                double band = h + Bleed;
+                artBand.Height = band;
+                artBand.OpacityMask = Fade(h / band);
+                if (aspect <= 0) return;
+                double push = band * aspect * 0.32;          // clear of the face, over the shoulder
+                double lift = (h - Caption) * 0.12;          // a little above the centre line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);
             };
             headerBar.SizeChanged += layout;
             layout(null, null);
+        }
+
+        // Solid down to the header's own bottom edge, give or take, then out to nothing by the foot of the band.
+        static Brush Fade(double solidTo)
+        {
+            var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+            g.GradientStops.Add(new GradientStop(Colors.White, 0));
+            g.GradientStops.Add(new GradientStop(Colors.White, solidTo * 0.88));
+            g.GradientStops.Add(new GradientStop(Color.FromArgb(0, 255, 255, 255), 1));
+            g.Freeze();
+            return g;
         }
 
         // Windows groups taskbar buttons by AppUserModelID, and a process that never sets one inherits its host's.

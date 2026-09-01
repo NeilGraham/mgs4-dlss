@@ -1,7 +1,16 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="MGS4 DLSS Launcher" Height="880" Width="1180" MinHeight="560" MinWidth="920"
         Background="#0F1116" WindowStartupLocation="CenterScreen" TextOptions.TextFormattingMode="Ideal">
+  <!-- No system title bar: the client area starts at the very top of the window so the key art can fill the strip
+       the caption used to have, and the three buttons at its right are drawn here instead. CaptionHeight is what
+       is left draggable - it is raised in code to the whole header's height, so the bar drags like a title bar.
+       The glass frame is kept so the window still has Windows' own shadow and rounded corners. -->
+  <shell:WindowChrome.WindowChrome>
+    <shell:WindowChrome CaptionHeight="32" ResizeBorderThickness="6" CornerRadius="0"
+                        GlassFrameThickness="0,32,0,0" UseAeroCaptionButtons="False"/>
+  </shell:WindowChrome.WindowChrome>
   <Window.Resources>
     <SolidColorBrush x:Key="Card" Color="#171A21"/>
     <SolidColorBrush x:Key="Line" Color="#242935"/>
@@ -152,6 +161,132 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- Minimise, maximise and close, in Windows' own metrics (46x32) and its own glyph font, because they are
+         no longer Windows' to draw. -->
+    <Style x:Key="Caption" TargetType="Button">
+      <Setter Property="Width" Value="46"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" Background="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#26FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#3DFFFFFF"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="CaptionClose" TargetType="Button" BasedOn="{StaticResource Caption}">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="b" Background="Transparent">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#E81123"/>
+                <Setter Property="Foreground" Value="#FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#C50F1F"/>
+                <Setter Property="Foreground" Value="#FFFFFF"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- The right-click menu on any text box. WPF builds that menu itself, and its own theme is the light one,
+         which came up white over this window. -->
+    <Style TargetType="ContextMenu">
+      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ContextMenu">
+            <Border Background="#171A21" BorderBrush="#333A4D" BorderThickness="1" CornerRadius="6" Padding="4"
+                    SnapsToDevicePixels="True">
+              <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="MenuItem">
+      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="MenuItem">
+            <Border x:Name="b" Background="Transparent" CornerRadius="4" Padding="11,5">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}" Foreground="#858D9E"
+                           Margin="22,0,0,0" VerticalAlignment="Center"/>
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="b" Property="Background" Value="#25335C"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="#5A6172"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="{x:Static MenuItem.SeparatorStyleKey}" TargetType="Separator">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Separator">
+            <Border Height="1" Background="#242935" Margin="7,4"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- The command line preview: a read-only text box rather than a text block, so the text can be selected and
+         copied by hand as well as with the button beside it. -->
+    <Style x:Key="CodeBox" TargetType="TextBox">
+      <Setter Property="IsReadOnly" Value="True"/>
+      <Setter Property="IsReadOnlyCaretVisible" Value="False"/>
+      <Setter Property="IsTabStop" Value="False"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Foreground" Value="#9FB6FF"/>
+      <Setter Property="SelectionBrush" Value="#3A5BD9"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FontFamily" Value="Consolas"/>
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="MinHeight" Value="0"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Cursor" Value="IBeam"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <ScrollViewer x:Name="PART_ContentHost" Background="Transparent"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Foreground" Value="#E7EAF0"/>
       <Setter Property="FontSize" Value="12"/>
@@ -287,17 +422,26 @@
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border x:Name="HeaderBar" Grid.Row="0" Background="#000000" BorderBrush="{StaticResource Line}"
-            BorderThickness="0,0,0,1">
+    <!-- The key art, behind the header and the top of the content both. The band is taller than the header by a
+         strip that reaches into the content, and Art fades the bottom of the whole thing out, so the art dissolves
+         into the window instead of ending on a line. Height comes from Art, which follows the header. Nothing in
+         here is hit-tested: the cards and buttons over it stay clickable. -->
+    <Grid x:Name="ArtBand" Grid.Row="0" Grid.RowSpan="2" VerticalAlignment="Top" IsHitTestVisible="False">
+      <!-- Black under everything: the art's own right-hand half is black, so the two meet with nothing to blend. -->
+      <Rectangle Fill="#000000"/>
+      <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. It sits on the
+           left, the full height of the band; the logo is offset past Snake's face rather than over it. -->
+      <Rectangle x:Name="HeroArt" HorizontalAlignment="Stretch" Visibility="Collapsed"/>
+      <!-- One translucent blue-grey over the lot, art and bare black alike, so they stay the same colour while the
+           black is lifted towards the rest of the window. -->
+      <Rectangle Fill="#188FA8D8"/>
+    </Grid>
+
+    <Border x:Name="HeaderBar" Grid.Row="0" Background="Transparent">
       <Grid>
-        <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. It sits on the
-             left at 80% of the bar's height, and the bar is black so the art's own black half has nothing to blend
-             against. The logo is offset past Snake's face rather than over it. -->
-        <Rectangle x:Name="HeroArt" HorizontalAlignment="Stretch" Visibility="Collapsed"/>
-        <!-- One translucent blue-grey over the whole bar, art and bare background alike, so the two still meet as
-             the same colour while the black is lifted towards the rest of the window. -->
-        <Rectangle Fill="#188FA8D8"/>
-        <Grid Margin="22,16">
+        <!-- 48 at the top: 32 of caption strip that is now ours to draw on, then the 16 the bar always had, which
+             leaves the logo, the tabs and the pill exactly where they were on screen. -->
+        <Grid Margin="22,48,22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
@@ -307,7 +451,10 @@
           <Image x:Name="LogoArt" Height="34" HorizontalAlignment="Left" Visibility="Collapsed"/>
           <TextBlock x:Name="TitleText" Text="MGS4 DLSS Launcher" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
         </StackPanel>
-        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <!-- The whole header is the draggable caption, so the tabs have to be excused from it or they stop
+             taking clicks. Everything else up here is a label and drags the window, which is what a bar does. -->
+        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
           <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="Settings" GroupName="nav"/>
           <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="Setup" GroupName="nav"/>
@@ -324,6 +471,14 @@
         </Grid>
       </Grid>
     </Border>
+
+    <!-- Over the art, and told the chrome to let clicks through to it rather than treating it as draggable bar. -->
+    <StackPanel x:Name="CaptionButtons" Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right"
+                VerticalAlignment="Top" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+      <Button x:Name="MinBtn" Content="&#xE921;" Style="{StaticResource Caption}" ToolTip="Minimise"/>
+      <Button x:Name="MaxBtn" Content="&#xE922;" Style="{StaticResource Caption}" ToolTip="Maximise"/>
+      <Button x:Name="CloseBtn" Content="&#xE8BB;" Style="{StaticResource CaptionClose}" ToolTip="Close"/>
+    </StackPanel>
 
     <!-- 16 at the bottom as well as the top: this view is one stretched panel rather than a stack of cards, so
          nothing else holds it off the bar underneath. The other two tabs get theirs from the last card's
@@ -405,7 +560,16 @@
               </StackPanel>
               <TextBlock Text="The same thing from a terminal" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,4,0,5"/>
               <Border Background="#12151D" BorderBrush="#242935" BorderThickness="1" CornerRadius="6" Padding="9,7">
-                <TextBlock x:Name="CmdPreview" FontFamily="Consolas" FontSize="11" Foreground="#9FB6FF" TextWrapping="Wrap"/>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="CmdPreview" Style="{StaticResource CodeBox}" VerticalAlignment="Center"/>
+                  <Button x:Name="CmdCopyBtn" Grid.Column="1" Content="Copy" Style="{StaticResource Link}"
+                          Margin="9,0,0,0" VerticalAlignment="Top"
+                          ToolTip="Copy this command line to the clipboard"/>
+                </Grid>
               </Border>
             </StackPanel>
           </ScrollViewer>
