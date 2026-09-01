@@ -2817,7 +2817,7 @@ static void on_destroy_swapchain(swapchain*, bool) { g_backbuffers.clear(); }
 static void on_init_device(device* dev)
 {
     logmsg("device created: api=%u (d3d12=%u)", (unsigned)dev->get_api(), (unsigned)device_api::d3d12);
-    if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (install MGS4_D3D12.asi)"); g_cfgEnabled = 0; return; }
+    if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (set Options -> Graphics -> API to DirectX 12)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
     objmv::init(g_d3d, logmsg);   // hooks root signature / PSO creation: must precede the game's pipelines
     // Streamline (frame generation) is only loaded when FrameGen is enabled at startup: it takes over the swapchain,

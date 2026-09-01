@@ -8,7 +8,7 @@ Real DLSS (DLAA and the upscaling modes) for the PC port of *Metal Gear Solid 4*
 
 | Step | State |
 |---|---|
-| Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — the game has a native renderer option (Options -> Graphics, `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`); `d3d12-switch/` remains as a fallback |
+| Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — the game has a native renderer option (Options -> Graphics, `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`) |
 | Phase 0 — map the frame (scene target, depth, composite draw) | **Done** — see docs |
 | Phase 1a — NGX DLSS (DLAA) created + evaluated every frame, NGX add-ons can hook it | **Done** — `dlss-addon/` (v1: zero jitter / zero motion vectors) |
 | Phase 1b — camera jitter + camera-only motion vectors | **Done** — see below |
@@ -272,13 +272,11 @@ What it reports, beyond whether a file exists:
      This is the one group with an **Install the add-on** button, because it is the one group that ships with the
      app: see below.
 
-  **Two things that used to be here are not part of the install.** A third-party **frame limiter** (MGSFPSUnlock)
-  is a separate mod, and above 60 fps it works against this port - its physics are tied to 60. The way to put more
-  frames on screen with this add-on is **frame generation**: the game keeps running at 60 and the generated frames
-  come on top, which is what `FrameGen` + `FGTargetFps` do. The **D3D12 switch ASI** is unnecessary too, because
-  the game has its own DirectX 12 option (`Options -> Graphics -> API`). Setup still *checks* for both, because a
-  copy left over from an earlier setup is worth knowing about - a limiter above 60 and an enabled ASI each get a
-  warning row.
+  **A frame limiter is not part of the install.** A third-party one (MGSFPSUnlock) is a separate mod, and above
+  60 fps it works against this port - its physics are tied to 60. The way to put more frames on screen with this
+  add-on is **frame generation**: the game keeps running at 60 and the generated frames come on top, which is what
+  `FrameGen` + `FGTargetFps` do. Setup still *checks* for one, because a copy left over from an earlier setup is
+  worth knowing about: above 60 it gets a warning row.
 
   **Drag and drop does most of it.** The Setup tab has a drop area naming exactly what it takes —
   `ReShade_Setup_*.exe`, `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, read
@@ -348,13 +346,10 @@ Settings that are not files this repo installs:
 - **`steam_appid.txt`** containing `2492670` next to `mgs4.exe`, so `--stage` boots do not bounce through Steam.
   Neither Steam nor the game ever writes it, and a reinstall never has one — the app writes it itself before a
   scene boot, and the Setup tab offers it as a button while it is missing.
-- **`scripts\MGS4_D3D12.ini`**, only if an old copy is still there: `Enabled = 0`. The game's own DirectX 12
-  option is what this setup uses, so the ASI is not installed any more and running both is pointless (see "Native
-  Direct3D 12 option").
 
 ### Build / install (from source)
 
-Requirements: MSVC Build Tools, ReShade 6.8 installed as `MGS4\dxgi.dll`, the D3D12 switch above, and `nvngx_dlss.dll` in `MGS4\` (copy `third_party/DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll` or let the NVIDIA app override supply it). `build.bat` finds the MSVC environment through `vswhere` and `fxc.exe` in the newest Windows 10 SDK; `MGS4_VCVARS` / `MGS4_FXC` in `config.ini` override that. The install script copies to whatever game folder is configured — see [Paths](#paths-configini).
+Requirements: MSVC Build Tools, ReShade 6.8 installed as `MGS4\dxgi.dll`, the game set to DirectX 12, and `nvngx_dlss.dll` in `MGS4\` (copy `third_party/DLSS/lib/Windows_x86_64/rel/nvngx_dlss.dll` or let the NVIDIA app override supply it). `build.bat` finds the MSVC environment through `vswhere` and `fxc.exe` in the newest Windows 10 SDK; `MGS4_VCVARS` / `MGS4_FXC` in `config.ini` override that. The install script copies to whatever game folder is configured — see [Paths](#paths-configini).
 
 ```bat
 dlss-addon\build.bat                       :: -> build\mgs4_dlss.addon64
@@ -662,36 +657,17 @@ scenes: no window switches, no mid-scene seed insertions, no pass-through frames
 - Frame generation on a 60 Hz output only adds real/generated alternation; use it with a 120 Hz (or faster) display or virtual display.
 - `steam_appid.txt` (2492670) is placed next to `mgs4.exe` — written by the app before any scene boot — so the exe can be launched directly for testing; harmless for Steam launches.
 
-## Native Direct3D 12 option (preferred)
+## Direct3D 12
 
-The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12**, stored as `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`. With it bgfx creates the D3D12 device directly, so the ASI switch below is unnecessary (set `Enabled = 0` in `scripts\MGS4_D3D12.ini` or remove it). Two things to keep in mind on that path:
+The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12**, stored as `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`. With it bgfx creates the D3D12 device directly, which is all this add-on needs — it is a D3D12 add-on and does nothing on the D3D11 backend. Setting it is step 1 of the install, and the Setup tab checks it.
 
-- bgfx never loads `d3d11.dll`, so an ASI loader installed under that name would not load any more. An ASI loader has to be installed as **`winmm.dll`** (imported by `mgs4.exe` at startup) instead. Nothing in this setup needs one any more — it is here because the note above is about a build that did.
 - The same settings file has `enableFXAA` (turn it off with DLAA — it only blurs the DLSS input) and `vsync` / `fpsLimiter` (vsync off is better for frame-generation latency).
-
-## d3d12-switch (`MGS4_D3D12.asi`) — fallback
-
-The port renders through [bgfx](https://github.com/bkaradzic/bgfx) and picks Direct3D 11. bgfx tries backends in score order (D3D11, then D3D12, …) and moves on when one fails to create a device. The ASI hooks the system `d3d11.dll`'s `D3D11CreateDevice` / `D3D11CreateDeviceAndSwapChain` and returns `E_FAIL` for calls that carry `D3D11_CREATE_DEVICE_SINGLETHREADED` (0x1 — bgfx passes 0x21), so bgfx falls through to its D3D12 backend. Nothing else is patched.
-
-Verified 2026-08-28: game boots and renders the title/intro on D3D12 (`ReShade.log` shows `D3D12CreateDevice`, `D3D12Core.dll` loaded); MGSFPSUnlock, ReShade and `renodx-dlss5.addon64` load alongside.
-
-### Build / install
-
-Requirements: mingw-w64 `gcc` on PATH (Git Bash), [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader) as `MGS4/d3d11.dll`.
-
-```sh
-sh d3d12-switch/build.sh      # -> build/MGS4_D3D12.asi
-sh d3d12-switch/install.sh    # copies asi + ini to MGS4/scripts/ (game folder: see Paths below)
-```
-
-Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: `MGS4/logs/MGS4_D3D12.log`.
 
 ## Layout
 
 ```
 mgs4-dlss-launcher            the app, and the only entry point: Play / Settings / Install
 config.example.ini            machine-local paths; copy to config.ini (git-ignored)
-d3d12-switch/                 mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/                   src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh         where the game / the output folder live on this machine
 launcher/src, build.ps1      the app itself: Program, Paths, Checks, Install, Catalogue, Runner, Ui/

@@ -54,7 +54,7 @@ driver's NGX runtime loads; `EvaluateFeature_C` is not exported by driver 616.56
 
 ## Plan
 
-**Route A (done):** force bgfx onto D3D12 with `MGS4_D3D12.asi` (see repo README). Unlocks NGX D3D12, DLSS-FG, and DX12-only ReShade add-ons. Route B (D3D11On12 proxy) is the fallback and was not needed.
+**Route A (done):** get bgfx onto D3D12. It was first forced with an ASI (`MGS4_D3D12.asi`, hooking `D3D11CreateDevice` to fail bgfx's D3D11 attempt); the port turned out to have the backend as its own option - Options -> Graphics -> API = DirectX 12 - so the ASI was removed on 2026-09-01 and this is now a setting, not a patch. Unlocks NGX D3D12, DLSS-FG, and DX12-only ReShade add-ons. Route B (D3D11On12 proxy) was the fallback and was not needed.
 
 **Phase 0 — map the frame.** RenderDoc capture (run without ReShade) plus a diagnostic ReShade add-on (API v18, D3D12) that logs pipelines/draws per frame. Find: the scene pass RTV/DSV, the stretch draw that consumes it, the UI boundary, and the constant buffer + offset holding view-projection (spot the projection pattern in a 4x4; confirm by perturbing it). Dump DXBC by hash with RenoDX's dev build.
 
