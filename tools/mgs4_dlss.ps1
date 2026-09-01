@@ -1195,23 +1195,25 @@ $script:Xaml = @'
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="#141821" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+    <Border x:Name="HeaderBar" Grid.Row="0" Background="#000000" BorderBrush="{StaticResource Line}"
+            BorderThickness="0,0,0,1">
       <Grid>
-        <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. The fade over
-             the top keeps the left side flat so the logo and the paths stay readable. -->
-        <Rectangle x:Name="HeroArt" Visibility="Collapsed"/>
+        <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. It sits on the
+             left at 80% of the bar's height, and the bar is black so the art's own black half has nothing to blend
+             against. The logo is offset past Snake's face rather than over it. -->
+        <Rectangle x:Name="HeroArt" HorizontalAlignment="Stretch" Visibility="Collapsed"/>
+        <!-- One translucent blue-grey over the whole bar, art and bare background alike, so the two still meet as
+             the same colour while the black is lifted towards the rest of the window. -->
+        <Rectangle Fill="#188FA8D8"/>
         <Grid Margin="22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <StackPanel Grid.Column="0">
-          <Image x:Name="LogoArt" Height="30" HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,2,0,6"/>
+        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+          <Image x:Name="LogoArt" Height="34" HorizontalAlignment="Left" Visibility="Collapsed"/>
           <TextBlock x:Name="TitleText" Text="MGS4 DLSS" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
-          <TextBlock x:Name="Caption" Text="start a scene" FontSize="13" Foreground="{StaticResource Accent}" Margin="0,1,0,6"/>
-          <TextBlock x:Name="GamePath" FontSize="11" Foreground="{StaticResource Muted}" FontFamily="Consolas"
-                     TextTrimming="CharacterEllipsis" MaxWidth="360"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
@@ -1480,41 +1482,38 @@ function Set-HeaderArt($ui) {
         # UniformToFill on a band this wide shows the art's full width, so the face lands on the left - which is
         # where the logo and the paths go. Mirroring the brush puts it on the right instead, under the status pill,
         # where the fade is thinnest and there is nothing to read.
-        # The whole art, uncropped: Uniform fits its full height into the band, so it takes about a quarter of the
-        # width. Aligned right, the face lands in the gap before the status pill and the art's own black half runs
-        # out under the pill into the header colour, with no edge to hide on that side.
+        # The art on the left, filling the bar's full height, showing the middle 80% of its own height - so it is
+        # zoomed in a little, losing the top of the bandana and the bottom of the shoulder. The bar is black and so
+        # is the art's right-hand half, so the two meet with nothing to blend - no gradient, no mask.
         # It is painted as a Rectangle's fill rather than an Image because an Image would offer the art's own
         # 1920x620 as its desired size and drag the header open to match.
+        $shown = 0.70
         $brush = New-Object System.Windows.Media.ImageBrush $hero
+        $brush.Viewbox = New-Object System.Windows.Rect 0, ((1.0 - $shown) / 2), 1, $shown
         $brush.Stretch = [System.Windows.Media.Stretch]::Uniform
-        $brush.AlignmentX = [System.Windows.Media.AlignmentX]::Right
+        $brush.AlignmentX = [System.Windows.Media.AlignmentX]::Left
         $brush.AlignmentY = [System.Windows.Media.AlignmentY]::Center
-        $brush.Opacity = 0.9
         $brush.Freeze()
         $ui.HeroArt.Fill = $brush
         $ui.HeroArt.Visibility = "Visible"
 
-        # The art's left edge is a hard cut through Snake's cheek - it is drawn to sit flush against a panel - so it
-        # is faded in. Where that edge falls depends on the band's proportions, so the mask is worked out from the
-        # measured size and redone whenever the window is resized.
-        $aspect = $hero.PixelWidth / $hero.PixelHeight
-        $rect = $ui.HeroArt
-        $fade = {
-            if ($rect.ActualWidth -le 0 -or $rect.ActualHeight -le 0) { return }
-            $artFrac = [Math]::Min(1.0, ($rect.ActualHeight * $aspect) / $rect.ActualWidth)
-            $start = 1.0 - $artFrac
-            $mask = New-Object System.Windows.Media.LinearGradientBrush
-            $mask.StartPoint = New-Object System.Windows.Point 0, 0
-            $mask.EndPoint = New-Object System.Windows.Point 1, 0
-            foreach ($stop in @(@($start, 0.0), @([Math]::Min(1.0, $start + 0.30 * $artFrac), 1.0))) {
-                $c = [System.Windows.Media.Color]::FromArgb([byte](255 * $stop[1]), 0, 0, 0)
-                $mask.GradientStops.Add((New-Object System.Windows.Media.GradientStop $c, $stop[0]))
-            }
-            $mask.Freeze()
-            $rect.OpacityMask = $mask
+        # How far right the logo has to start to clear Snake's face depends on how wide the art comes out, which
+        # depends on the bar's height - so it is measured and redone on resize. The aspect is the cropped region's,
+        # not the file's.
+        $aspect = $hero.PixelWidth / ($hero.PixelHeight * $shown)
+        $bar = $ui.HeaderBar
+        $logo = $ui.LogoArt
+        $title = $ui.TitleText
+        $layout = {
+            $h = $bar.ActualHeight
+            if ($h -le 0) { return }
+            $push = [Math]::Max(0.0, ($h * $aspect) * 0.32)     # left far enough to clear the face, over the shoulder
+            $lift = $h * 0.12                                   # and sat a little above the bar's centre line
+            $logo.Margin = New-Object System.Windows.Thickness $push, 0, 0, $lift
+            $title.Margin = New-Object System.Windows.Thickness $push, 0, 0, $lift
         }.GetNewClosure()
-        $rect.Add_SizeChanged($fade)
-        & $fade
+        $bar.Add_SizeChanged($layout)
+        & $layout
     }
 }
 
@@ -1930,7 +1929,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     })
 
     $ui = @{}
-    foreach ($n in @("GamePath", "Caption", "TitleText", "LogoArt", "HeroArt", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
+    foreach ($n in @("HeaderBar", "TitleText", "LogoArt", "HeroArt", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
                      "Search", "SearchHint", "Filters", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
@@ -1943,13 +1942,6 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     Set-WindowIcon $win $state.GameDir
     Set-HeaderArt $ui
 
-    $refreshGamePath = {
-        $ui.GamePath.Text = $(if ($state.GameDir) { $state.GameDir }
-                              elseif ($opt.GameDirBad) { "no mgs4.exe in $($opt.GameDirBad) - see Setup" }
-                              else { "no MGS4 install found - see Setup" })
-        $ui.GamePath.ToolTip = $ui.GamePath.Text
-    }.GetNewClosure()
-    & $refreshGamePath
     $ui.SceneList.ItemTemplate = [Windows.Markup.XamlReader]::Parse($script:ItemTemplateXaml)
 
     $pad = Open-Pad
@@ -2440,7 +2432,6 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         $ui.ReloadBtn.Visibility = & $vis ($tab -eq "settings")
         $ui.CopyBtn.Visibility = & $vis ($tab -eq "install")
         $ui.RecheckBtn.Visibility = & $vis ($tab -eq "install")
-        $ui.Caption.Text = switch ($tab) { "settings" { "add-on settings" } "install" { "setup and install check" } default { "start a scene" } }
         if ($tab -eq "settings") { & $buildSettings }
         if ($tab -eq "install") { & $showInstall }
         & $refreshState
@@ -2472,7 +2463,6 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.Status.Text = $(if ($dir) { "found $dir - left to auto-detection" } else { "no MGS4 install found" })
         }
         Set-WindowIcon $win $dir
-        & $refreshGamePath
         & $applyFilter
         & $showInstall
     }.GetNewClosure()
