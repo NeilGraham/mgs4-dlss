@@ -1,12 +1,12 @@
-// The mgs4-dlss.exe wrapper: runs tools\mgs4_dlss.ps1 with no console window of any kind.
+// The mgs4-dlss-launcher.exe wrapper: runs tools\mgs4_dlss_launcher.ps1 with no console window of any kind.
 //
 // Built by tools\build_app_exe.ps1, which also gives it the game's icon. It is a Windows-subsystem program
 // (/target:winexe), so double-clicking it never flashes a console - a .bat cannot avoid that, because cmd.exe owns
 // one before it can hide anything.
 //
 // Run from a terminal it still behaves like a command: AttachConsole hands it the console it was started from, the
-// PowerShell child inherits that, and `mgs4-dlss.exe --list` or `--report` print where you typed them. The exit
-// code is the script's.
+// PowerShell child inherits that, and `mgs4-dlss-launcher.exe --list` or `--report` print where you typed them.
+// The exit code is the script's.
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -32,8 +32,8 @@ static class App
 
     // AttachConsole gives the process a console but leaves its standard handles unset, so a child would inherit
     // nothing and its output would go nowhere. Point the unset ones at the console device before starting anything
-    // - only the unset ones, because a caller redirecting us ("mgs4-dlss.exe --report > out.txt") has already put a
-    // file there and that has to survive.
+    // - only the unset ones, because a caller redirecting us ("mgs4-dlss-launcher.exe --report > out.txt") has
+    // already put a file there and that has to survive.
     static void BindStandardHandles()
     {
         BindOne(STD_OUTPUT, "CONOUT$", GENERIC_READ | GENERIC_WRITE);
@@ -71,13 +71,13 @@ static class App
     static int Main(string[] args)
     {
         string dir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
-        string script = Path.Combine(dir, "tools\\mgs4_dlss.ps1");
+        string script = Path.Combine(dir, "tools\\mgs4_dlss_launcher.ps1");
         if (!File.Exists(script))
         {
             MessageBoxW(IntPtr.Zero,
-                "Could not find tools\\mgs4_dlss.ps1 next to this program.\n\n" +
-                "Run mgs4-dlss.exe from the folder it was unzipped into.",
-                "MGS4 DLSS", 0x10);
+                "Could not find tools\\mgs4_dlss_launcher.ps1 next to this program.\n\n" +
+                "Run mgs4-dlss-launcher.exe from the folder it was unzipped into.",
+                "MGS4 DLSS Launcher", 0x10);
             return 1;
         }
 
@@ -105,7 +105,7 @@ static class App
         }
         catch (Exception e)
         {
-            MessageBoxW(IntPtr.Zero, "Could not start PowerShell:\n\n" + e.Message, "MGS4 DLSS", 0x10);
+            MessageBoxW(IntPtr.Zero, "Could not start PowerShell:\n\n" + e.Message, "MGS4 DLSS Launcher", 0x10);
             return 1;
         }
     }

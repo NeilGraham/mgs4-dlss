@@ -36,20 +36,20 @@ Verified 2026-08-28: NGX init OK on RTX 5090 / 616.56, `CreateFeature` OK, ~120 
 
 ### Install (release)
 
-`mgs4-dlss` walks through this on its Setup tab, and takes most of these files by drag-and-drop. In order:
+`mgs4-dlss-launcher` walks through this on its Setup tab, and takes most of these files by drag-and-drop. In order:
 
 1. In the game: **Options -> Graphics -> API = DirectX 12** (`api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`), FXAA off, frame limiter 60 (`fpsLimiter=60`), vsync off.
-2. **ReShade with add-on support** ([reshade.me](https://reshade.me/)): run the setup marked *with full add-on support*, point it at `MGS4\mgs4.exe`, choose the Direct3D 10/11/12 renderer, and tick **no** shader packs — none are used. It installs itself as `MGS4\dxgi.dll`.
+2. **ReShade with add-on support** ([reshade.me](https://reshade.me/)): download the setup marked *with full add-on support* and drop it on the launcher's Setup tab — it is run headless against `MGS4\mgs4.exe`, installs itself as `MGS4\dxgi.dll`, and takes no shader packs (none are used). By hand: run it, point it at `MGS4\mgs4.exe`, choose the Direct3D 10/11/12 renderer, tick no shader packs.
 3. **`streamline.zip`** from the [RenoDX Discord](https://discord.gg/renodx), under Pinned Messages: extract everything in it straight into `MGS4\`. One zip carries `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set, already matched to each other — the NVIDIA and Streamline SDKs are not needed separately. (If the NVIDIA app's DLSS override is on for this game it supplies `nvngx_dlss.dll` instead.)
 4. **`renodx-dlss5.addon64`** from the same Pinned Messages, next to `mgs4.exe`. Optional, and the reason to bother: with it present this add-on runs DLAA on the final image so Neural Rendering works at full strength. It is auto-detected — nothing to configure.
-5. **`mgs4_dlss.addon64`** from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases), next to `mgs4.exe`, last. `mgs4_dlss.ini` beside it is the configuration this was verified with; without it the add-on uses its built-in defaults.
+5. **`mgs4_dlss.addon64`** — press **Install the add-on** on the launcher's Setup tab, or run `mgs4-dlss-launcher --install-addon`. The add-on ships with the launcher, so there is nothing to fetch: it copies the add-on next to `mgs4.exe`, last, and an `mgs4_dlss.ini` alongside it if the game folder has none. Dropping a pair from the [releases](https://github.com/NeilGraham/mgs4-dlss/releases) in by hand still works.
 6. Start the game; the first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the DLSS create/evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay's Add-ons tab has live controls and GPU/CPU timing.
 
 Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps — set `FGTargetFps` to your refresh rate (the shipped ini uses `FrameGen=4` + `FGTargetFps=240`); on a 60 Hz output set `FrameGen=0`.
 
-Run **`mgs4-dlss`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
+Run **`mgs4-dlss-launcher`** at any point: its Install tab says which of those pieces are actually in place, and its Play tab starts the game or any single scene — see below.
 
-## The app (`mgs4-dlss`)
+## The app (`mgs4-dlss-launcher`)
 
 One window for the whole add-on, and the same things as a command line. It needs nothing installed — PowerShell
 ships with Windows and the `.bat` handles the execution policy — so it runs straight out of an unzipped release.
@@ -61,32 +61,34 @@ ships with Windows and the `.bat` handles the execution policy — so it runs st
 | **Setup** | the game folder, which files are in place, what the settings say, what the add-on did on its last run |
 
 ```bat
-mgs4-dlss                         :: the window
-mgs4-dlss s02a50l_D1              :: boot that scene and exit
-mgs4-dlss --main                  :: MGS4's own menu, past the Master Collection screen
-mgs4-dlss --list naomi            :: what can be launched
-mgs4-dlss --setup                 :: the window, opened on Setup (game folder + install check)
-mgs4-dlss --report                :: the install check as text, for pasting into an issue
-mgs4-dlss <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
-mgs4-dlss --set FrameGen=0        :: write ini keys without opening anything
-mgs4-dlss --help                  :: every option
+mgs4-dlss-launcher                         :: the window
+mgs4-dlss-launcher s02a50l_D1              :: boot that scene and exit
+mgs4-dlss-launcher --main                  :: MGS4's own menu, past the Master Collection screen
+mgs4-dlss-launcher --list naomi            :: what can be launched
+mgs4-dlss-launcher --setup                 :: the window, opened on Setup (game folder + install check)
+mgs4-dlss-launcher --report                :: the install check as text, for pasting into an issue
+mgs4-dlss-launcher --install-addon         :: put the add-on that ships here next to mgs4.exe
+mgs4-dlss-launcher <id> --shortcut <file>  :: save that scene, with its run options, as a .lnk
+mgs4-dlss-launcher --set FrameGen=0        :: write ini keys without opening anything
+mgs4-dlss-launcher --help                  :: every option
 ```
 
-**Two files, one program.** `mgs4-dlss.bat` is what a fresh clone has and always works. Running
+**Two files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works. Running
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\build_app_exe.ps1
 ```
 
-once builds **`mgs4-dlss.exe`** next to it: the same thing, but a Windows-subsystem program, so double-clicking it
+once builds **`mgs4-dlss-launcher.exe`** next to it: the same thing, but a Windows-subsystem program, so double-clicking it
 never flashes a console the way a `.bat` must (cmd.exe owns one before it can hide anything), and it wears the
 game's icon - in the title bar and on the file. Nothing has to be installed for that: the C# compiler ships with
 Windows, and the icon is read out of the `mgs4.exe` already on this machine, which is also why the exe is not in the
 repo - the artwork inside it is Konami's, so it is built locally rather than redistributed. Every example below
-works with either, since `mgs4-dlss` resolves to whichever is there.
+works with either, since `mgs4-dlss-launcher` resolves to whichever is there.
 
 The exe passes arguments through and prints where you typed them, but cmd does not wait for a windowed program, so
-a script that needs to capture output or check an exit code should call `mgs4-dlss.bat` or `tools\mgs4_dlss.ps1`.
+a script that needs to capture output or check an exit code should call `mgs4-dlss-launcher.bat` or
+`tools\mgs4_dlss_launcher.ps1`.
 
 **The window wears the game's own artwork** when Steam has it cached on this machine: the Metal Gear Solid 4 logo
 in place of the title, the key art behind the header band (mirrored, so Snake sits on the right where there is
@@ -94,6 +96,23 @@ nothing to read), and the game's icon on the window and the taskbar. All of it i
 `Steam\appcache\librarycache` and from `mgs4.exe` itself — none of it is in this repo, because it is Konami's
 artwork and it is already on the machine of anyone who owns the game. Every piece falls back to plain text if it is
 not there.
+
+**Scrolling.** WPF gives a wheel notch three "lines" and applies it in one jump - and in a `ListBox` a "line" is a
+whole row, so the scene list moved three scenes at a time. Three things fix that:
+
+- the scene list scrolls **by pixel** (`VirtualizingPanel.ScrollUnit`), keeping recycling virtualisation for its
+  400+ rows - without it an offset of 72 would mean 72 rows rather than 72 pixels;
+- a **wheel notch** moves a target offset 72 px and the real offset eases toward it, so a flick glides and repeated
+  notches accumulate instead of fighting each other. The step is taken on `CompositionTarget.Rendering` - once per
+  frame the compositor is about to draw - and the amount depends on how long the frame took (a 70 ms time
+  constant), so a dropped frame costs no distance. A `DispatcherTimer` was the obvious way to do this and the wrong
+  one: it runs at `Background` priority, which measured 42 ticks a second with stalls to 147 ms, and every stall is
+  a stutter;
+- a **precision touchpad** reports the finger continuously in deltas well under a notch. That stream is already
+  smooth, and easing it would only put lag between the finger and the page, so anything under a full notch is
+  applied as it arrives, one to one.
+
+`ScrollStep` and `ScrollTau` at the top of that block are the two numbers worth touching.
 
 Play, Settings and Setup are tabs of the one window. The **first** run
 opens on Setup, because the first thing anyone needs to know is whether the pieces are in place; after that it
@@ -175,10 +194,10 @@ choose - so "the Naomi lab cutscene, tapping X the whole way, closing when gamep
 double-click. The same thing from a terminal:
 
 ```bat
-mgs4-dlss s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
+mgs4-dlss-launcher s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
 ```
 
-The shortcut runs `tools\mgs4_dlss.ps1` **by absolute path**, which is the one thing that can break it: move or
+The shortcut runs `tools\mgs4_dlss_launcher.ps1` **by absolute path**, which is the one thing that can break it: move or
 re-clone the checkout and it points at a folder that is no longer there. Make a new one rather than editing it.
 
 The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
@@ -191,7 +210,7 @@ on the Master Collection screen first, so a plain "run the game" shortcut needs 
 
 `MGS4\mgs4_dlss.ini` as a form — DLSS mode and preset, frame generation and its target fps, the image keys
 (`PostDof`, `ObjectMV`, `DRS`, `UIMask`, ...) and the diagnostics, each row naming its key and what it does.
-`mgs4-dlss --settings` prints the same thing; `--set Key=Value` writes without opening a window.
+`mgs4-dlss-launcher --settings` prints the same thing; `--set Key=Value` writes without opening a window.
 
 Saving is blocked while the game is running, because the add-on owns that file then: its writes go through the
 Windows profile API, whose cache will quietly undo an outside edit. While the game *is* up, the same keys are live in
@@ -203,9 +222,12 @@ Most of the files this add-on needs cannot be shipped here: NVIDIA's DLSS runtim
 ReShade all have to be fetched from their own projects, so an install is assembled by hand and it is easy to end up
 one file short. The Setup tab opens with the verdict, then the game folder everything is checked against — the path, where it came
 from, a Browse button that records your choice as `MGS4_DIR` in `config.ini`, and Detect to stop pinning one and
-search the Steam libraries again. Auto-detection reads Steam's registry entry and `libraryfolders.vdf`, then tries
-every drive in letter order for the handful of places a library sits, so a library Steam has forgotten is still
-found without pressing anything. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
+search the Steam libraries again. **A game on another drive needs nothing special**: Steam's own install - found
+from the registry, normally on C: - carries `steamapps\libraryfolders.vdf`, and that file names every library on
+every drive, so a D: install is read out of the C: client. The PowerShell and Python resolvers additionally try
+each drive in letter order for the handful of places a library sits, which catches one Steam has forgotten.
+When no `mgs4.exe` turns up, the card **names the libraries it looked in** - if the drive holding the install is
+not among them, that library is not registered with Steam and Browse is the way in. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
 second monitor while files are dropped into the game folder, and **Copy report** puts the text form on the clipboard.
 
 What it reports, beyond whether a file exists:
@@ -214,8 +236,9 @@ What it reports, beyond whether a file exists:
   source as a button and every row a path relative to the game folder:
 
   1. **The game** — Steam. Set Graphics -> API to DirectX 12, FXAA off, vsync off, limiter 60.
-  2. **ReShade, with add-on support** — [reshade.me](https://reshade.me/). Run the setup marked *with full add-on
-     support*, point it at `mgs4.exe`, pick Direct3D 10/11/12, and tick **no** shader packs. It installs as `dxgi.dll`.
+  2. **ReShade, with add-on support** — [reshade.me](https://reshade.me/). Download the setup marked *with full
+     add-on support* and drop it on the tab: it is run **headless against `mgs4.exe`**, installs as `dxgi.dll`, and
+     takes no shader packs — none are used. Running it by hand still works.
   3. **DLSS and Streamline runtimes** — the [RenoDX Discord](https://discord.gg/renodx), Pinned Messages:
      **`streamline.zip`**, extracted straight into the folder with `mgs4.exe`. That one zip carries `nvngx_dlss.dll`,
      `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set already matched to each other — the NVIDIA and
@@ -223,6 +246,8 @@ What it reports, beyond whether a file exists:
   4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss5.addon64`, next to
      `mgs4.exe`. Nothing to configure; this add-on notices it.
   5. **This add-on** — `mgs4_dlss.addon64` next to `mgs4.exe`, last, so it loads with the rest already in place.
+     This is the one group with an **Install the add-on** button, because it is the one group that ships with the
+     app: see below.
   6. **Frame limiter** — [MGSFPSUnlock](https://github.com/cipherxof/MGSFPSUnlock/releases). Its zip brings its own
      ASI loader, so extract the whole thing into the game folder: `winmm.dll` beside `mgs4.exe` (the game imports
      winmm at startup, which is what makes `scripts\` load at all) and the limiter into `scripts\`.
@@ -233,8 +258,19 @@ What it reports, beyond whether a file exists:
   straight out of the manifest so the two cannot drift. Drop any of them anywhere on the tab: archives are unpacked
   into the game folder keeping
   the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the
-  ReShade setup is started for you, and the check re-runs. Only files the install actually uses are written —
+  ReShade setup is **run for you** rather than merely started — `ReShade_Setup_*.exe "<game>\mgs4.exe" --headless
+  --api dxgi`, which is its own unattended mode, so it picks no target, no API and no shader packs and is done in
+  under a second — and the check re-runs. Only files the install actually uses are written —
   anything else in a dropped archive is left alone and named in the status line.
+
+  **The add-on installs itself.** Every other group is somebody else's download, but `mgs4_dlss.addon64` and
+  `mgs4_dlss.ini` are what this app is *for*, so requiring them to be fetched separately made no sense. Group 5 has
+  an **Install the add-on** button that copies the pair the app ships with into the game folder: a release carries
+  them next to the app, a source checkout has the built add-on in `build\` and the sample ini in `dlss-addon\`.
+  `mgs4-dlss-launcher --install-addon` does the same from a terminal. Two rules it keeps: an `mgs4_dlss.ini`
+  already in the game folder is never overwritten (it holds your settings, and the `InternalRes` the first run
+  wrote), and the game has to be closed, because ReShade holds the loaded `.addon64` open. The button says
+  *Reinstall* once the add-on is there, and the drop area still takes a newer pair from a release.
 
 - **Settings** that the Settings tab does not cover, plus anything that reads as wrong. The game's own options
   (`api=dx12`, vsync, the frame limiter, FXAA) — with a **Set them for me** button that writes all four into
@@ -285,6 +321,8 @@ Settings that are not files this repo installs:
   `NeuralUplift=1`, `NRIntensity=2`, `NRStyle=2`, `NRLocalTone=1`, `NRSkinStructure=-1`, `NREnableUpscaling=0`
   (upscaling off: this add-on already runs DLAA on the final image, so NR only denoises / uplifts it).
 - **`steam_appid.txt`** containing `2492670` next to `mgs4.exe`, so `--stage` boots do not bounce through Steam.
+  Neither Steam nor the game ever writes it, and a reinstall never has one — the app writes it itself before a
+  scene boot, and the Setup tab offers it as a button while it is missing.
 - **`scripts\MGS4_D3D12.ini`**: `Enabled = 0` when the native D3D12 option below is used — the ASI is the fallback
   for builds without it, and running both is pointless (see "Native Direct3D 12 option").
 
@@ -596,7 +634,7 @@ scenes: no window switches, no mid-scene seed insertions, no pass-through frames
 - `Mode` changes need a restart (render targets are created at startup).
 - GPU load: DLAA + NR + frame generation at 4K120 can push the port's own dynamic resolution down to 50 %; the add-on renders correctly at any scale, but sharpness follows the game's choice — `Mode=Quality`, a fixed `FrameGen=1` or a lighter streaming encode keep it at native.
 - Frame generation on a 60 Hz output only adds real/generated alternation; use it with a 120 Hz (or faster) display or virtual display.
-- `steam_appid.txt` (2492670) is placed next to `mgs4.exe` so the exe can be launched directly for testing; harmless for Steam launches.
+- `steam_appid.txt` (2492670) is placed next to `mgs4.exe` — written by the app before any scene boot — so the exe can be launched directly for testing; harmless for Steam launches.
 
 ## Native Direct3D 12 option (preferred)
 
@@ -625,18 +663,18 @@ Revert to stock D3D11: set `Enabled = 0` in `MGS4/scripts/MGS4_D3D12.ini`. Log: 
 ## Layout
 
 ```
-mgs4-dlss          the app, and the only entry point: Play / Settings / Install
-config.example.ini     machine-local paths; copy to config.ini (git-ignored)
-d3d12-switch/          mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
-dlss-addon/            src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
-tools/paths.py|ps1|sh  where the game / the output folder live on this machine
-tools/mgs4_dlss.ps1    the app itself; tools/install_checks.ps1 the checks behind its Install tab
-tools/install_manifest.json  the file list, verified versions and download links the checks render
-tools/scenes.csv       every launchable scene; labels.json the names, scene_info.json the corrections
-third_party/minhook/   MinHook (BSD-2), vendored
-third_party/reshade/   ReShade add-on API headers (v6.8.0, BSD-3)
-third_party/DLSS/      NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
-docs/                  reverse-engineering notes and the DLSS plan
+mgs4-dlss-launcher            the app, and the only entry point: Play / Settings / Install
+config.example.ini            machine-local paths; copy to config.ini (git-ignored)
+d3d12-switch/                 mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
+dlss-addon/                   src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
+tools/paths.py|ps1|sh         where the game / the output folder live on this machine
+tools/mgs4_dlss_launcher.ps1  the app itself; tools/install_checks.ps1 the checks behind its Install tab
+tools/install_manifest.json   the file list, verified versions and download links the checks render
+tools/scenes.csv              every launchable scene; labels.json the names, scene_info.json the corrections
+third_party/minhook/          MinHook (BSD-2), vendored
+third_party/reshade/          ReShade add-on API headers (v6.8.0, BSD-3)
+third_party/DLSS/             NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
+docs/                         reverse-engineering notes and the DLSS plan
 ```
 
 ## Paths (`config.ini`)
@@ -647,7 +685,7 @@ value the same way: **environment variable > `config.ini` in the repo root > aut
 
 | key | what | detected as |
 | --- | --- | --- |
-| `MGS4_DIR` | the folder holding `mgs4.exe` (the install root also works) | the Steam library folder that has app 2492670, on any drive |
+| `MGS4_DIR` | the folder holding `mgs4.exe` (the install root also works) | the library holding app 2492670, on any drive: Steam's own install names them all in `libraryfolders.vdf`, and the app manifest names the folder under `steamapps\common` |
 | `MGS4_OUT` | recordings, gold clips, screenshots, analysis output | `<repo>\work` |
 | `MGS4_FFMPEG` / `MGS4_FFPROBE` | video tools used by the capture / analysis scripts | PATH |
 | `MGS4_PYTHON` | interpreter the detached gold worker starts | PATH |
@@ -739,15 +777,15 @@ trace lists each full-frame draw with its `ps=` hash) - that is how the three pa
 `s01a00l` (Act 1 start), ... (names listed in the exe). `steam_appid.txt` next to the exe keeps Steam from
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
-`mgs4-dlss` (see [The app](#the-app-mgs4-dlssbat)) does this and the rest of it — a scene list, the
+`mgs4-dlss-launcher` (see [The app](#the-app-mgs4-dlss-launcher)) does this and the rest of it — a scene list, the
 Cross tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
 and `tools\test_stages.ps1` call. `tools\launch_stage.ps1` is still there as a shim over it, so existing shortcuts
 and notes keep working:
 
 ```bat
-mgs4-dlss s00a00l                                 :: boot it, press through the prompts, exit
-mgs4-dlss s00a00l --keys "5,ENTER,4,ENTER"        :: an explicit key sequence instead (menus)
-mgs4-dlss s00a00l --mash-x --end-on-gameplay      :: play the whole cutscene, then close the game
+mgs4-dlss-launcher s00a00l                            :: boot it, press through the prompts, exit
+mgs4-dlss-launcher s00a00l --keys "5,ENTER,4,ENTER"   :: an explicit key sequence instead (menus)
+mgs4-dlss-launcher s00a00l --mash-x --end-on-gameplay :: play the whole cutscene, then close the game
 ```
 
 Keys go through `keybd_event` with the window forced to the foreground — this port ignores scan-code `SendInput`

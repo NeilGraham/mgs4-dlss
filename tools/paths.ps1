@@ -68,6 +68,14 @@ function Get-Mgs4SteamLibraries {
     return $libs
 }
 
+# The libraries worth naming when the game is not found: the ones that actually hold a steamapps folder, rather
+# than every drive letter the search tried. This is the list the Setup tab shows - Steam's own install first,
+# then every library its steamapps\libraryfolders.vdf names, which is where an install on another drive comes from.
+function Get-Mgs4SteamLibraryList {
+    return @(Get-Mgs4SteamLibraries | Where-Object { Test-Mgs4Path (Join-Mgs4Path $_ "steamapps") } |
+             ForEach-Object { Format-Mgs4Path $_ } | Select-Object -Unique)
+}
+
 function Find-Mgs4GameDir {
     foreach ($lib in Get-Mgs4SteamLibraries) {
         $apps = Join-Mgs4Path $lib "steamapps"
@@ -160,4 +168,7 @@ if ($MyInvocation.InvocationName -ne '.') {
         if (-not (Test-Mgs4Path $val)) { $miss = "   <- missing" }
         Write-Host ("{0,-10} {1,-70}{2}" -f $k, $val, $miss)
     }
+    Write-Host ""
+    Write-Host "Steam libraries searched (Steam's own install, then what libraryfolders.vdf names):"
+    foreach ($lib in Get-Mgs4SteamLibraryList) { Write-Host ("  {0}" -f $lib) }
 }

@@ -1,7 +1,7 @@
 {
   "_comment": [
     "The install, in the order you do it. Each group is one download and one instruction, and every row is a path",
-    "relative to the folder holding mgs4.exe. tools/install_checks.ps1 reads this; tools/mgs4_dlss.ps1 renders it as",
+    "relative to the folder holding mgs4.exe. tools/install_checks.ps1 reads this; tools/mgs4_dlss_launcher.ps1 renders it as",
     "the Setup tab and as --report, and its drag-and-drop uses 'accepts' to know what a dropped file is for.",
     "Versions match the 'setup this was verified on' table in README.md - change both together.",
     "",
@@ -9,6 +9,7 @@
     "  url / urlLabel  where this group's files come from, as a button above them",
     "  guide           what to do with them, in the order it is done",
     "  accepts         file names this group takes by drag-and-drop; a .zip is unpacked into the game folder",
+    "  bundled         this group's files ship with the app, so Setup can install them itself (Get-BundledAddon)",
     "  drop            the headline file to drag in, named in the drop area; accepts is the full match list",
     "  files[].path    relative to the game folder - the row's label"
   ],
@@ -29,7 +30,7 @@
         {
           "path": "steam_appid.txt",
           "optional": true,
-          "detail": "one line containing 2492670; lets `mgs4.exe --stage` boot without bouncing through Steam"
+          "detail": "one line holding 2492670. Neither Steam nor the game writes it: without it mgs4.exe is handed back to Steam at startup and relaunched without its arguments, which is how a --stage boot loses the stage. Launching a scene writes it, or press the button above."
         }
       ]
     },
@@ -40,7 +41,7 @@
       "blurb": "The host this add-on loads into. The plain build looks identical on disk and silently loads nothing.",
       "url": "https://reshade.me/",
       "urlLabel": "reshade.me",
-      "guide": "Download the setup marked \"with full add-on support\" and run it. Point it at mgs4.exe, pick the Direct3D 10/11/12 renderer, and tick nothing when it offers shader packs - none are needed. It installs itself as dxgi.dll next to the game.",
+      "guide": "Drop the setup here and it installs itself: run headless against mgs4.exe, as dxgi.dll, with no shader packs - none are used. Download the build marked \"with full add-on support\"; the plain one looks identical on disk and silently loads nothing. Running the setup by hand still works: point it at mgs4.exe and pick the Direct3D 10/11/12 renderer.",
       "accepts": [
         "ReShade_Setup_*.exe"
       ],
@@ -137,10 +138,11 @@
       "id": "addon",
       "title": "5. This add-on",
       "required": true,
+      "bundled": true,
       "blurb": "Last, so it loads with everything else already in place.",
       "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
       "urlLabel": "Releases",
-      "guide": "Drop mgs4_dlss.addon64 next to mgs4.exe. The ini beside it is the configuration this was verified with; without it the add-on falls back to its built-in defaults. Building from source instead: dlss-addon\\build.bat, then sh dlss-addon/install.sh.",
+      "guide": "Install it from here - the add-on ships with this app, so there is nothing to download. Dropping mgs4_dlss.addon64 in by hand still works, as does dlss-addon\\build.bat then sh dlss-addon/install.sh. The ini beside it is the configuration this was verified with; without it the add-on falls back to its built-in defaults.",
       "accepts": [
         "mgs4_dlss.addon64",
         "mgs4_dlss.ini"

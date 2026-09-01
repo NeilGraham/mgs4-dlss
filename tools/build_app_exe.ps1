@@ -1,4 +1,4 @@
-# Builds mgs4-dlss.exe from tools\app_launcher.cs, wearing the game's own icon.
+# Builds mgs4-dlss-launcher.exe from tools\app_launcher.cs, wearing the game's own icon.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\build_app_exe.ps1
 #
@@ -7,14 +7,14 @@
 # icon inside it is Konami's artwork, so it is made locally rather than redistributed.
 param(
     [string]$GameDir = "",      # default: MGS4_DIR / config.ini / the Steam libraries (tools\paths.ps1)
-    [string]$Out = "",          # default: mgs4-dlss.exe in the repo root
+    [string]$Out = "",          # default: mgs4-dlss-launcher.exe in the repo root
     [switch]$NoIcon             # build without one (the game folder is not needed then)
 )
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\paths.ps1"
 
 $repo = Split-Path -Parent $PSScriptRoot
-if (-not $Out) { $Out = Join-Path $repo "mgs4-dlss.exe" }
+if (-not $Out) { $Out = Join-Path $repo "mgs4-dlss-launcher.exe" }
 $source = Join-Path $PSScriptRoot "app_launcher.cs"
 if (-not (Test-Mgs4Path $source)) { throw "missing $source" }
 

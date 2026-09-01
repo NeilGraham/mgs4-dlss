@@ -1,14 +1,15 @@
-# MGS4 DLSS: the app for this add-on. Start the game or any single scene in it, set the add-on up, and check the
-# install - one window with three tabs, and the same things as a command line.
+# MGS4 DLSS Launcher: the app for this add-on. Start the game or any single scene in it, set the add-on up, and
+# check the install - one window with three tabs, and the same things as a command line.
 #
-#   mgs4-dlss                                the window
-#   mgs4-dlss s02a50l_D1                     boot that scene, no window
-#   mgs4-dlss --main                         straight to MGS4's main menu (past the collection screen)
-#   mgs4-dlss --list naomi                   what can be launched
-#   mgs4-dlss --setup                        the window, on Setup (game folder + install check)
-#   mgs4-dlss --report                       the install check as text, for pasting into an issue
-#   mgs4-dlss s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
-#   mgs4-dlss --set FrameGen=0 --set Mode=Quality
+#   mgs4-dlss-launcher                       the window (Play / Settings / Install)
+#   mgs4-dlss-launcher s02a50l_D1            boot that scene, no window
+#   mgs4-dlss-launcher --main                straight to MGS4's main menu (past the collection screen)
+#   mgs4-dlss-launcher --list naomi          what can be launched
+#   mgs4-dlss-launcher --setup               the window, on Setup (game folder + install check)
+#   mgs4-dlss-launcher --report              the install check as text, for pasting into an issue
+#   mgs4-dlss-launcher --install-addon       copy the add-on that ships here next to mgs4.exe
+#   mgs4-dlss-launcher s02a50l_D1 --shortcut "C:\...\scene.lnk"   save that scene, with its options, as a shortcut
+#   mgs4-dlss-launcher --set FrameGen=0 --set Mode=Quality
 #
 # There is deliberately NO param() block: PowerShell then hands every argument through in $args verbatim, so the
 # --flag spellings above survive `powershell -File`. Run options are parsed by Read-Options below.
@@ -25,14 +26,15 @@ $script:ScenesCsv = Join-Path $PSScriptRoot "scenes.csv"
 $script:LabelsJson = Join-Path $PSScriptRoot "labels.json"
 $script:SceneInfoJson = Join-Path $PSScriptRoot "scene_info.json"
 $script:ShippedIni = Join-Path (Split-Path -Parent $PSScriptRoot) "dlss-addon\mgs4_dlss.ini"
-$script:PrefsPath = Join-Path $env:LOCALAPPDATA "mgs4-dlss\launcher.json"
+$script:PrefsPath = Join-Path $env:LOCALAPPDATA "mgs4-dlss-launcher\launcher.json"
+$script:OldPrefsPath = Join-Path $env:LOCALAPPDATA "mgs4-dlss\launcher.json"    # before the app was renamed
 
 # ---------------------------------------------------------------------------------------------- options
 
 function New-Options {
     return [ordered]@{
-        Action        = ""          # "" = launch, or ui / install / report / list / settings / set /
-                                    #      shortcuts / stop / help
+        Action        = ""          # "" = launch, or ui / install / install-addon / report / list / settings /
+                                    #      set / shortcuts / stop / help
         Stage         = ""          # a stage id, or one of the @-entries in the catalogue
         GameDir       = ""
         GameDirGiven  = $false      # true only when --game-dir was passed, so previews do not echo a detected path
@@ -80,6 +82,7 @@ function Read-Options([string[]]$argv) {
         elseif ($a -match '^--list$')                     { $o.Action = "list"; $took = $false }
         elseif ($a -match '^--(show-settings|settings)$') { $o.Action = "settings"; $took = $false }
         elseif ($a -match '^--(setup|install|check|check-install)$') { $o.Action = "install"; $took = $false }
+        elseif ($a -match '^--install-addon$')            { $o.Action = "install-addon"; $took = $false }
         elseif ($a -match '^--report$')                   { $o.Action = "report"; $took = $false }
         elseif ($a -match '^--stop$')                     { $o.Action = "stop"; $took = $false }
         elseif ($a -match '^--main$')                     { $o.Stage = "@main"; $took = $false }
@@ -129,20 +132,21 @@ function Read-Options([string[]]$argv) {
 }
 
 $script:HelpText = @'
-MGS4 DLSS - start the game or one scene of it, set the add-on up, check the install.
+MGS4 DLSS Launcher - start the game or one scene of it, set the add-on up, check the install.
 
-  mgs4-dlss                         open the window (Play / Settings / Install)
-  mgs4-dlss <stage id>              boot that scene and exit
-  mgs4-dlss --main                  MGS4's own main menu, past the Master Collection screen
-  mgs4-dlss --collection            the Master Collection launcher
-  mgs4-dlss --list [text]           every launchable scene (filtered by id / name / act)
-  mgs4-dlss --setup                 the window, opened on Setup: the game folder and the install check
-                                        (the first run opens there anyway; later ones open on Play)
-  mgs4-dlss --report                the install check as text, for pasting into an issue
-  mgs4-dlss <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
-  mgs4-dlss --settings              print mgs4_dlss.ini the way the window shows it
-  mgs4-dlss --set Key=Value [...]   write those keys into mgs4_dlss.ini
-  mgs4-dlss --stop                  close a running game
+  mgs4-dlss-launcher                         open the window (Play / Settings / Install)
+  mgs4-dlss-launcher <stage id>              boot that scene and exit
+  mgs4-dlss-launcher --main                  MGS4's own main menu, past the Master Collection screen
+  mgs4-dlss-launcher --collection            the Master Collection launcher
+  mgs4-dlss-launcher --list [text]           every launchable scene (filtered by id / name / act)
+  mgs4-dlss-launcher --setup                 the window, opened on Setup: the game folder and the install check
+                                                 (the first run opens there anyway; later ones open on Play)
+  mgs4-dlss-launcher --report                the install check as text, for pasting into an issue
+  mgs4-dlss-launcher --install-addon         copy the add-on that ships here next to mgs4.exe
+  mgs4-dlss-launcher <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
+  mgs4-dlss-launcher --settings              print mgs4_dlss.ini the way the window shows it
+  mgs4-dlss-launcher --set Key=Value [...]   write those keys into mgs4_dlss.ini
+  mgs4-dlss-launcher --stop                  close a running game
 
 Run options (any of them keeps this attached until the scene is done):
   --advance / --no-advance   press through the auto-save notice and "press any button" until the
@@ -656,6 +660,13 @@ function Invoke-SceneRun($opt, [scriptblock]$Say) {
     $cmd = Get-LaunchCommand $opt $gameDir
     if (-not (Test-Mgs4Path $cmd.Exe)) { & $Say "not found: $($cmd.Exe)"; return 1 }
 
+    # A --stage boot is handed back to Steam and relaunched without its arguments when this file is absent, so it
+    # is written on the way past rather than left as a warning on the Setup tab.
+    if ($cmd.Args -contains "--stage" -or $cmd.Args -contains "--skip-to-main-menu") {
+        $appid = Write-SteamAppId $gameDir
+        if ($appid.Lines[0] -notlike "*already there*") { & $Say $appid.Lines[0] }
+    }
+
     if ($opt.Restart) {
         Stop-Game
         $tail = New-LogTail $addonLog          # the add-on truncates its log at startup; read from the new one
@@ -791,7 +802,7 @@ function Write-SceneList($filter) {
         $n++
     }
     Write-Host ""
-    Write-Host ("{0} {1}.  mgs4-dlss <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
+    Write-Host ("{0} {1}.  mgs4-dlss-launcher <id>  boots one." -f $n, $(if ($n -eq 1) { "entry" } else { "entries" }))
 }
 
 function Write-SettingsReport($gameDir) {
@@ -848,7 +859,7 @@ function New-SceneShortcut($opt, [string]$path) {
     $dir = Split-Path -Parent $path
     if ($dir -and -not (Test-Mgs4Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
 
-    $scriptPath = Join-Path $PSScriptRoot "mgs4_dlss.ps1"
+    $scriptPath = Join-Path $PSScriptRoot "mgs4_dlss_launcher.ps1"
     $scene = Find-Scene $opt.Stage
     $cli = @(Get-CliArgs $opt | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } })
 
@@ -887,12 +898,16 @@ function Get-CliArgs($opt) {
 
 # The same argument list as a line someone can paste into a terminal.
 function Format-CliPreview($cliArgs) {
-    return "mgs4-dlss " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
+    return "mgs4-dlss-launcher " + (($cliArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join " ")
 }
 
 function Read-Prefs {
-    if (Test-Mgs4Path $script:PrefsPath) {
-        try { return (Get-Content -LiteralPath $script:PrefsPath -Raw -Encoding UTF8 | ConvertFrom-Json) } catch {}
+    # The old path is read when the new one is not there yet, so the game folder and the ticked options survive the
+    # rename from "mgs4-dlss" to "mgs4-dlss-launcher". The next Save-Prefs writes the new one.
+    foreach ($p in @($script:PrefsPath, $script:OldPrefsPath)) {
+        if (Test-Mgs4Path $p) {
+            try { return (Get-Content -LiteralPath $p -Raw -Encoding UTF8 | ConvertFrom-Json) } catch {}
+        }
     }
     return $null
 }
@@ -914,7 +929,7 @@ function Save-Prefs($o) {
 $script:Xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="MGS4 DLSS" Height="880" Width="1180" MinHeight="560" MinWidth="920"
+        Title="MGS4 DLSS Launcher" Height="880" Width="1180" MinHeight="560" MinWidth="920"
         Background="#0F1116" WindowStartupLocation="CenterScreen" TextOptions.TextFormattingMode="Ideal">
   <Window.Resources>
     <SolidColorBrush x:Key="Card" Color="#171A21"/>
@@ -1164,6 +1179,12 @@ $script:Xaml = @'
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+      <!-- By default a ListBox scrolls in whole rows, so an offset of 1 is one scene and the smooth scrolling
+           below would move 72 rows rather than 72 pixels. ScrollUnit=Pixel keeps recycling virtualisation (the
+           list is 400+ rows) while making the offset a pixel count like every other ScrollViewer here. -->
+      <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
+      <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
+      <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel"/>
     </Style>
     <Style TargetType="ListBoxItem">
       <Setter Property="Cursor" Value="Hand"/>
@@ -1213,7 +1234,7 @@ $script:Xaml = @'
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" VerticalAlignment="Center">
           <Image x:Name="LogoArt" Height="34" HorizontalAlignment="Left" Visibility="Collapsed"/>
-          <TextBlock x:Name="TitleText" Text="MGS4 DLSS" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+          <TextBlock x:Name="TitleText" Text="MGS4 DLSS Launcher" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
         </StackPanel>
         <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
@@ -1630,6 +1651,78 @@ function New-GameSettingsRow($sec, $state) {
     return $b
 }
 
+# One line the install has no other way of getting: see Write-SteamAppId. Only rendered while it is missing.
+function New-AppIdRow($state) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = ConvertTo-Brush "#12151D"
+    $b.BorderBrush = ConvertTo-Brush "#20242E"
+    $b.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $b.Padding = New-Object System.Windows.Thickness 18, 12, 18, 12
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $t = New-TextBlock ("Neither Steam nor the game ever writes steam_appid.txt - it is one line holding the app id, " +
+                        "and without it a scene boot is handed back to Steam and relaunched without its --stage " +
+                        "argument. Launching a scene writes it anyway; this is the same thing, now.") 11 "#9AA3B4" $false $false
+    $t.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $t.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$g.Children.Add($t)
+
+    $btn = New-Object System.Windows.Controls.Button
+    $btn.Content = "Write steam_appid.txt"
+    $btn.Style = $script:FlatStyle
+    $btn.ToolTip = "Writes " + (Join-Mgs4Path $state.GameDir "steam_appid.txt")
+    $btn.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $btn.Tag = $state
+    $btn.Add_Click({ & $this.Tag.WriteAppId })
+    [System.Windows.Controls.Grid]::SetColumn($btn, 1)
+    [void]$g.Children.Add($btn)
+    $b.Child = $g
+    return $b
+}
+
+# The add-on installs itself. The app ships with mgs4_dlss.addon64 and mgs4_dlss.ini (see Get-BundledAddon), so the
+# one group of files this whole thing exists for is a button rather than a download - the drop area still takes a
+# newer pair from a release. Only rendered when a copy is actually bundled; an unbuilt checkout has none.
+function New-AddonInstallRow($state, $bundle) {
+    $running = Test-GameRunning
+    $have = Test-Mgs4Path (Join-Mgs4Path $state.GameDir "mgs4_dlss.addon64")
+    $b = New-Object System.Windows.Controls.Border
+    $b.Background = ConvertTo-Brush "#12151D"
+    $b.BorderBrush = ConvertTo-Brush "#20242E"
+    $b.BorderThickness = New-Object System.Windows.Thickness 0, 0, 0, 1
+    $b.Padding = New-Object System.Windows.Thickness 18, 12, 18, 12
+    $g = New-Object System.Windows.Controls.Grid
+    foreach ($w in @("*", "Auto")) {
+        $cd = New-Object System.Windows.Controls.ColumnDefinition
+        $cd.Width = $w
+        [void]$g.ColumnDefinitions.Add($cd)
+    }
+    $text = $(if ($have) { "The add-on is in place. Installing again replaces mgs4_dlss.addon64 with the copy that ships here and keeps the mgs4_dlss.ini you have." }
+              else { "The add-on ships with this app - nothing to download. This copies mgs4_dlss.addon64, and an mgs4_dlss.ini if the game folder has none, next to mgs4.exe." })
+    if ($running) { $text += " The game is running - close it first, ReShade holds the add-on open." }
+    $t = New-TextBlock $text 11 "#9AA3B4" $false $false
+    $t.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $t.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    [void]$g.Children.Add($t)
+
+    $btn = New-Object System.Windows.Controls.Button
+    $btn.Content = $(if ($have) { "Reinstall the add-on" } else { "Install the add-on" })
+    $btn.Style = $(if (-not $have -and -not $running) { $script:PrimaryStyle } else { $script:FlatStyle })
+    $btn.IsEnabled = -not $running
+    $btn.ToolTip = "Copies " + $bundle.Addon + " into " + $state.GameDir
+    $btn.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $btn.Tag = $state
+    $btn.Add_Click({ & $this.Tag.InstallAddon })
+    [System.Windows.Controls.Grid]::SetColumn($btn, 1)
+    [void]$g.Children.Add($btn)
+    $b.Child = $g
+    return $b
+}
+
 # The Setup tab's first card, and the only one that is not a step: how the check came out, the folder it was run
 # against, and the fact that files can be dropped here. Three separate cards for that read as clutter above the
 # seven that matter.
@@ -1887,6 +1980,94 @@ function New-CheckRow($row, $first) {
 # Windows groups taskbar buttons by AppUserModelID, and a process that never sets one inherits its host's - which
 # is why the window sat under "Windows PowerShell". Claiming an id of our own, before any window exists, makes it a
 # separate taskbar entry named after the window instead.
+# ---------------------------------------------------------------------------------------------- smooth scrolling
+
+# Pixels a wheel notch asks for. WPF's own answer is three "lines", which on the scene list means three whole rows
+# and on a card means a lurch.
+$script:ScrollStep = 72
+# How quickly the offset closes on its target, as a time constant in milliseconds: it covers 63% of the remaining
+# distance in this long, whatever the frame rate. Time-based rather than a fixed slice per frame, because frames
+# here are 15 ms most of the time and 70 ms when something else is happening - a fixed slice turns every one of
+# those into a visible stall.
+$script:ScrollTau = 70
+
+# The ScrollViewer a wheel event belongs to: the innermost one under the pointer that actually has somewhere to go.
+# Walking up from OriginalSource rather than trusting the sender means the scene list, the settings pane, the Setup
+# cards and the options column all work without naming any of them, and anything added later works too.
+function Get-ScrollHost($src) {
+    $d = $src
+    while ($d) {
+        if (($d -is [System.Windows.Controls.ScrollViewer]) -and $d.ScrollableHeight -gt 0) { return $d }
+        $d = $(if ($d -is [System.Windows.Media.Visual]) { [System.Windows.Media.VisualTreeHelper]::GetParent($d) }
+               else { [System.Windows.LogicalTreeHelper]::GetParent($d) })
+    }
+    return $null
+}
+
+# Wheel notches are eased toward a target offset; a precision touchpad is followed one to one.
+#
+# The movement is stepped by CompositionTarget.Rendering - the frame the compositor is about to draw - rather than
+# by a DispatcherTimer. A DispatcherTimer runs at Background priority by default, which measured 42 ticks a second
+# with stalls to 147 ms on this machine, and every stall is a stutter; the rendering hook is one step per frame, in
+# step with what is actually drawn, and costs nothing while nothing is moving because it is only subscribed then.
+function Add-SmoothScroll($win) {
+    # Captured as locals first: GetNewClosure() binds each scriptblock below to its own dynamic module, where
+    # $script:... is that module's scope and not this one - reading the settings there gives $null, and a step of
+    # $null scrolls precisely nowhere.
+    $step = [double]$script:ScrollStep
+    $tau = [double]$script:ScrollTau
+    $scroll = @{ Targets = @{}; Clock = [Diagnostics.Stopwatch]::StartNew(); Running = $false; OnRender = $null }
+
+    $scroll.OnRender = [EventHandler]{
+        $dt = $scroll.Clock.Elapsed.TotalMilliseconds
+        $scroll.Clock.Restart()
+        if ($dt -le 0) { return }
+        if ($dt -gt 200) { $dt = 200 }              # after a long stall, glide the rest rather than teleporting
+        $f = 1.0 - [Math]::Exp(- $dt / $tau)
+        foreach ($sv in @($scroll.Targets.Keys)) {
+            $to = $scroll.Targets[$sv]
+            $now = $sv.VerticalOffset
+            $left = $to - $now
+            # Under half a pixel from home: land exactly on it and stop, or the easing crawls toward it forever.
+            if ([Math]::Abs($left) -lt 0.5) {
+                $sv.ScrollToVerticalOffset($to)
+                $scroll.Targets.Remove($sv)
+            } else {
+                $sv.ScrollToVerticalOffset($now + $left * $f)
+            }
+        }
+        if ($scroll.Targets.Count -eq 0 -and $scroll.Running) {
+            [System.Windows.Media.CompositionTarget]::remove_Rendering($scroll.OnRender)
+            $scroll.Running = $false
+        }
+    }.GetNewClosure()
+
+    $win.Add_PreviewMouseWheel({
+        param($sender, $e)
+        $sv = Get-ScrollHost $e.OriginalSource
+        if (-not $sv) { return }        # nothing here scrolls - leave the event alone
+        $e.Handled = $true
+        $clamp = { param($v) if ($v -lt 0) { 0.0 } elseif ($v -gt $sv.ScrollableHeight) { [double]$sv.ScrollableHeight } else { [double]$v } }
+
+        # A precision touchpad reports the finger continuously, in deltas well under a notch. That stream is
+        # already smooth, and easing it would only add lag between the finger and the page, so it is applied as it
+        # arrives. Anything at a full notch or more is a wheel, and gets the animation.
+        if ([Math]::Abs($e.Delta) -lt 120) {
+            $scroll.Targets.Remove($sv)
+            $sv.ScrollToVerticalOffset((& $clamp ($sv.VerticalOffset - ($e.Delta / 120.0) * $step)))
+            return
+        }
+
+        $from = $(if ($scroll.Targets.ContainsKey($sv)) { $scroll.Targets[$sv] } else { $sv.VerticalOffset })
+        $scroll.Targets[$sv] = & $clamp ($from - ($e.Delta / 120.0) * $step)
+        if (-not $scroll.Running) {
+            $scroll.Clock.Restart()
+            [System.Windows.Media.CompositionTarget]::add_Rendering($scroll.OnRender)
+            $scroll.Running = $true
+        }
+    }.GetNewClosure())
+}
+
 function Set-AppUserModelId([string]$id) {
     try {
         Add-Type -TypeDefinition @"
@@ -1902,7 +2083,7 @@ public static class Mgs4AppId {
 
 function Show-AppWindow($opt, $gameDir, $startTab) {
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
-    Set-AppUserModelId "NeilGraham.Mgs4Dlss"
+    Set-AppUserModelId "NeilGraham.Mgs4DlssLauncher"
 
     # Every scriptblock below is closed with GetNewClosure(), which binds it to its own dynamic module - so
     # $script:... and the automatic variables inside one are NOT this scope's. Anything shared is captured here,
@@ -1941,6 +2122,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $script:PrimaryStyle = $win.FindResource("Primary")
     Set-WindowIcon $win $state.GameDir
     Set-HeaderArt $ui
+    Add-SmoothScroll $win
 
     $ui.SceneList.ItemTemplate = [Windows.Markup.XamlReader]::Parse($script:ItemTemplateXaml)
 
@@ -2113,7 +2295,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             $ui.PickSub.Text = "Choose a scene on the left."
             $ui.LaunchBtn.IsEnabled = $false
             $ui.ShortcutBtn.IsEnabled = $false
-            $ui.CmdPreview.Text = "mgs4-dlss --list"
+            $ui.CmdPreview.Text = "mgs4-dlss-launcher --list"
             $ui.PickWarn.Visibility = "Collapsed"
             $ui.AltRow.Visibility = "Collapsed"
             foreach ($c in @($ui.OptAdvance, $ui.OptMashX, $ui.OptEnd, $ui.OptHold)) { $c.IsEnabled = $true }
@@ -2375,7 +2557,13 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         if (-not $state.GameDir) {
             [void]$ui.InstallHost.Children.Add((New-StatusCard $state @{ Text = "No game folder"; Kind = "bad"
                                                                         Note = "nothing to check against yet" }))
+            # Which libraries were searched is the whole answer on a machine with more than one drive: Steam's
+            # own install on C: is what names a library on D:, so if the game is there and this list is not, the
+            # library is not registered with Steam and Browse is the way in.
+            $libs = @(Get-Mgs4SteamLibraryList)
             $why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up."
+            if ($libs.Count) { $why += " Looked in: " + ($libs -join ", ") + "." }
+            else { $why += " No Steam library was found at all - Steam's own install could not be located." }
             if ($opt.GameDirBad) { $why = "There is no mgs4.exe in $($opt.GameDirBad)." }
             $c = New-Card "Nothing to check yet" ($why + " Point the app at the folder holding mgs4.exe with " +
                  "Browse above, and everything below fills in.") "bad" "no game folder"
@@ -2397,6 +2585,13 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
             if ($sec.Guide -or $sec.Url) { [void]$card.Body.Children.Add((New-GuideRow $sec)) }
             if ($sec.Id -eq "settings" -and $sec.SavedSettings) {
                 [void]$card.Body.Children.Add((New-GameSettingsRow $sec $state))
+            }
+            if ($sec.Id -eq "game" -and -not (Test-Mgs4Path (Join-Mgs4Path $state.GameDir "steam_appid.txt"))) {
+                [void]$card.Body.Children.Add((New-AppIdRow $state))
+            }
+            if ($sec.Bundled) {
+                $bundle = Get-BundledAddon
+                if ($bundle.Addon) { [void]$card.Body.Children.Add((New-AddonInstallRow $state $bundle)) }
             }
             $first = $true
             foreach ($row in $sec.Rows) {
@@ -2498,6 +2693,22 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         & $showInstall
     }.GetNewClosure())
+
+    $state.WriteAppId = {
+        $done = Write-SteamAppId $state.GameDir
+        $ui.Status.Text = ($done.Lines -join "   |   ")
+        & $showInstall
+    }.GetNewClosure()
+
+    $state.InstallAddon = {
+        try {
+            $done = Install-BundledAddon $state.GameDir
+            $ui.Status.Text = ($done.Lines -join "   |   ")
+        } catch {
+            $ui.Status.Text = "could not install the add-on: $($_.Exception.Message)"
+        }
+        & $showInstall
+    }.GetNewClosure()
 
     $state.ApplyGameSettings = {
         param($path)
@@ -2610,17 +2821,23 @@ if (-not $gameDir -and $wantsWindow) { $startTab = "install" }
 
 if (-not $gameDir -and -not $wantsWindow -and $opt.Action -ne "list") {
     Write-Host "mgs4.exe was not found. Set MGS4_DIR in config.ini or pass --game-dir ""<path to MGS4>""." -ForegroundColor Red
+    foreach ($lib in (Get-Mgs4SteamLibraryList)) { Write-Host "  looked in $lib" }
     exit 1
 }
 
 switch ($opt.Action) {
     "list"      { Write-SceneList $opt.Filter; exit 0 }
     "report"    { Write-Host (Format-TextReport $gameDir (Invoke-InstallChecks -Game $gameDir)); exit 0 }
+    "install-addon" {
+        $done = Install-BundledAddon $gameDir
+        foreach ($line in $done.Lines) { Write-Host $line -ForegroundColor $(if ($done.Ok) { "Gray" } else { "Yellow" }) }
+        exit $(if ($done.Ok) { 0 } else { 1 })
+    }
     "settings"  { Write-SettingsReport $gameDir; exit 0 }
     "set"       { exit (Set-SettingsFromCli $gameDir $opt.Sets) }
     "stop"      { Stop-Game; Write-Host "closed mgs4.exe"; exit 0 }
     "shortcut"  {
-        if (-not $opt.Stage) { Write-Host "--shortcut needs a scene: mgs4-dlss <id> --shortcut <file>" -ForegroundColor Red; exit 2 }
+        if (-not $opt.Stage) { Write-Host "--shortcut needs a scene: mgs4-dlss-launcher <id> --shortcut <file>" -ForegroundColor Red; exit 2 }
         $written = New-SceneShortcut $opt $opt.ShortcutPath
         Write-Host "shortcut written: $written"
         exit 0

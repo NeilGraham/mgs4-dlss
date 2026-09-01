@@ -8,13 +8,13 @@ The stage table in `mgs4.exe` holds **420 entries**, and the naming already clas
 | gameplay | 250 | `<stage>_<n>` | a gameplay section |
 | stage entry | 68 | `<stage>` | boots the stage at its start |
 
-Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command) - what `mgs4-dlss` lists. The 20 unnumbered `<stage>_D` cutscenes were added to it
+Full machine-readable list: **`tools/scenes.csv`** (entry, kind, act, launch command) - what `mgs4-dlss-launcher` lists. The 20 unnumbered `<stage>_D` cutscenes were added to it
 later, pulled out of the executable's own strings.
 
 The act column there is the one the stage id implies. **`tools/scene_info.json`** carries the corrections that only
 booting a scene can tell you: the `s10` / `s20` briefings belong to the act they lead into, `s30` and `s00` are the
 closing material, several ids start the same scene as another, and every id ending in a single digit
-(`_0` .. `_9`, 102 of them) crashes or comes up black - the two-digit sections (`_00`, `_11`) are the working ones. `mgs4-dlss` groups and hides on that basis.
+(`_0` .. `_9`, 102 of them) crashes or comes up black - the two-digit sections (`_00`, `_11`) are the working ones. `mgs4-dlss-launcher` groups and hides on that basis.
 
 **Prerecorded vs in-game.** Prerecorded cutscenes are Bink 2 videos in `common/BK2/BK2` and `ww/BK2/BK2`; their headers
 give exact frame counts and frame rates, so their lengths are known without running the game: **18 videos, 55 m 32 s
@@ -38,4 +38,4 @@ by decoding the demo scripts inside `stage/stage_data_compressed.*.pak` (VPAK, c
 | other | `s10a20l_D1/_D2`, `s10a30l_D1/_D2`, `s10a40l_D/_D2`, `s20a00l_D1..D3`, `s30a00l_D..D4` | interludes / mission briefings |
 
 Rotation runs: `tools\test_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1,s04a10l_D1" -MvVis`.
-Single scenes: `mgs4-dlss s02a50l_D1`, or the window: `mgs4-dlss`.
+Single scenes: `mgs4-dlss-launcher s02a50l_D1`, or the window: `mgs4-dlss-launcher`.

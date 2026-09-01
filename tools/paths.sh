@@ -9,6 +9,7 @@
 mgs4_self="${BASH_SOURCE:-$0}"
 mgs4_repo=$(cd "$(dirname "$mgs4_self")/.." && pwd)
 mgs4_config="$mgs4_repo/config.ini"
+mgs4_appid="2492670"          # METAL GEAR SOLID 4: Guns of the Patriots - Master Collection Version
 
 # Windows path -> POSIX path (C:\x\y -> /c/x/y), so the result can be used by cp/mkdir here.
 mgs4_posix() {
@@ -22,7 +23,8 @@ mgs4_from_config() {
     sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//Ip" "$mgs4_config" | sed 's/[[:space:]]*$//; s/^"//; s/"$//' | grep -v '^$' | head -1
 }
 
-# Every Steam library folder, from the registry and the usual install spots.
+# Every Steam library folder: the Steam install itself, from the registry, plus every library named in its
+# steamapps/libraryfolders.vdf - which is where an install on another drive is listed, so C: is what finds D:.
 mgs4_steam_libraries() {
     roots=""
     for key in "HKCU\\SOFTWARE\\Valve\\Steam //v SteamPath" "HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam //v InstallPath"; do
@@ -49,9 +51,22 @@ C:\\Program Files\\Steam"
 
 mgs4_detect_game() {
     mgs4_steam_libraries | while IFS= read -r lib; do
-        for name in "METAL GEAR SOLID 4"; do
-            cand="$lib/steamapps/common/$name/MGS4"
-            if [ -f "$cand/mgs4.exe" ]; then printf '%s\n' "$cand"; return 0; fi
+        apps="$lib/steamapps"
+        names="METAL GEAR SOLID 4"
+        manifest="$apps/appmanifest_$mgs4_appid.acf"
+        if [ -f "$manifest" ]; then
+            installdir=$(sed -n 's/^[[:space:]]*"installdir"[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' "$manifest" | head -1)
+            if [ -n "$installdir" ]; then names="$installdir
+METAL GEAR SOLID 4"; fi
+        fi
+        # split on newlines only, so a folder name with spaces survives; exit leaves the loop at the first hit,
+        # the way the single-name version did - without it head closes the pipe and the rest of the loop writes
+        # into it.
+        IFS="
+"
+        for name in $names; do
+            cand="$apps/common/$name/MGS4"
+            if [ -f "$cand/mgs4.exe" ]; then printf '%s\n' "$cand"; exit 0; fi
         done
     done | head -1
 }

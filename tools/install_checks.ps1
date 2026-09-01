@@ -1,6 +1,6 @@
 # The install check for the MGS4 DLSS add-on, as a library: which required and optional files are in place, what the
-# settings say, and what the add-on reported on its last run. No UI and no dispatch of its own - tools\mgs4_dlss.ps1
-# renders it, as the Install tab and as `mgs4-dlss.bat --report`.
+# settings say, and what the add-on reported on its last run. No UI and no dispatch of its own - tools\mgs4_dlss_launcher.ps1
+# renders it, as the Install tab and as `mgs4-dlss-launcher.bat --report`.
 #
 # The file list, the versions this was verified against and the download links live in tools\install_manifest.json;
 # this only reads them.
@@ -249,7 +249,7 @@ function Invoke-InstallChecks {
         $sections += [pscustomobject]@{
             Id = $sec.id; Title = $sec.title; Blurb = $sec.blurb; Rows = $rows
             Required = [bool]$sec.required; Url = $sec.url; UrlLabel = $sec.urlLabel; Guide = $sec.guide
-            Accepts = @($sec.accepts); Drop = @($sec.drop)
+            Accepts = @($sec.accepts); Drop = @($sec.drop); Bundled = [bool]$sec.bundled
         }
     }
 
@@ -428,6 +428,93 @@ function Format-TextReport($game, $sections) {
     return $sb.ToString()
 }
 
+# ---------------------------------------------------------------------------------------------- the bundled add-on
+
+# The add-on's own two files, as they ship with this app: a release carries them next to it, a source checkout has
+# the built addon64 in build\ and the sample ini in dlss-addon\. Either way they are already on the machine, so the
+# one group of files this app exists for is the one group nobody should have to go and fetch.
+# $null for a piece that is not there - an unbuilt checkout has the ini but no addon64.
+function Get-BundledAddon {
+    $repo = Split-Path -Parent $PSScriptRoot
+    $addon = $null
+    foreach ($p in @((Join-Mgs4Path $repo "mgs4_dlss.addon64"), (Join-Mgs4Path $repo "build\mgs4_dlss.addon64"))) {
+        if (Test-Mgs4Path $p) { $addon = $p; break }
+    }
+    $ini = $null
+    foreach ($p in @((Join-Mgs4Path $repo "mgs4_dlss.ini"), (Join-Mgs4Path $repo "dlss-addon\mgs4_dlss.ini"))) {
+        if (Test-Mgs4Path $p) { $ini = $p; break }
+    }
+    return [pscustomobject]@{ Addon = $addon; Ini = $ini }
+}
+
+# Copies those two next to mgs4.exe: the addon64 every time, the ini only when the game folder has none - the rule
+# dlss-addon\install.sh has always used, so an ini that has been tuned (or that the add-on wrote InternalRes into)
+# is never overwritten. Returns Ok - did the add-on itself land? - and Lines describing what happened: a refusal
+# has to be tellable from a success, which lines alone are not.
+#
+# The game must be closed: ReShade holds mgs4_dlss.addon64 open for as long as it is loaded, so the copy would fail
+# on a sharing violation half way through rather than not at all.
+function Install-BundledAddon([string]$gameDir) {
+    $log = New-Object System.Collections.Generic.List[string]
+    if (-not $gameDir) { $log.Add("no game folder set - pick one above first"); return [pscustomobject]@{ Ok = $false; Lines = $log } }
+    if (Get-Process mgs4 -ErrorAction SilentlyContinue) {
+        $log.Add("the game is running - close it first, ReShade holds mgs4_dlss.addon64 open")
+        return [pscustomobject]@{ Ok = $false; Lines = $log }
+    }
+    $bundle = Get-BundledAddon
+    if (-not $bundle.Addon) {
+        $log.Add("no mgs4_dlss.addon64 ships with this copy of the app - build it (dlss-addon\build.bat) or take one from the releases")
+        return [pscustomobject]@{ Ok = $false; Lines = $log }
+    }
+
+    try {
+        Copy-Item -LiteralPath $bundle.Addon -Destination (Join-Mgs4Path $gameDir "mgs4_dlss.addon64") -Force
+        $log.Add("mgs4_dlss.addon64 -> the game folder")
+    } catch {
+        $log.Add("could not copy mgs4_dlss.addon64: $($_.Exception.Message)")
+        return [pscustomobject]@{ Ok = $false; Lines = $log }
+    }
+
+    $destIni = Join-Mgs4Path $gameDir "mgs4_dlss.ini"
+    if (Test-Mgs4Path $destIni) {
+        $log.Add("kept the mgs4_dlss.ini already there")
+    } elseif ($bundle.Ini) {
+        try {
+            Copy-Item -LiteralPath $bundle.Ini -Destination $destIni -Force
+            $log.Add("mgs4_dlss.ini -> the game folder")
+        } catch { $log.Add("could not copy mgs4_dlss.ini: $($_.Exception.Message)") }
+    } else {
+        $log.Add("no mgs4_dlss.ini to copy - the add-on will use its built-in defaults")
+    }
+    return [pscustomobject]@{ Ok = $true; Lines = $log }
+}
+
+# steam_appid.txt is not something Steam or the game ever writes - it is a Steamworks convention the *caller*
+# provides: one line holding the appid, next to the exe, telling the Steam API which game this is. Without it
+# mgs4.exe hands itself back to Steam at startup and is relaunched without its arguments, which is exactly how a
+# --stage boot loses the stage. So the app writes it: nothing to download, and a fresh install never has one.
+function Write-SteamAppId([string]$gameDir) {
+    $log = New-Object System.Collections.Generic.List[string]
+    if (-not $gameDir) {
+        $log.Add("no game folder set - pick one above first")
+        return [pscustomobject]@{ Ok = $false; Lines = $log }
+    }
+    $path = Join-Mgs4Path $gameDir "steam_appid.txt"
+    if (Test-Mgs4Path $path) {
+        $log.Add("steam_appid.txt is already there")
+        return [pscustomobject]@{ Ok = $true; Lines = $log }
+    }
+    try {
+        # No BOM and no trailing newline: the file is read as a bare number, and a BOM in front of it is not one.
+        [IO.File]::WriteAllText($path, $Mgs4AppId, (New-Object Text.UTF8Encoding $false))
+        $log.Add("wrote steam_appid.txt ($Mgs4AppId) - scene boots keep their --stage argument now")
+        return [pscustomobject]@{ Ok = $true; Lines = $log }
+    } catch {
+        $log.Add("could not write steam_appid.txt: $($_.Exception.Message)")
+        return [pscustomobject]@{ Ok = $false; Lines = $log }
+    }
+}
+
 # ---------------------------------------------------------------------------------------------- drag and drop
 
 # What a dropped file is: which manifest group claims it, by the "accepts" patterns.
@@ -480,10 +567,33 @@ function Copy-DroppedFiles($sections, [string]$gameDir, [string[]]$paths) {
         $name = [IO.Path]::GetFileName($path)
 
         if ($name -like "ReShade_Setup*.exe") {
-            try {
-                Start-Process -FilePath $path | Out-Null
-                $log.Add("started $name - point it at mgs4.exe, pick Direct3D 10/11/12, and tick no shader packs")
-            } catch { $log.Add("could not start ${name}: $($_.Exception.Message)") }
+            # ReShade's setup is scriptable, so the one step of the install that looks un-droppable is not: the
+            # target exe as the first argument, --headless to install without asking anything (no target picker,
+            # no API picker, no shader packs - none are used here), and --api dxgi because dxgi.dll is the name
+            # this game loads. It takes well under a second, so the drop can wait for it and re-check straight
+            # after. If it comes back non-zero the setup is started the old way, with its own window, rather than
+            # leaving the user with nothing.
+            $target = Join-Mgs4Path $gameDir "mgs4.exe"
+            $done = $false
+            if (Test-Mgs4Path $target) {
+                try {
+                    $proc = Start-Process -FilePath $path -ArgumentList @('"' + $target + '"', "--headless", "--api", "dxgi") -PassThru
+                    if ($proc.WaitForExit(120000) -and $proc.ExitCode -eq 0) {
+                        $dll = Join-Mgs4Path $gameDir "dxgi.dll"
+                        if (Test-Mgs4Path $dll) {
+                            $ver = Get-PeVersion $dll
+                            $log.Add("installed ReShade$(if ($ver) { " " + (Format-Version $ver) }) as dxgi.dll")
+                            $done = $true
+                        }
+                    }
+                } catch { $log.Add("could not run ${name}: $($_.Exception.Message)") }
+            }
+            if (-not $done) {
+                try {
+                    Start-Process -FilePath $path | Out-Null
+                    $log.Add("started $name - point it at mgs4.exe, pick Direct3D 10/11/12, and tick no shader packs")
+                } catch { $log.Add("could not start ${name}: $($_.Exception.Message)") }
+            }
             continue
         }
 
