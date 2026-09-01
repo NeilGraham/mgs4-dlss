@@ -14,6 +14,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\..\tools\paths.ps1"
+. "$PSScriptRoot\..\tools\game_icon.ps1"
 
 $repo = Split-Path -Parent $PSScriptRoot
 $src = Join-Path $PSScriptRoot "src"
@@ -34,10 +35,11 @@ $ico = Join-Path ([IO.Path]::GetTempPath()) "mgs4_dlss_launcher.ico"
 if (-not $NoIcon) {
     if (-not $GameDir) { try { $GameDir = Get-Mgs4GameDir } catch { $GameDir = $null } }
     $gameExe = $(if ($GameDir) { Join-Mgs4Path $GameDir "mgs4.exe" } else { $null })
-    if ($gameExe -and (Test-Mgs4Path $gameExe)) {
-        # The same extraction tools\build_app_exe.ps1 does, kept there so the two exes wear the same icon.
-        & (Join-Path $repo "tools\build_app_exe.ps1") -GameDir $GameDir -Out (Join-Path ([IO.Path]::GetTempPath()) "icon_probe.exe") | Out-Null
-        Remove-Item -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) "icon_probe.exe") -ErrorAction SilentlyContinue
+    if ($gameExe -and (Test-Mgs4Path $gameExe) -and (Write-Mgs4IconFile $gameExe $ico)) {
+        $icoArg = @("/win32icon:$ico")
+        Write-Host "icon taken from $gameExe"
+    } else {
+        Write-Host "no mgs4.exe found - building without an icon (pass -GameDir, or -NoIcon to stop asking)" -ForegroundColor Yellow
     }
 }
 
@@ -63,5 +65,6 @@ $cscArgs = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/wa
 & $csc @cscArgs
 if ($LASTEXITCODE -ne 0) { throw "csc failed ($LASTEXITCODE)" }
 
+Remove-Item -LiteralPath $ico -ErrorAction SilentlyContinue
 $size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1KB)
 Write-Host "built $Out ($size KB)"

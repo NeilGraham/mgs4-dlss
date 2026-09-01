@@ -81,6 +81,7 @@ namespace Mgs4Launcher
             WireSetup();
 
             RestorePrefs();
+            RestoreSelection();
             ShowTab(startTab);
             Win.Closing += (s, e) => SavePrefs();
         }

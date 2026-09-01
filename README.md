@@ -298,6 +298,45 @@ checks in `tools\install_checks.ps1` only render it.
 
 The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
+### The C# build (`launcher/`, branch `csharp-wpf-launcher`)
+
+The same app, ported to C# and compiled with the `csc.exe` that ships with Windows - the compiler
+`tools\build_app_exe.ps1` already used for the wrapper exe, so this still needs nothing installed:
+
+```bat
+powershell -ExecutionPolicy Bypass -File launcher\build.ps1     :: -> mgs4-dlss-launcher.exe
+```
+
+**Why**, measured rather than assumed: PowerShell takes **1.66 s** to put the window up against the C# build's
+**0.34 s** (three runs each, median on this machine), and it keeps a scripting engine in the per-frame path of
+every animation - the scroll easing runs a script block per frame there and native code here.
+
+**It is a port, not a redesign.** `--report`, `--list` and `--settings` are byte-identical to the PowerShell app's
+output against this install; `--help` differs by one word, because the third tab is called Setup and the C# help
+says so. The file list is still `tools\install_manifest.json`, the scene list is still `tools\scenes.csv` +
+`labels.json` + `scene_info.json`, and the window is the same XAML, lifted whole into `launcher\src\Window.xaml`.
+
+| file | what it holds |
+| --- | --- |
+| `src\Paths.cs` | the game folder and the Steam libraries, resolved in the order `tools\paths.*` resolve them |
+| `src\Checks.cs` | the install check and its text report |
+| `src\Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
+| `src\Catalogue.cs` | the scene list, in story order |
+| `src\Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
+| `src\Ui\` | the window: shell, Play, Settings, Setup, artwork, smooth scrolling |
+
+**No MSBuild, so no compiled XAML**: `csc` alone cannot produce BAML, so `Window.xaml` is an embedded resource
+loaded with `XamlReader` at startup. Two things that cost a debugging round each, kept here so they are not
+rediscovered: `XamlReader` returns a fully formed `Window` and it has to be used as-is - re-parenting its content
+into a `Window` subclass takes the process down with an access violation before anything is drawn; and `Scene` and
+`SceneRow` are `public` because WPF's binding engine reflects over public members of public types only.
+
+**Verified so far**: the three tabs render and switch, the install check and its buttons, the settings form, the
+scene list with its grouping and filters, `--install-addon`, `--shortcut` (which now targets the exe directly
+rather than `powershell -File`), a scene run in attach mode, and scrolling - 3 notches settle at exactly 216 DIP,
+the same as the PowerShell app. **Not yet exercised**: drag-and-drop onto the C# Setup tab, and a real scene boot
+with the game actually starting. The PowerShell app is untouched and is still the one that ships.
+
 ### The setup this was verified on
 
 The add-on and the ASI come out of this repo, but the rest of the stack lives in the game folder and is worth

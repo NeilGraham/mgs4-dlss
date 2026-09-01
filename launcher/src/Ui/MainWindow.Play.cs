@@ -131,11 +131,28 @@ namespace Mgs4Launcher
             // Every act starts collapsed, so the window opens as a short list of acts rather than 400 rows.
             foreach (string key in Catalogue.ActOrder) _collapsed[key] = true;
             ApplyFilter();
-            if (!string.IsNullOrEmpty(_pickedId))
+        }
+
+        // A scene asked for on the command line, or the last one used, opens its act and is selected in it. Called
+        // after the preferences are read, because that is where the last one comes from.
+        void RestoreSelection()
+        {
+            Scene entry = Catalogue.Find(_pickedId);
+            if (entry != null)
             {
-                Scene s0 = Catalogue.Find(_pickedId);
-                if (s0 != null) ShowPicked(s0);
+                _collapsed[entry.ActKey] = false;
+                _pickedId = entry.Id;
+                foreach (var chip in _filters.Children.OfType<ToggleButton>()) chip.IsChecked = false;   // so the scene is in view
             }
+            ApplyFilter();
+            if (entry != null)
+            {
+                SceneRow hit = (_sceneList.ItemsSource as IEnumerable<SceneRow>)
+                    .FirstOrDefault(r => !r.IsHeader && r.Id == _pickedId);
+                if (hit != null) { _sceneList.SelectedItem = hit; _sceneList.ScrollIntoView(hit); }
+                ShowPicked(entry);
+            }
+            else UpdatePreview();
         }
 
         void ApplyFilter()
