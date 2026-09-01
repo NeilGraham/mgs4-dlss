@@ -190,7 +190,7 @@ namespace Mgs4Launcher
             _pillText.Foreground = Widgets.Brush(fg);
 
             _stopBtn.IsEnabled = running || busy;
-            _saveBtn.IsEnabled = !running && !string.IsNullOrEmpty(_gameDir);
+            UpdateSaveButton();     // enabled only while there is an edit to write, and the game is not running
 
             if (_settingsView.Visibility == Visibility.Visible)
             {

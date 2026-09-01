@@ -284,7 +284,8 @@ the file - or files - its rows are written to.
   settings and not its defaults; the values this add-on was verified with are in "the setup this was verified on".
 
 The files spell booleans differently — the add-on and RenoDX write `1` / `0`, the game writes `true` / `false` — so
-each key carries its own spelling and a tick box writes whichever its file expects. **Save settings** writes all of
+each key carries its own spelling and a tick box writes whichever its file expects. **Save settings** is greyed until something is actually
+changed - it compares each control against what its file said when the form was built - and then writes all of
 them at once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a group whose file
 does not exist yet shows *not there* until whatever writes it has run.
 

@@ -11,8 +11,36 @@ namespace Mgs4Launcher
 {
     partial class MainWindow
     {
-        // One entry per row: the key it belongs to (which knows its file) and how to read the control back.
-        readonly List<KeyValuePair<IniKey, Func<string>>> _settingReaders = new List<KeyValuePair<IniKey, Func<string>>>();
+        // One entry per row: the key it belongs to (which knows its file), how to read the control back, and what
+        // the file said when the form was built. The third is what makes "has anything changed?" answerable.
+        class Binding
+        {
+            public IniKey Spec;
+            public Func<string> Read;
+            public string Original;
+        }
+        readonly List<Binding> _settingReaders = new List<Binding>();
+
+        // Save is for writing changes, so it is only offered when there are any. Recomputed on every edit, and
+        // reset by building the form, reloading, and saving - each of which makes the controls agree with the
+        // files again.
+        bool Changed()
+        {
+            foreach (Binding b in _settingReaders)
+                if (!string.Equals(b.Read(), b.Original, StringComparison.Ordinal)) return true;
+            return false;
+        }
+
+        void UpdateSaveButton()
+        {
+            bool changed = Changed();
+            bool running = Checks.GameRunning();
+            _saveBtn.IsEnabled = changed && !running && !string.IsNullOrEmpty(_gameDir);
+            _saveBtn.ToolTip = string.IsNullOrEmpty(_gameDir) ? "No game folder"
+                             : running ? "The game is running - close it to write these files"
+                             : changed ? "Write the changed settings to their files"
+                             : "Nothing has been changed yet";
+        }
 
         void WireSettings()
         {
@@ -76,6 +104,7 @@ namespace Mgs4Launcher
             // the tab opened part-way down its own first card. Start at the top, where the reading starts.
             var scroller = _settingsHost.Parent as ScrollViewer;
             if (scroller != null) scroller.ScrollToTop();
+            UpdateSaveButton();
         }
 
         Border SettingRow(IniKey spec, string value)
@@ -107,6 +136,8 @@ namespace Mgs4Launcher
                         VerticalAlignment = VerticalAlignment.Center,
                     };
                     Remember(spec, () => cb.IsChecked == true ? spec.TrueWord : spec.FalseWord);
+                    cb.Checked += (s2, e2) => UpdateSaveButton();
+                    cb.Unchecked += (s2, e2) => UpdateSaveButton();
                     editor = cb;
                     break;
                 }
@@ -119,6 +150,7 @@ namespace Mgs4Launcher
                     int idx = Array.IndexOf(spec.Choices, value ?? "");
                     combo.SelectedIndex = idx >= 0 ? idx : -1;
                     Remember(spec, () => combo.SelectedIndex >= 0 ? spec.Choices[combo.SelectedIndex] : value);
+                    combo.SelectionChanged += (s2, e2) => UpdateSaveButton();
                     editor = combo;
                     break;
                 }
@@ -140,6 +172,8 @@ namespace Mgs4Launcher
                         string across = w.Text.Trim(), down = h.Text.Trim();
                         return across.Length > 0 && down.Length > 0 ? across + "x" + down : "";
                     });
+                    w.TextChanged += (s2, e2) => UpdateSaveButton();
+                    h.TextChanged += (s2, e2) => UpdateSaveButton();
                     editor = row;
                     break;
                 }
@@ -154,6 +188,7 @@ namespace Mgs4Launcher
                 {
                     var tb = new TextBox { Text = value ?? "", MinWidth = 90, VerticalAlignment = VerticalAlignment.Center };
                     Remember(spec, () => tb.Text.Trim());
+                    tb.TextChanged += (s2, e2) => UpdateSaveButton();
                     editor = tb;
                     break;
                 }
@@ -164,9 +199,11 @@ namespace Mgs4Launcher
             return b;
         }
 
+        // Called as each row is built, with the control already showing the file's value - so reading it back now
+        // is exactly what the file says, and anything different later is an edit.
         void Remember(IniKey spec, Func<string> read)
         {
-            _settingReaders.Add(new KeyValuePair<IniKey, Func<string>>(spec, read));
+            _settingReaders.Add(new Binding { Spec = spec, Read = read, Original = read() });
         }
 
         // Both files at once, each row going to the one its key lives in. The game owns mgs4.savedsettings while it
@@ -179,13 +216,13 @@ namespace Mgs4Launcher
             {
                 var values = new List<KeyValuePair<string, string>>();
                 string section = null;
-                foreach (var row in _settingReaders)
+                foreach (Binding row in _settingReaders)
                 {
-                    if (row.Key.Source != source) continue;
-                    string v = row.Value();
+                    if (row.Spec.Source != source) continue;
+                    string v = row.Read();
                     if (v == null) continue;
-                    section = row.Key.Section;
-                    values.Add(new KeyValuePair<string, string>(row.Key.Key, v));
+                    section = row.Spec.Section;
+                    values.Add(new KeyValuePair<string, string>(row.Spec.Key, v));
                 }
                 if (values.Count == 0) continue;
                 string file = IniForm.PathFor(source, _gameDir);
@@ -202,6 +239,8 @@ namespace Mgs4Launcher
                 }
                 catch (Exception e) { Say("could not write " + IniForm.SourceLabel(source) + ": " + e.Message); return; }
             }
+            foreach (Binding b in _settingReaders) b.Original = b.Read();   // what is on screen is what is on disk
+            UpdateSaveButton();
             Say(written.Count > 0 ? "written: " + string.Join(", ", written) : "nothing to write");
             ShowSetup();      // the Setup tab's view of the game's settings just changed
         }
