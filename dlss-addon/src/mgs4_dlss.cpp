@@ -3187,7 +3187,13 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Handle the game's dynamic resolution (DLSS on the scene sub-rect; restart to change)", &drs)) { g_cfgDRS = drs ? 1 : 0; write_ini_int("DRS", g_cfgDRS); }
     if (g_sceneVpValid && g_internalW) {
         const float fx = g_sceneVp.width / float(g_internalW);
-        if (fx < 0.995f || g_drsActiveLast) ImGui::TextColored(g_cfgDRS ? ImVec4(0.6f, 0.9f, 0.6f, 1.0f) : ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Game dynamic resolution: scene viewport %.0fx%.0f (%.0f%%) -> %s (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_cfgDRS ? "DLSS evaluates that sub-rect, output resampled back into it" : "NOT handled (DRS=0): expect smearing while the game changes resolution", g_drsFrames);
+        if (fx < 0.995f || g_drsActiveLast) {
+            // the game's own load-driven dynamic resolution: it renders the 3D scene into this sub-rect and upscales it
+            // itself before DLSS sees the image, so the detail DLAA works from is capped by the game's scale
+            if (g_cfgDRS == 2) ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "Game dynamic resolution: the 3D scene is rendered at %.0fx%.0f (%.0f%%) -> DLSS evaluates that sub-rect, output resampled back into it (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_drsFrames);
+            else if (g_cfgDRS) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Game dynamic resolution: the GAME renders its 3D scene at %.0fx%.0f (%.0f%%) and upscales it to %ux%u itself; DLAA runs on that full image, so detail is capped at the game's scale. The game picks it from its GPU load (DLSS + NR count) - Mode=Quality or less load keeps it at 100%% (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_internalW, g_internalH, g_drsFrames);
+            else ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Game dynamic resolution: scene viewport %.0fx%.0f (%.0f%%) -> NOT handled (DRS=0): expect smearing while the game changes resolution (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_drsFrames);
+        }
         else ImGui::Text("Game dynamic resolution: scene viewport at full size (%.0fx%.0f)", g_sceneVp.width, g_sceneVp.height);
     }
     bool jit = g_cfgJitter != 0;

@@ -592,6 +592,15 @@ rectangle while the game was scaled.
 `DRS=2` keeps the legacy behaviour (DLSS evaluated on the sub-rect, output resampled back into it) for reference; it is
 wrong for this port's composite and breaks NR's coverage.
 
+**Why the overlay may say the scene is 1920x1080 with DLAA on.** The game decides its own render scale from its GPU load,
+and everything the add-on runs inside its frame (DLAA, DLSS 5 NR, the vector passes) counts toward that budget. Under load
+it renders the 3D scene at 50 % (1920x1080 of 3840x2160) and upscales it itself before DLSS sees the image; DLAA then
+runs on the full-size image but cannot add detail the game never rendered. There is no game-side switch
+(`mgs4.savedsettings` only has the quality tiers). `Mode=Quality` is the way out: the add-on shrinks the game's targets to
+the DLSS render resolution, the game has nothing left to scale down, and DLSS super-resolves properly jittered samples -
+far better than DLAA over the game's bilinear 1080p upscale. Test the cause live with the overlay's "Enable DLSS"
+checkbox: with it off the "Game dynamic resolution" line should climb back to full size within seconds.
+
 The sub-rect is detected per frame from the viewport most depth-tested draws into the frame's geometry target use
 (at least half the target); the 20-frame hysteresis copy is only a fallback before the first scene draw of a frame.
 
