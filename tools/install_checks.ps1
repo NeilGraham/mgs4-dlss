@@ -136,6 +136,39 @@ function Get-LastRun($game) {
     return $r
 }
 
+# The game's key art, from Steam's own cache on this machine. Steam keeps library_hero.jpg and logo.png for every
+# owned game under appcache\librarycache; it is the user's copy of Konami's artwork, which is why the app reads it
+# at runtime and nothing of the sort is in this repo. Newer Steam nests them in a hash folder per image, older
+# builds name them <appid>_hero.jpg beside each other - both are looked for. Returns a hashtable of what exists.
+function Get-GameArt {
+    $art = @{}
+    $wanted = @{ Hero = @("library_hero.jpg", "${Mgs4AppId}_library_hero.jpg", "${Mgs4AppId}_hero.jpg")
+                 Logo = @("logo.png", "${Mgs4AppId}_logo.png")
+                 Capsule = @("library_capsule.jpg", "${Mgs4AppId}_library_600x900.jpg") }
+    foreach ($root in (Get-Mgs4SteamLibraries)) {
+        $cache = Join-Mgs4Path $root "appcache\librarycache"
+        if (-not (Test-Mgs4Path $cache)) { continue }
+        # The per-app folder is small, so recursing it is cheap; the shared cache holds every game the account owns,
+        # so that one is looked at flat, where the older naming put <appid>_hero.jpg anyway.
+        foreach ($pair in @(@{ Dir = (Join-Mgs4Path $cache $Mgs4AppId); Deep = $true }, @{ Dir = $cache; Deep = $false })) {
+            if (-not (Test-Mgs4Path $pair.Dir)) { continue }
+            foreach ($key in @($wanted.Keys)) {
+                if ($art[$key]) { continue }
+                foreach ($name in $wanted[$key]) {
+                    $hit = $(if ($pair.Deep) {
+                        Get-ChildItem -LiteralPath $pair.Dir -Filter $name -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    } else {
+                        Get-ChildItem -LiteralPath $pair.Dir -Filter $name -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                    })
+                    if ($hit) { $art[$key] = $hit.FullName; break }
+                }
+            }
+        }
+        if ($art.Hero -and $art.Logo) { break }
+    }
+    return $art
+}
+
 # tools\ViGEmClient.dll plus the ViGEmBus driver: what lets the launcher tap Cross through the whole of a cutscene,
 # which is what MGS4's flashback prompts want. Optional - without it the launcher can only press Enter.
 function Get-VigemState {

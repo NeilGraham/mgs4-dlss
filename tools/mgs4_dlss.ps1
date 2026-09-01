@@ -1195,15 +1195,30 @@ $script:Xaml = @'
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="#141821" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="22,16">
+    <Border Grid.Row="0" Background="#141821" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
       <Grid>
+        <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. The fade over
+             the top keeps the left side flat so the logo and the paths stay readable. -->
+        <Rectangle x:Name="HeroArt" Visibility="Collapsed"/>
+        <Rectangle x:Name="HeroFade" Visibility="Collapsed">
+          <Rectangle.Fill>
+            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+              <GradientStop Color="#FF141821" Offset="0.0"/>
+              <GradientStop Color="#F2141821" Offset="0.34"/>
+              <GradientStop Color="#A6141821" Offset="0.62"/>
+              <GradientStop Color="#73141821" Offset="1.0"/>
+            </LinearGradientBrush>
+          </Rectangle.Fill>
+        </Rectangle>
+        <Grid Margin="22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0">
-          <TextBlock Text="MGS4 DLSS" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+          <Image x:Name="LogoArt" Height="30" HorizontalAlignment="Left" Visibility="Collapsed" Margin="0,2,0,6"/>
+          <TextBlock x:Name="TitleText" Text="MGS4 DLSS" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
           <TextBlock x:Name="Caption" Text="start a scene" FontSize="13" Foreground="{StaticResource Accent}" Margin="0,1,0,6"/>
           <TextBlock x:Name="GamePath" FontSize="11" Foreground="{StaticResource Muted}" FontFamily="Consolas"
                      TextTrimming="CharacterEllipsis" MaxWidth="360"/>
@@ -1222,6 +1237,7 @@ $script:Xaml = @'
                        HorizontalAlignment="Center" Margin="0,2,0,0"/>
           </StackPanel>
         </Border>
+        </Grid>
       </Grid>
     </Border>
 
@@ -1410,6 +1426,83 @@ function New-SceneRow($r) {
 
 # The game's own icon on the window, taken from the mgs4.exe on this machine rather than shipped - PrivateExtractIcons
 # gives the best size it holds (256 in this port), which ExtractAssociatedIcon would flatten to 32.
+# The logo art is mostly transparent margin, which makes it look tiny at any sensible height. Crops to the pixels
+# that are actually drawn. Returns $null if that cannot be worked out, and the caller uses the image as it came.
+function Get-TrimmedBitmap($src) {
+    try {
+        $conv = New-Object System.Windows.Media.Imaging.FormatConvertedBitmap $src, ([System.Windows.Media.PixelFormats]::Bgra32), $null, 0
+        $w = $conv.PixelWidth; $h = $conv.PixelHeight
+        $stride = $w * 4
+        $px = New-Object byte[] ($stride * $h)
+        $conv.CopyPixels($px, $stride, 0)
+        $minX = $w; $minY = $h; $maxX = -1; $maxY = -1
+        for ($y = 0; $y -lt $h; $y++) {
+            $row = $y * $stride
+            for ($x = 0; $x -lt $w; $x++) {
+                if ($px[$row + $x * 4 + 3] -gt 16) {          # alpha
+                    if ($x -lt $minX) { $minX = $x }
+                    if ($x -gt $maxX) { $maxX = $x }
+                    if ($y -lt $minY) { $minY = $y }
+                    if ($y -gt $maxY) { $maxY = $y }
+                }
+            }
+        }
+        if ($maxX -lt 0 -or ($maxX - $minX) -lt 8 -or ($maxY - $minY) -lt 4) { return $null }
+        $rect = New-Object System.Windows.Int32Rect $minX, $minY, ($maxX - $minX + 1), ($maxY - $minY + 1)
+        $crop = New-Object System.Windows.Media.Imaging.CroppedBitmap $conv, $rect
+        $crop.Freeze()
+        return $crop
+    } catch { return $null }
+}
+
+# Loads an image file without keeping a handle on it, so nothing in the game folder is locked open.
+function Read-ImageFile([string]$path) {
+    if (-not (Test-Mgs4Path $path)) { return $null }
+    try {
+        $img = New-Object System.Windows.Media.Imaging.BitmapImage
+        $img.BeginInit()
+        $img.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $img.CreateOptions = [System.Windows.Media.Imaging.BitmapCreateOptions]::IgnoreColorProfile
+        $img.UriSource = New-Object System.Uri $path
+        $img.EndInit()
+        $img.Freeze()
+        return $img
+    } catch { return $null }
+}
+
+# Dresses the header in the game's own artwork when Steam has it cached on this machine: the logo in place of the
+# title, the hero behind the band. Both are the user's copy of Konami's art - read here, never shipped - so every
+# step falls back to the plain text if anything is missing.
+function Set-HeaderArt($ui) {
+    $art = @{}
+    try { $art = Get-GameArt } catch { return }
+
+    $logo = Read-ImageFile $art.Logo
+    if ($logo) {
+        $trimmed = Get-TrimmedBitmap $logo
+        $ui.LogoArt.Source = $(if ($trimmed) { $trimmed } else { $logo })
+        $ui.LogoArt.Visibility = "Visible"
+        $ui.TitleText.Visibility = "Collapsed"
+    }
+
+    $hero = Read-ImageFile $art.Hero
+    if ($hero) {
+        # UniformToFill on a band this wide shows the art's full width, so the face lands on the left - which is
+        # where the logo and the paths go. Mirroring the brush puts it on the right instead, under the status pill,
+        # where the fade is thinnest and there is nothing to read.
+        $brush = New-Object System.Windows.Media.ImageBrush $hero
+        $brush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
+        $brush.AlignmentY = [System.Windows.Media.AlignmentY]::Center
+        $brush.Opacity = 0.7
+        $flip = New-Object System.Windows.Media.ScaleTransform -1, 1, 0.5, 0.5
+        $brush.RelativeTransform = $flip
+        $brush.Freeze()
+        $ui.HeroArt.Fill = $brush
+        $ui.HeroArt.Visibility = "Visible"
+        $ui.HeroFade.Visibility = "Visible"
+    }
+}
+
 function Set-WindowIcon($win, [string]$gameDir) {
     if (-not $gameDir) { return }
     $exe = Join-Mgs4Path $gameDir "mgs4.exe"
@@ -1822,7 +1915,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     })
 
     $ui = @{}
-    foreach ($n in @("GamePath", "Caption", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
+    foreach ($n in @("GamePath", "Caption", "TitleText", "LogoArt", "HeroArt", "HeroFade", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
                      "Search", "SearchHint", "Filters", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
@@ -1833,6 +1926,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $script:FlatStyle = $win.FindResource("Flat")
     $script:PrimaryStyle = $win.FindResource("Primary")
     Set-WindowIcon $win $state.GameDir
+    Set-HeaderArt $ui
 
     $refreshGamePath = {
         $ui.GamePath.Text = $(if ($state.GameDir) { $state.GameDir }

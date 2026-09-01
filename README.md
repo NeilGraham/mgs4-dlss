@@ -88,6 +88,13 @@ works with either, since `mgs4-dlss` resolves to whichever is there.
 The exe passes arguments through and prints where you typed them, but cmd does not wait for a windowed program, so
 a script that needs to capture output or check an exit code should call `mgs4-dlss.bat` or `tools\mgs4_dlss.ps1`.
 
+**The window wears the game's own artwork** when Steam has it cached on this machine: the Metal Gear Solid 4 logo
+in place of the title, the key art behind the header band (mirrored, so Snake sits on the right where there is
+nothing to read), and the game's icon on the window and the taskbar. All of it is read at runtime from
+`Steam\appcache\librarycache` and from `mgs4.exe` itself — none of it is in this repo, because it is Konami's
+artwork and it is already on the machine of anyone who owns the game. Every piece falls back to plain text if it is
+not there.
+
 Play, Settings and Setup are tabs of the one window. The **first** run
 opens on Setup, because the first thing anyone needs to know is whether the pieces are in place; after that it
 opens on Play. `--setup` and `--settings` override that at any time.
