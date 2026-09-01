@@ -1,0 +1,27 @@
+<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+  <Grid>
+    <Grid Visibility="{Binding HeaderVis}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="18"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="{Binding Chevron}" FontSize="11" Foreground="#858D9E" VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="1" Text="{Binding HeadText}" FontSize="13" FontWeight="SemiBold" Foreground="#E7EAF0"
+                 VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="2" Text="{Binding HeadCount}" FontSize="11" Foreground="#5C6478" VerticalAlignment="Center"/>
+    </Grid>
+    <Grid Visibility="{Binding SceneVis}" Margin="18,0,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="130"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="Consolas" FontSize="12" Foreground="#7C9CFF"
+                 VerticalAlignment="Center"/>
+      <StackPanel Grid.Column="1">
+        <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#E7EAF0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="#858D9E" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
+      </StackPanel>
+    </Grid>
+  </Grid>
+</DataTemplate>
