@@ -112,12 +112,23 @@ function Resolve-Mgs4Exe($configured, $name) {
     return $name
 }
 
+# A folder someone points at is the game folder if mgs4.exe is in it - or if mgs4.exe is in an MGS4 folder inside
+# it, because "METAL GEAR SOLID 4" is the install root and MGS4 is the part that matters. $null when it is neither.
+function Resolve-Mgs4GameDir($path) {
+    if (-not $path) { return $null }
+    $path = Format-Mgs4Path $path
+    if (Test-Mgs4Path (Join-Mgs4Path $path "mgs4.exe")) { return $path }
+    $inner = Join-Mgs4Path $path "MGS4"
+    if (Test-Mgs4Path (Join-Mgs4Path $inner "mgs4.exe")) { return $inner }
+    return $null
+}
+
 function Get-Mgs4Paths {
     $v = Get-Mgs4ConfigValues
     $game = Get-Mgs4Setting "MGS4_DIR" $v $null
     if (-not $game) { $game = Find-Mgs4GameDir }
-    $game = Format-Mgs4Path $game
-    if ($game -and (Test-Mgs4Path (Join-Mgs4Path $game "MGS4\mgs4.exe"))) { $game = Join-Mgs4Path $game "MGS4" }
+    $resolved = Resolve-Mgs4GameDir $game
+    if ($resolved) { $game = $resolved } else { $game = Format-Mgs4Path $game }
     $out = Format-Mgs4Path (Get-Mgs4Setting "MGS4_OUT" $v (Join-Path $Mgs4Repo "work"))
     return [ordered]@{
         Repo    = $Mgs4Repo

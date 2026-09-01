@@ -1484,38 +1484,32 @@ $script:StatusStyle = @{
     info = @{ Glyph = [char]0x25CF; Fg = "#7C9CFF"; Bg = "#161B2A"; Br = "#33436E" }
 }
 
-# Says the window takes files, because nothing else would.
-function New-DropCard {
-    $c = New-Card "Drop the downloads here" "" "info" "drag and drop"
-    $b = New-Object System.Windows.Controls.Border
-    $b.Padding = New-Object System.Windows.Thickness 18, 13, 18, 13
-    $t = New-TextBlock ("Drag streamline.zip, renodx-dlss5.addon64, mgs4_dlss.addon64 or the ReShade setup onto " +
-                        "this tab and each one goes where it belongs - the zip is unpacked into the game folder, " +
-                        "the ReShade setup is started for you. Anything that is not part of the install is left " +
-                        "alone and reported.") 11 "#9AA3B4" $false $false
-    $b.Child = $t
-    [void]$c.Body.Children.Add($b)
-    return $c.Card
-}
+# The Setup tab's first card, and the only one that is not a step: how the check came out, the folder it was run
+# against, and the fact that files can be dropped here. Three separate cards for that read as clutter above the
+# seven that matter.
+function New-StatusCard($state, $verdict) {
+    $c = New-Card ("Install check: " + $verdict.Text) $verdict.Note $verdict.Kind $verdict.Text
 
-# The Setup tab's first card: which folder everything else is checked against, and how to change it.
-function New-GameDirCard($state) {
     $ok = [bool]$state.GameDir
-    $c = New-Card "Game folder" $(if ($ok) { Get-GameDirSource } else { "not set" }) `
-                  $(if ($ok) { "ok" } else { "bad" }) $(if ($ok) { "found" } else { "not set" })
-
     $row = New-Object System.Windows.Controls.Border
     $row.Padding = New-Object System.Windows.Thickness 18, 13, 18, 13
     $g = New-Object System.Windows.Controls.Grid
-    foreach ($w in @("*", "Auto")) {
+    foreach ($w in @("Auto", "*", "Auto")) {
         $cd = New-Object System.Windows.Controls.ColumnDefinition
         $cd.Width = $w
         [void]$g.ColumnDefinitions.Add($cd)
     }
+    $label = New-TextBlock "Game folder" 12 "#858D9E" $false $false
+    $label.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+    $label.Margin = New-Object System.Windows.Thickness 0, 0, 14, 0
+    [void]$g.Children.Add($label)
+
     $path = New-TextBlock $(if ($ok) { $state.GameDir } else { "no mgs4.exe found - pick the folder that holds it" }) `
                           12 $(if ($ok) { "#7C9CFF" } else { "#FF7B72" }) $false $true
     $path.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
     $path.Margin = New-Object System.Windows.Thickness 0, 0, 16, 0
+    $path.ToolTip = $(if ($ok) { Get-GameDirSource } else { "nothing found" })
+    [System.Windows.Controls.Grid]::SetColumn($path, 1)
     [void]$g.Children.Add($path)
 
     $buttons = New-Object System.Windows.Controls.StackPanel
@@ -1526,6 +1520,7 @@ function New-GameDirCard($state) {
     $browse.Content = "Browse..."
     $browse.Style = $script:FlatStyle
     $browse.Tag = $state
+    $browse.ToolTip = "Pick mgs4.exe, or the folder above it"
     $browse.Add_Click({
         $st = $this.Tag
         $dlg = New-Object Microsoft.Win32.OpenFileDialog
@@ -1552,10 +1547,21 @@ function New-GameDirCard($state) {
     })
     [void]$buttons.Children.Add($auto)
 
-    [System.Windows.Controls.Grid]::SetColumn($buttons, 1)
+    [System.Windows.Controls.Grid]::SetColumn($buttons, 2)
     [void]$g.Children.Add($buttons)
     $row.Child = $g
     [void]$c.Body.Children.Add($row)
+
+    $drop = New-Object System.Windows.Controls.Border
+    $drop.BorderBrush = ConvertTo-Brush "#20242E"
+    $drop.BorderThickness = New-Object System.Windows.Thickness 0, 1, 0, 0
+    $drop.Padding = New-Object System.Windows.Thickness 18, 12, 18, 13
+    $drop.Child = (New-TextBlock ("Drag the downloads onto this tab and each one goes where it belongs - " +
+                                  "streamline.zip and MGSFPSUnlock.zip are unpacked into the game folder, " +
+                                  "renodx-dlss5.addon64 and mgs4_dlss.addon64 land beside mgs4.exe, and the " +
+                                  "ReShade setup is started for you. Anything that is not part of the install is " +
+                                  "left alone and named below.") 11 "#9AA3B4" $false $false)
+    [void]$c.Body.Children.Add($drop)
     return $c.Card
 }
 
@@ -2191,7 +2197,8 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         if ($ui.InstallView.Visibility -ne [System.Windows.Visibility]::Visible) { return }
         $ui.InstallHost.Children.Clear()
         if (-not $state.GameDir) {
-            [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
+            [void]$ui.InstallHost.Children.Add((New-StatusCard $state @{ Text = "No game folder"; Kind = "bad"
+                                                                        Note = "nothing to check against yet" }))
             $why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up."
             if ($opt.GameDirBad) { $why = "There is no mgs4.exe in $($opt.GameDirBad)." }
             $c = New-Card "Nothing to check yet" ($why + " Point the app at the folder holding mgs4.exe with " +
@@ -2202,11 +2209,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
         }
         $sections = Invoke-InstallChecks -Game $state.GameDir
         $state.Sections = $sections
-        $v = Get-Verdict $sections
-        $vc = New-Card ("Install check: " + $v.Text) $v.Note $v.Kind $v.Text
-        [void]$ui.InstallHost.Children.Add($vc.Card)
-        [void]$ui.InstallHost.Children.Add((New-GameDirCard $state))
-        [void]$ui.InstallHost.Children.Add((New-DropCard))
+        [void]$ui.InstallHost.Children.Add((New-StatusCard $state (Get-Verdict $sections)))
         foreach ($sec in $sections) {
             $bad = @($sec.Rows | Where-Object { $_.Status -eq "bad" }).Count
             $warn = @($sec.Rows | Where-Object { $_.Status -eq "warn" }).Count
@@ -2259,17 +2262,14 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     $ui.NavSettings.Add_Checked($showView)
     $ui.NavInstall.Add_Checked($showView)
 
-    # Repointing the game folder from the Setup tab. Reached through $state so New-GameDirCard's button can call it
+    # Repointing the game folder from the Setup tab. Reached through $state so New-StatusCard's button can call it
     # without this having to exist before the card builder does.
     $state.ApplyGameDir = {
         param($dir, $persist = $true)
         if ($dir) {
-            $dir = $dir.TrimEnd('\')
-            if (Test-Mgs4Path (Join-Mgs4Path $dir "MGS4\mgs4.exe")) { $dir = Join-Mgs4Path $dir "MGS4" }
-            if (-not (Test-Mgs4Path (Join-Mgs4Path $dir "mgs4.exe"))) {
-                $ui.Status.Text = "no mgs4.exe in $dir"
-                return
-            }
+            $resolved = Resolve-Mgs4GameDir $dir.TrimEnd('\')
+            if (-not $resolved) { $ui.Status.Text = "no mgs4.exe in $dir"; return }
+            $dir = $resolved
         }
         $state.GameDir = $dir
         $opt.GameDir = $dir
@@ -2391,10 +2391,11 @@ $gameDir = $opt.GameDir
 if (-not $gameDir) {
     try { $gameDir = Get-Mgs4GameDir } catch { $gameDir = $null }
 }
-# --game-dir can name a folder that holds no mgs4.exe; a non-empty string is not an install.
-if ($gameDir -and -not (Test-Mgs4Path (Join-Mgs4Path $gameDir "mgs4.exe"))) {
-    $opt.GameDirBad = $gameDir
-    $gameDir = $null
+# --game-dir can name a folder that holds no mgs4.exe; a non-empty string is not an install. It can also name the
+# install root ("METAL GEAR SOLID 4") rather than the MGS4 folder inside it, which Resolve-Mgs4GameDir sorts out.
+if ($gameDir) {
+    $resolved = Resolve-Mgs4GameDir $gameDir
+    if ($resolved) { $gameDir = $resolved } else { $opt.GameDirBad = $gameDir; $gameDir = $null }
 }
 $opt.GameDir = $gameDir
 

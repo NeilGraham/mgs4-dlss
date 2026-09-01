@@ -216,10 +216,14 @@ What it reports, beyond whether a file exists:
   4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss5.addon64`, next to
      `mgs4.exe`. Nothing to configure; this add-on notices it.
   5. **This add-on** — `mgs4_dlss.addon64` next to `mgs4.exe`, last, so it loads with the rest already in place.
-  6. **Frame limiter** and 7. **D3D12 fallback**, both optional.
+  6. **Frame limiter** — [MGSFPSUnlock](https://github.com/cipherxof/MGSFPSUnlock/releases). Its zip brings its own
+     ASI loader, so extract the whole thing into the game folder: `winmm.dll` beside `mgs4.exe` (the game imports
+     winmm at startup, which is what makes `scripts\` load at all) and the limiter into `scripts\`.
+  7. **D3D12 fallback**, only for a build whose Options -> Graphics has no DirectX 12 entry.
 
-  **Drag and drop does most of it.** Drop `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64` or the
-  ReShade setup onto the Setup tab: the zip is unpacked into the game folder, `.asi` files go to `scripts\`, the
+  **Drag and drop does most of it.** Drop `streamline.zip`, `MGSFPSUnlock.zip`, `renodx-dlss5.addon64`,
+  `mgs4_dlss.addon64` or the ReShade setup onto the Setup tab: archives are unpacked into the game folder keeping
+  the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the
   ReShade setup is started for you, and the check re-runs. Only files the install actually uses are written —
   anything else in a dropped archive is left alone and named in the status line.
 

@@ -87,18 +87,18 @@
       "id": "limiter",
       "title": "Optional: frame limiter",
       "blurb": "The port is built around 60 fps; this is what holds it there.",
-      "url": "https://github.com/Skyth3r/MGSFPSUnlock",
+      "url": "https://github.com/cipherxof/MGSFPSUnlock/releases",
       "urlLabel": "MGSFPSUnlock",
-      "guide": "Needs an ASI loader: winmm.dll next to mgs4.exe (the game imports winmm at startup, so that is what loads the scripts folder), then the .asi and its ini in scripts\\ with TargetFrameRate = 60.",
-      "accepts": ["winmm.dll", "MGSFPSUnlock.asi"],
+      "guide": "MGSFPSUnlock.zip brings its own ASI loader, so extract the whole thing into the folder with mgs4.exe: winmm.dll lands next to the game (it is imported at startup, which is what makes scripts\\ load at all) and the limiter lands in scripts\\. Then set TargetFrameRate = 60 in scripts\\MGSFPSUnlock.ini.",
+      "accepts": ["MGSFPSUnlock*.zip", "winmm.dll", "wininet.dll", "MGSFPSUnlock.asi", "MGSFPSUnlock.ini"],
       "files": [
         {
           "path": "winmm.dll",
           "verified": "9.7.4",
-          "detail": "Ultimate ASI Loader, which loads everything in scripts\\",
-          "url": "https://github.com/ThirteenAG/Ultimate-ASI-Loader"
+          "detail": "the ASI loader that ships in the zip - the game imports winmm at startup, so this is what loads scripts\\"
         },
-        { "path": "scripts\\MGSFPSUnlock.asi", "detail": "with MGSFPSUnlock.ini set to TargetFrameRate = 60" }
+        { "path": "scripts\\MGSFPSUnlock.asi", "detail": "the limiter itself" },
+        { "path": "scripts\\MGSFPSUnlock.ini", "detail": "set TargetFrameRate = 60 in it" }
       ]
     },
     {

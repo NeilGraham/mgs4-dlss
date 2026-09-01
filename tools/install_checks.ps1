@@ -371,10 +371,20 @@ function Get-DropTarget($sections, [string]$name) {
     return $null
 }
 
+# Where a dropped or unpacked file belongs. Most sit next to mgs4.exe; anything the archive already put in a
+# scripts folder, and any .asi, belongs in scripts\ - MGSFPSUnlock.zip ships exactly that shape.
+function Get-DropFolder([string]$gameDir, [string]$insideArchive, [string]$name) {
+    $parts = @($insideArchive -split '[\\/]')
+    if (($parts | Where-Object { $_ -eq "scripts" }) -or ([IO.Path]::GetExtension($name) -eq ".asi")) {
+        return (Join-Mgs4Path $gameDir "scripts")
+    }
+    return $gameDir
+}
+
 # Everything the install can legitimately receive, so a stray file in a zip is never written into the game folder.
 # Anything not matching one of these is reported as skipped rather than copied.
-$script:DropPatterns = @("sl.*.dll", "nvngx_*.dll", "*.addon64", "mgs4_dlss.ini", "winmm.dll", "*.asi",
-                         "steam_appid.txt", "*.license.txt")
+$script:DropPatterns = @("sl.*.dll", "nvngx_*.dll", "*.addon64", "mgs4_dlss.ini", "winmm.dll", "wininet.dll",
+                         "*.asi", "MGSFPSUnlock.ini", "steam_appid.txt", "*license*")
 
 function Test-DropAllowed([string]$name) {
     foreach ($pat in $script:DropPatterns) { if ($name -like $pat) { return $true } }
@@ -409,7 +419,9 @@ function Copy-DroppedFiles($sections, [string]$gameDir, [string[]]$paths) {
                 foreach ($entry in $zip.Entries) {
                     if (-not $entry.Name) { continue }                      # a directory entry
                     if (-not (Test-DropAllowed $entry.Name)) { $skipped++; continue }
-                    $dest = Join-Mgs4Path $gameDir $entry.Name              # flattened: the game folder is flat
+                    $into = Get-DropFolder $gameDir $entry.FullName $entry.Name
+                    if (-not (Test-Mgs4Path $into)) { New-Item -ItemType Directory -Force $into | Out-Null }
+                    $dest = Join-Mgs4Path (Get-DropFolder $gameDir $entry.FullName $entry.Name) $entry.Name
                     [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
                     $took++
                 }
@@ -423,7 +435,7 @@ function Copy-DroppedFiles($sections, [string]$gameDir, [string[]]$paths) {
         if (-not (Test-DropAllowed $name)) { $log.Add("skipped $name - not part of the install"); continue }
         $sec = Get-DropTarget $sections $name
         # .asi files live in scripts\, everything else sits next to mgs4.exe
-        $dest = $(if ([IO.Path]::GetExtension($name) -eq ".asi") { Join-Mgs4Path $gameDir "scripts" } else { $gameDir })
+        $dest = Get-DropFolder $gameDir $name $name
         if (-not (Test-Mgs4Path $dest)) { New-Item -ItemType Directory -Force $dest | Out-Null }
         try {
             Copy-Item -LiteralPath $path -Destination (Join-Mgs4Path $dest $name) -Force
