@@ -40,7 +40,6 @@ set FXC="%MGS4_FXC%"
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\resample_cs.h /Vn g_resample_cs src\resample_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\depth_stretch_cs.h /Vn g_depth_stretch_cs src\depth_stretch_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\uimask_cs.h /Vn g_uimask_cs src\uimask_cs.hlsl || exit /b 1
-%FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\mvmerge_cs.h /Vn g_mvmerge_cs src\mvmerge_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\dof_coc_cs.h /Vn g_dof_coc_cs src\dof_coc_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\dof_pack_cs.h /Vn g_dof_pack_cs src\dof_pack_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\dof_gather_cs.h /Vn g_dof_gather_cs src\dof_gather_cs.hlsl || exit /b 1

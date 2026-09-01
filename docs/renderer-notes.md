@@ -267,3 +267,11 @@ the overlay mid-run to test):
   texture, clear or merge pass), and the pairing signature comes from the constants the jitter patch already read per
   region (no second write-combined read per capture). Default-on GPU delta vs 9d87c29 is now the merge pass alone
   (~0.1 ms); DebugMode=9 itself adds a 4K blend pass every frame and must be off for any A/B.
+- The merge pass's camera-relative bound (|object - camera| <= 64 px) was wrong for the followed third-person player:
+  Snake's screen motion is ~0 while the camera vector at 2 m carries the full parallax (60-150 px a frame when moving),
+  so his legitimate vectors were dropped and his edges reprojected from the background - "low-resolution" edges on near
+  objects while moving. Replaced by two absolute tests in velocity_ps.hlsl: |mv| <= ObjectMVMaxPixels (200) and the
+  screen-space gradient of the vector field (ddx/ddy, taken before any discard) <= ObjectMVMaxGradient (4 px/px). The
+  first catches another-instance pairings (hundreds of px, smooth), the second the same-mesh-other-projection pairings
+  (wild across the surface). The separate object-vector texture, its clear and the merge compute pass are gone again:
+  GPU work equals 9d87c29.

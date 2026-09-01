@@ -451,6 +451,8 @@ void shutdown()
 bool ready() { return g_st.ready; }
 const Stats& stats() { return g_st; }
 bool has_captures() { return g_frameStarted; }
+static float g_maxPixels = 200.0f, g_maxGradient = 4.0f;
+void set_limits(float maxPixels, float maxGradient) { g_maxPixels = maxPixels; g_maxGradient = maxGradient; }
 void set_timestamp_frequency(uint64_t hz) { g_tsHz = hz; }
 
 static double cpu_now_ms() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return g_qpf.QuadPart ? t.QuadPart * 1000.0 / double(g_qpf.QuadPart) : 0.0; }
@@ -604,7 +606,7 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
     if (!g_vel.empty()) {
         const uint32_t cbSlot = g_velCbSlot++ % 4;
         const float cw = sceneVp.Width > 0 ? sceneVp.Width : float(w), ch = sceneVp.Height > 0 ? sceneVp.Height : float(h);
-        float cb[8] = { cw, ch, jitterCur[0], jitterCur[1], jitterPrev[0], jitterPrev[1], prevSize && prevSize[0] > 0 ? prevSize[0] : cw, prevSize && prevSize[1] > 0 ? prevSize[1] : ch };
+        float cb[12] = { cw, ch, jitterCur[0], jitterCur[1], jitterPrev[0], jitterPrev[1], prevSize && prevSize[0] > 0 ? prevSize[0] : cw, prevSize && prevSize[1] > 0 ? prevSize[1] : ch, g_maxPixels, g_maxGradient, 0.0f, 0.0f };
         memcpy(g_velCbPtr + cbSlot * 256, cb, sizeof(cb));
         const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         ID3D12DescriptorHeap* heaps[1] = { g_heap };

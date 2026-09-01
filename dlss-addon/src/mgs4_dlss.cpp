@@ -32,7 +32,6 @@
 #include "dof_gather_cs.h"
 #include "dof_composite_cs.h"
 #include "uimask_cs.h"          // g_uimask_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
-#include "mvmerge_cs.h"         // g_mvmerge_cs: per-object vectors merged into the camera vectors with a plausibility bound
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include "objmv.h"   // per-object motion vectors via stream output (objmv.cpp)
 #include <cstdio>
@@ -300,7 +299,7 @@ static uint32_t g_dofFallbacks = 0;                                             
 // Every per-frame GPU input of the DoF passes (constants, descriptors) is ring-buffered: the CPU records frame N+1
 // (and with frame generation N+2) while the GPU still runs frame N's passes, so nothing frame N reads may be rewritten.
 static const uint32_t DOF_RING = 8, DOF_CB_STRIDE = 512, DOF_CB_PER_FRAME = 2, DOF_DESC_PER_FRAME = 16;
-static const uint32_t MV_HEAP_SLOTS = 40;   // 4-descriptor slots of the motion-vector / utility passes in the shared heap (24-31: FG hint rescale, 32-35: object-vector merge); the DoF ring follows them
+static const uint32_t MV_HEAP_SLOTS = 32;   // 4-descriptor slots of the motion-vector / utility passes in the shared heap (24-31: FG hint rescale); the DoF ring follows them
 static uint32_t g_lateSceneWrites = 0;
 static bool g_frameKStep = false;        // this frame the dynamic-resolution scale stepped or the chain disagreed about it
 static int g_cfgDofStepFreeze = 1;       // 1 = on such frames skip the evaluation and show the previous DLSS output (one-frame hold instead of the game's inconsistent frame)
@@ -429,17 +428,17 @@ static resource_usage g_maskState = resource_usage::unordered_access;
 static uint64_t g_lastDepth = 0;             // depth buffer DLSS used last frame (only draws with it bound are replayed)
 static int g_cfgObjectMV = 1;                // per-object motion vectors (stream-out of the game's vertex shaders), see objmv.h
 static int g_cfgObjMvProps = 0;              // ObjectMVProps: also capture rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes
-// Object vectors are rasterised into their own texture (over a sentinel) and merged into the camera vectors only where
-// they stay within ObjectMVMaxDelta pixels of the camera vector: a wrong pairing of stream-out captures (another
-// instance of the same mesh, the same mesh drawn in another space) produces vectors of tens to hundreds of pixels and
-// showed as a one-frame flash on the character - Snake's suit, a soldier's torso - that frame generation amplified.
-static float g_cfgObjMvMaxDelta = 64.0f;
+// Object vectors are accepted per fragment by the velocity pixel shader only when plausible: at most ObjectMVMaxPixels of
+// motion and at most ObjectMVMaxGradient pixels of motion change per pixel across the surface (velocity_ps.hlsl). A
+// wrong pairing of stream-out captures - another instance of the mesh, the same mesh in another projection - fails one
+// of the two and the pixel keeps its camera vector; it showed as a one-frame flash on characters that frame generation
+// amplified. Relative to the camera vector was wrong: a followed third-person player legitimately differs from the
+// camera vector by the full parallax of a near object.
+static int g_cfgObjMvMaxPixels = 200, g_cfgObjMvMaxGradient = 4;
 // FGHintRescale=1: in a window that is not the render size, rescale the HUD-less / UI hints to the backbuffer size for
 // DLSS-G (two 4K resample passes at the composite draw, plus DLSS-G's own UI work). Off by default: the GPU budget for
 // generated frames is what is left of the game's 16.7 ms, and the hints' benefit was not visible in testing.
 static int g_cfgFgHintRescale = 0;
-static resource g_objMv = { 0 }; static resource_view g_objMvRtv = { 0 }; static resource_usage g_objMvState = resource_usage::render_target;
-static const float OBJMV_SENTINEL = 60000.0f;   // half-float range; the velocity pass never writes anything near it
 static viewport g_sceneVp = {};              // viewport of the last dynamic scene draw (the port can render into a sub-viewport of its targets)
 static bool g_sceneVpValid = false;
 static viewport g_sceneVpFrame = {}; static bool g_sceneVpFrameValid = false;   // most common viewport of this frame's depth draws into the scene target
@@ -640,7 +639,6 @@ static ID3D12PipelineState* g_hudlessPso = nullptr;
 static ID3D12PipelineState* g_resamplePso = nullptr;
 static ID3D12PipelineState* g_stretchPso = nullptr;
 static ID3D12PipelineState* g_uimaskPso = nullptr;
-static ID3D12PipelineState* g_mvMergePso = nullptr;
 static ID3D12DescriptorHeap* g_mvHeap = nullptr;    // shader visible: 4 slots x (SRV depth, UAV mv) + 4 slots x (SRV mv, UAV out)
 static ID3D12Resource* g_mvCb = nullptr; static uint8_t* g_mvCbPtr = nullptr;   // 8 x 256 B upload ring
 static ID3D12Resource* g_dummyUav = nullptr;   // 8x8 R8 texture bound where a shader declares a UAV it never writes
@@ -728,9 +726,6 @@ static bool mv_init()
     pso.CS = { g_uimask_cs, sizeof(g_uimask_cs) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_uimaskPso));
     if (FAILED(hr)) { logmsg("MV: UI mask PSO failed 0x%08lX", (unsigned long)hr); return false; }
-    pso.CS = { g_mvmerge_cs, sizeof(g_mvmerge_cs) };
-    hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_mvMergePso));
-    if (FAILED(hr)) { logmsg("MV: object-vector merge PSO failed 0x%08lX", (unsigned long)hr); return false; }
     // One shader-visible heap for every add-on pass, so the insertion switches heaps once (bgfx -> ours) and once back
     // rather than per pass: 24 slots x [srv0, srv1, uav0, uav1] (mv 0-3, uimask 4-7, vis 8-11, hudless 12-15, resample
     // 16-19, depth stretch 20-23, resume mask 23), then the DoF passes' 8-frame ring (DOF_RING x DOF_DESC_PER_FRAME).
@@ -896,43 +891,6 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
     native->Dispatch((fullW + 7) / 8, (fullH + 7) / 8, 1);
     cmd->barrier(g_depthFull, resource_usage::unordered_access, resource_usage::shader_resource); g_depthFullState = resource_usage::shader_resource;
     cbSlot++;
-}
-
-// Object vectors (g_objMv, NPSR) merged into the camera vectors (g_mv) where plausible; see g_cfgObjMvMaxDelta.
-static uint32_t g_mvMergeFrames = 0;
-static void mvmerge_dispatch(command_list* cmd, uint32_t w, uint32_t h)
-{
-    if (!g_mvReady || !g_mvMergePso || !g_objMv.handle || !g_mv.handle) return;
-    const uint32_t slot = 32 + (g_mvSlot % 4), cbSlot = 16 + (g_mvSlot % 4);
-    float cb[4] = { float(w), float(h), g_cfgObjMvMaxDelta, OBJMV_SENTINEL };
-    memcpy(g_mvCbPtr + cbSlot * 256, cb, sizeof(cb));
-    const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 4 * inc;
-    D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(slot) * 4 * inc;
-    D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_R16G16_FLOAT; srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
-    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_objMv.handle), &srv, cpu);
-    D3D12_CPU_DESCRIPTOR_HANDLE h1 = cpu; h1.ptr += inc;
-    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_objMv.handle), &srv, h1);
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R16G16_FLOAT; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
-    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_mv.handle), nullptr, &uav, h2);
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDummy = {}; uavDummy.Format = DXGI_FORMAT_R8_UNORM; uavDummy.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    D3D12_CPU_DESCRIPTOR_HANDLE h3 = cpu; h3.ptr += 3 * inc;
-    g_d3d->CreateUnorderedAccessView(g_dummyUav, nullptr, &uavDummy, h3);
-    if (g_objMvState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_objMv, g_objMvState, resource_usage::shader_resource_non_pixel); g_objMvState = resource_usage::shader_resource_non_pixel; }
-    cmd->barrier(g_mv, g_mvState, resource_usage::unordered_access); g_mvState = resource_usage::unordered_access;
-    ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
-    ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
-    native->SetDescriptorHeaps(1, heaps);
-    native->SetComputeRootSignature(g_mvRootSig);
-    native->SetPipelineState(g_mvMergePso);
-    native->SetComputeRootConstantBufferView(0, g_mvCb->GetGPUVirtualAddress() + cbSlot * 256);
-    native->SetComputeRootDescriptorTable(1, gpu);
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuUav = gpu; gpuUav.ptr += 2 * inc;
-    native->SetComputeRootDescriptorTable(2, gpuUav);
-    native->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
-    cmd->barrier(g_mv, resource_usage::unordered_access, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
-    g_mvMergeFrames++;
 }
 
 // UI mask: the replayed UI layer marks HUD pixels in the bias-current-colour mask and zeroes their motion vectors.
@@ -1431,8 +1389,6 @@ static void release_dlss_resources(device* dev)
 {
     if (g_dlss) { NVSDK_NGX_D3D12_ReleaseFeature(g_dlss); g_dlss = nullptr; }
     if (g_mvRtv.handle) { dev->destroy_resource_view(g_mvRtv); g_mvRtv = { 0 }; }
-    if (g_objMvRtv.handle) { dev->destroy_resource_view(g_objMvRtv); g_objMvRtv = { 0 }; }
-    if (g_objMv.handle) { dev->destroy_resource(g_objMv); g_objMv = { 0 }; }
     if (g_mv.handle) { dev->destroy_resource(g_mv); g_mv = { 0 }; }
     if (g_depthFull.handle) { dev->destroy_resource(g_depthFull); g_depthFull = { 0 }; }
     if (g_out.handle) { dev->destroy_resource(g_out); g_out = { 0 }; }
@@ -1514,10 +1470,6 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
                               nullptr, resource_usage::unordered_access, &g_out)) { logmsg("create output texture failed"); return false; }
     g_outState = resource_usage::unordered_access;
     dev->set_resource_name(g_mv, "MGS4DLSS motion vectors");
-    if (dev->create_resource(resource_desc(w, h, 1, 1, format::r16g16_float, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource), nullptr, resource_usage::render_target, &g_objMv)) {
-        dev->set_resource_name(g_objMv, "MGS4DLSS object vectors"); g_objMvState = resource_usage::render_target;
-        if (!dev->create_resource_view(g_objMv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &g_objMvRtv)) { logmsg("object-vector RTV failed"); dev->destroy_resource(g_objMv); g_objMv = { 0 }; }
-    } else logmsg("object-vector texture failed (object vectors will be written straight into the camera vectors)");
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r32_float, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource), nullptr, resource_usage::unordered_access, &g_depthFull)) { dev->set_resource_name(g_depthFull, "MGS4DLSS depth (full grid)"); g_depthFullState = resource_usage::unordered_access; }
     else logmsg("create full-grid depth texture failed (dynamic resolution will not be corrected)");
     dev->set_resource_name(g_out, "MGS4DLSS output");
@@ -1717,14 +1669,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         const bool haveDsv = itv != g_dsvForDs.end() && itv->second.handle;
         if (haveDsv || depthStretched) {
             if (!depthStretched) cmd->barrier(depth, resource_usage::shader_resource_non_pixel, resource_usage::depth_stencil_write);
-            // the object vectors go into their own texture over a sentinel and are merged with a plausibility bound
-            // (mvmerge_dispatch); without that texture they are written straight into the camera vectors as before
-            const bool separate = g_cfgObjMvMaxDelta > 0.0f && g_objMv.handle && g_objMvRtv.handle && g_mvMergePso;   // ObjectMVMaxDelta=0: the direct path, no extra texture / pass
-            if (separate) {
-                if (g_objMvState != resource_usage::render_target) { cmd->barrier(g_objMv, g_objMvState, resource_usage::render_target); g_objMvState = resource_usage::render_target; }
-                const float sent[4] = { OBJMV_SENTINEL, OBJMV_SENTINEL, 0, 0 }; cmd->clear_render_target_view(g_objMvRtv, sent);
-            } else { cmd->barrier(g_mv, g_mvState, resource_usage::render_target); g_mvState = resource_usage::render_target; }
-            const resource_view velRtv = separate ? g_objMvRtv : g_mvRtv;
+            cmd->barrier(g_mv, g_mvState, resource_usage::render_target); g_mvState = resource_usage::render_target;
             const float k = (g_scaling && g_internalW) ? float(g_renderW) / float(g_internalW) : 1.0f, ky2 = (g_scaling && g_internalH) ? float(g_renderH) / float(g_internalH) : 1.0f;
             const viewport& sv = scene_vp_now();
             // full grid: the captured clip positions are viewport-independent, so the full viewport puts each object where
@@ -1734,10 +1679,9 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
                                : D3D12_VIEWPORT{ 0, 0, float(cd.texture.width), float(cd.texture.height), 0, 1 };
             float jitCur[2]; jitter_ndc(jitCur);
             const float prevSz[2] = { svp.Width, svp.Height };
-            objmv::velocity(native, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)velRtv.handle }, haveDsv ? D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)itv->second.handle } : D3D12_CPU_DESCRIPTOR_HANDLE{ 0 }, cd.texture.width, cd.texture.height, svp, jitCur, g_prevJitNdc, prevSz,
+            objmv::velocity(native, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)g_mvRtv.handle }, haveDsv ? D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)itv->second.handle } : D3D12_CPU_DESCRIPTOR_HANDLE{ 0 }, cd.texture.width, cd.texture.height, svp, jitCur, g_prevJitNdc, prevSz,
                             depthStretched ? reinterpret_cast<ID3D12Resource*>(g_depthFull.handle) : nullptr);
-            if (separate) mvmerge_dispatch(cmd, cd.texture.width, cd.texture.height);
-            else { cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel; }
+            cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
             if (!depthStretched) cmd->barrier(depth, resource_usage::depth_stencil_write, resource_usage::shader_resource_non_pixel);
             g_objMvFrames++;
         }
@@ -2973,7 +2917,8 @@ static void reload_config()
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 1, g_iniPath);
     g_cfgObjMvProps = GetPrivateProfileIntA("DLSS", "ObjectMVProps", 0, g_iniPath);
     { const int lim = GetPrivateProfileIntA("DLSS", "CutPosLimit", 6000, g_iniPath); g_cfgCutPosLimit = lim > 0 ? float(lim) : 6000.0f; }
-    g_cfgObjMvMaxDelta = float(GetPrivateProfileIntA("DLSS", "ObjectMVMaxDelta", 64, g_iniPath));
+    g_cfgObjMvMaxPixels = GetPrivateProfileIntA("DLSS", "ObjectMVMaxPixels", 200, g_iniPath); g_cfgObjMvMaxGradient = GetPrivateProfileIntA("DLSS", "ObjectMVMaxGradient", 4, g_iniPath);
+    objmv::set_limits(float(g_cfgObjMvMaxPixels), float(g_cfgObjMvMaxGradient));
     g_cfgFgHintRescale = GetPrivateProfileIntA("DLSS", "FGHintRescale", 0, g_iniPath);
     g_cfgDRS = GetPrivateProfileIntA("DLSS", "DRS", 1, g_iniPath);
     g_cfgSceneLog = GetPrivateProfileIntA("DLSS", "SceneLog", 1, g_iniPath);

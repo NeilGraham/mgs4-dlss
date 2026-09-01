@@ -62,6 +62,9 @@ namespace objmv {
     void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& vp,
                   const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth);
     bool has_captures();
+    // Plausibility limits of the velocity pass (velocity_ps.hlsl): a fragment whose vector exceeds maxPixels, or whose
+    // vector changes by more than maxGradient pixels per screen pixel across the surface, is discarded (0 = no limit).
+    void set_limits(float maxPixels, float maxGradient);
 
     // GPU timing of the scene: call at the first scene draw of the frame and after the DLSS evaluation (the latter also
     // resolves this frame's queries). Cheap; works with object motion off (frame time only).

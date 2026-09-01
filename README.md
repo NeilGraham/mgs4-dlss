@@ -465,7 +465,8 @@ Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 ObjectMVProps=0          ; live: 1 = object vectors also for rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes; one extra stream-out draw per such prop
 CutPosLimit=6000         ; live: camera-cut heuristic - a position jump above this many game units (millimetres) in one frame resets the DLSS history; 1500 fired on every 2 m aim / cover snap
-ObjectMVMaxDelta=64      ; live: an object vector is used only where it differs from the camera vector by at most this many pixels (a wrong capture pairing gives tens to hundreds); 0 = the direct path (no extra pass)
+ObjectMVMaxPixels=200    ; live: an object vector longer than this (pixels per frame) is dropped for the camera vector - a wrong capture pairing gives hundreds; 0 = no limit
+ObjectMVMaxGradient=4    ; live: an object vector field changing by more than this many pixels per screen pixel across one surface is dropped (the same mesh paired with a capture in another projection); 0 = no limit
 FGHintRescale=0          ; live: 1 = in a window that is not the render size, rescale the HUD-less / UI hints to the backbuffer for DLSS-G (two 4K passes + DLSS-G's UI work; benefit not shown in testing)
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
