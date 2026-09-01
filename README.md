@@ -166,6 +166,10 @@ colour families the rest of the window uses: green **Gameplay** for what you pla
 watch, amber **Briefing** for the Nomad briefings, blue **Stage** for a plain stage boot, sky **Start** for the two
 entries that start the game. The badge column is a fixed width, so the names line up down the list.
 
+**Double-click a scene to start it** - the same thing the Launch button does with the options as they are
+ticked. Act headers and the star are not double-clickable: their clicks are handled before the list sees
+them, so neither can pair into one.
+
 **Favourites.** Every scene row has a star on the right: click the outline to add it, click the filled one to take
 it out. It is saved the moment it is clicked - not when the window closes - so a scene starred and a window shut
 straight after keeps it. The list of ids lives with the rest of the window's memory in

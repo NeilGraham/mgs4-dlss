@@ -162,6 +162,23 @@ namespace Mgs4Launcher
                 e.Handled = true;
                 ApplyFilter();
             };
+            // Double-clicking a scene starts it, the way double-clicking a file opens it. Act headers and the
+            // star never get here: the handler above marks their clicks handled, so the ListBox never sees a
+            // second one to pair into a double.
+            _sceneList.MouseDoubleClick += (s, e) =>
+            {
+                // On a row, not merely inside the list: the empty space under the last scene would otherwise
+                // launch whatever was still selected.
+                DependencyObject src = e.OriginalSource as DependencyObject;
+                while (src != null && !(src is ListBoxItem))
+                    src = System.Windows.Media.VisualTreeHelper.GetParent(src);
+                var item = src as ListBoxItem;
+                if (item == null) return;
+                var row = item.DataContext as SceneRow;
+                if (row == null || row.IsHeader) return;
+                e.Handled = true;
+                Launch();
+            };
             _sceneList.SelectionChanged += (s, e) =>
             {
                 var row = _sceneList.SelectedItem as SceneRow;

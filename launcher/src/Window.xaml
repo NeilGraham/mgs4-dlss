@@ -325,7 +325,10 @@
       </Grid>
     </Border>
 
-    <Grid x:Name="PlayView" Grid.Row="1" Margin="22,16,22,0">
+    <!-- 16 at the bottom as well as the top: this view is one stretched panel rather than a stack of cards, so
+         nothing else holds it off the bar underneath. The other two tabs get theirs from the last card's
+         own margin. -->
+    <Grid x:Name="PlayView" Grid.Row="1" Margin="22,16,22,16">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="370"/>
