@@ -666,17 +666,17 @@ The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12
 ## Layout
 
 ```
-mgs4-dlss-launcher            the app, and the only entry point: Play / Settings / Install
-config.example.ini            machine-local paths; copy to config.ini (git-ignored)
-dlss-addon/                   src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
-tools/paths.py|ps1|sh         where the game / the output folder live on this machine
+mgs4-dlss-launcher           the app, and the only entry point: Play / Settings / Setup
 launcher/src, build.ps1      the app itself: Program, Paths, Checks, Install, Catalogue, Runner, Ui/
-tools/install_manifest.json   the file list, verified versions and download links the checks render
-tools/scenes.csv              every launchable scene; labels.json the names, scene_info.json the corrections
-third_party/minhook/          MinHook (BSD-2), vendored
-third_party/reshade/          ReShade add-on API headers (v6.8.0, BSD-3)
-third_party/DLSS/             NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
-docs/                         reverse-engineering notes and the DLSS plan
+config.example.ini           machine-local paths; copy to config.ini (git-ignored)
+dlss-addon/                  src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
+tools/paths.py|ps1|sh        where the game / the output folder live on this machine
+tools/install_manifest.json  the file list, verified versions and download links the checks render
+tools/scenes.csv             every launchable scene; labels.json the names, scene_info.json the corrections
+third_party/minhook/         MinHook (BSD-2), vendored
+third_party/reshade/         ReShade add-on API headers (v6.8.0, BSD-3)
+third_party/DLSS/            NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
+docs/                        reverse-engineering notes and the DLSS plan
 ```
 
 ## Paths (`config.ini`)
