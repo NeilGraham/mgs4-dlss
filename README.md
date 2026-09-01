@@ -331,10 +331,16 @@ rediscovered: `XamlReader` returns a fully formed `Window` and it has to be used
 into a `Window` subclass takes the process down with an access violation before anything is drawn; and `Scene` and
 `SceneRow` are `public` because WPF's binding engine reflects over public members of public types only.
 
+The C# build also carries three things the PowerShell one does not yet: a wheel notch of **48 px** rather than 72,
+a precision touchpad **eased** (22 ms) rather than applied as it arrives, so a trackpad scrubs rather than steps,
+and a **title bar that follows the desktop's light/dark setting** - the bar is Windows' to draw, so it ignores the
+dark XAML and comes up white until `DwmSetWindowAttribute` asks otherwise.
+
 **Verified so far**: the three tabs render and switch, the install check and its buttons, the settings form, the
 scene list with its grouping and filters, `--install-addon`, `--shortcut` (which now targets the exe directly
-rather than `powershell -File`), a scene run in attach mode, and scrolling - 3 notches settle at exactly 216 DIP,
-the same as the PowerShell app. **Not yet exercised**: drag-and-drop onto the C# Setup tab, and a real scene boot
+rather than `powershell -File`), a scene run in attach mode, the game-state poll (pill and Close the game follow
+the game starting and stopping), and scrolling measured from the shipped code: a notch settles at exactly 48.0 px,
+three at 144.0, ten touchpad deltas at 48.0 while tracking continuously on the way. **Not yet exercised**: drag-and-drop onto the C# Setup tab, and a real scene boot
 with the game actually starting. The PowerShell app is untouched and is still the one that ships.
 
 ### The setup this was verified on
