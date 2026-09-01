@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,6 +28,7 @@ namespace Mgs4Launcher
         // remembers, and written the moment a star is clicked rather than only when the window closes.
         readonly HashSet<string> _favourites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, bool> _collapsed = new Dictionary<string, bool>();
+        bool _hadSavedActs;     // false on a first run, when nothing has been left in any particular state yet
         System.Diagnostics.Process _runProc;
 
         // Named controls from the XAML, by the names the PowerShell app used.
@@ -267,6 +269,17 @@ namespace Mgs4Launcher
                     if (chip != null && chip.Tag != null) chip.IsChecked = want.Contains(chip.Tag.ToString());
                 }
             }
+
+            // Which acts were left closed. Stored as the closed ones rather than the open ones, so an act added to
+            // the catalogue later starts closed like every other act does on a first run.
+            object acts;
+            if (p.TryGetValue("Collapsed", out acts) && acts is object[])
+            {
+                _hadSavedActs = true;
+                var shut = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (object o in (object[])acts) if (o != null) shut.Add(o.ToString());
+                foreach (string key in Catalogue.ActOrder) _collapsed[key] = shut.Contains(key);
+            }
         }
 
         void SavePrefs()
@@ -282,6 +295,7 @@ namespace Mgs4Launcher
                 { "Stage", _pickedId },
                 { "Filters", filters },
                 { "Favourites", new List<string>(_favourites) },
+                { "Collapsed", _collapsed.Where(kv => kv.Value).Select(kv => kv.Key).ToList() },
                 { "Advance", _optAdvance.IsChecked == true },
                 { "MashX", _optMashX.IsChecked == true },
                 { "EndOnGameplay", _optEnd.IsChecked == true },

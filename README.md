@@ -175,6 +175,14 @@ it out. It is saved the moment it is clicked - not when the window closes - so a
 straight after keeps it. The list of ids lives with the rest of the window's memory in
 `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`.
 
+**The tab comes back as it was left.** The chips still ticked, the acts still open or closed, the scene still
+picked, the stars still starred - all of it in
+`%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`, written when a chip, an act or a star changes as well as when
+the window closes, so a launcher that is killed rather than closed does not lose it. The one thing not kept is the
+search box: a query is a thing you are doing, not a thing you have set. A first run, with nothing saved yet, opens
+the act the picked scene is in so it can be seen - after that the acts are yours, and a filter is never cleared to
+bring a row into view.
+
 **Favourites** is also the first filter chip, and works like the others: nothing ticked shows everything, ticking
 chips shows the union of what they cover. **Start the game** is no longer a chip - the two entries it covered are
 an act of their own at the top of the list, so filtering for them only ever hid everything else.

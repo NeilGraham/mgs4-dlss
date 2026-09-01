@@ -132,8 +132,8 @@ namespace Mgs4Launcher
             foreach (string name in CatNames)
             {
                 var chip = new ToggleButton { Content = name, Tag = name, Style = Widgets.ChipStyle };
-                chip.Checked += (s, e) => ApplyFilter();
-                chip.Unchecked += (s, e) => ApplyFilter();
+                chip.Checked += (s, e) => { ApplyFilter(); SavePrefs(); };
+                chip.Unchecked += (s, e) => { ApplyFilter(); SavePrefs(); };
                 _filters.Children.Add(chip);
             }
             _search.TextChanged += (s, e) => ApplyFilter();
@@ -160,6 +160,7 @@ namespace Mgs4Launcher
                 if (!row.IsHeader) return;
                 _collapsed[row.ActKey] = !(_collapsed.ContainsKey(row.ActKey) && _collapsed[row.ActKey]);
                 e.Handled = true;
+                SavePrefs();
                 ApplyFilter();
             };
             // Double-clicking a scene starts it, the way double-clicking a file opens it. Act headers and the
@@ -215,13 +216,17 @@ namespace Mgs4Launcher
             Scene entry = Catalogue.Find(_pickedId);
             if (entry != null)
             {
-                _collapsed[entry.ActKey] = false;
                 _pickedId = entry.Id;
-                foreach (var chip in _filters.Children.OfType<ToggleButton>()) chip.IsChecked = false;   // so the scene is in view
+                // On a first run the scene's act is opened so it can be seen. After that the tab comes back as it
+                // was left - acts however they were left, chips still ticked - because a filter someone chose is
+                // theirs to keep, and clearing it to show one row is not a trade the window gets to make.
+                if (!_hadSavedActs) _collapsed[entry.ActKey] = false;
             }
             ApplyFilter();
             if (entry != null)
             {
+                // The panel shows it either way; the list can only select it when the filters and the act it is in
+                // leave it on screen.
                 SceneRow hit = (_sceneList.ItemsSource as IEnumerable<SceneRow>)
                     .FirstOrDefault(r => !r.IsHeader && r.Id == _pickedId);
                 if (hit != null) { _sceneList.SelectedItem = hit; _sceneList.ScrollIntoView(hit); }
