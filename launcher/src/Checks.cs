@@ -52,7 +52,24 @@ namespace Mgs4Launcher
 
     static class Checks
     {
+        // The file list is embedded in the exe as well as living in tools\install_manifest.json, and the file wins
+        // when it is there, so editing it in a checkout works the way it always has. A copy of the exe on its own -
+        // dropped on a desktop, or put beside the game - has no tools folder next to it, and reading that path
+        // blind is what took the whole window down the moment Setup was opened.
         public static string ManifestPath { get { return Path.Combine(Paths.Root, "tools\\install_manifest.json"); } }
+        const string ManifestResource = "install_manifest.json";
+
+        public static string ManifestSource = "";    // what was actually read, for the footer and the report
+        public static string ManifestError = "";     // empty unless there is no file list at all
+
+        static string ManifestText()
+        {
+            string text = Paths.DataText(ManifestResource, out ManifestSource);
+            if (text == null)
+                ManifestError = "no file list to check against: neither " + ManifestPath +
+                                " nor a copy inside the launcher could be read.";
+            return text;
+        }
 
         // ------------------------------------------------------------------------------------------- helpers
 
@@ -206,8 +223,14 @@ namespace Mgs4Launcher
         public static List<Section> Manifest()
         {
             if (_manifest != null) return _manifest;
+            // An empty list is cached even when nothing could be read, so a missing file list is one message on the
+            // Setup tab rather than the same exception thrown again by every caller.
+            _manifest = new List<Section>();
+            string json = ManifestText();
+            if (json == null) return _manifest;
+
             var ser = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
-            var root = (Dictionary<string, object>)ser.DeserializeObject(File.ReadAllText(ManifestPath));
+            var root = (Dictionary<string, object>)ser.DeserializeObject(json);
             var list = new List<Section>();
             foreach (object secObj in (object[])root["sections"])
             {
@@ -611,6 +634,8 @@ namespace Mgs4Launcher
 
         public static Verdict GetVerdict(List<Section> sections)
         {
+            if (!string.IsNullOrEmpty(ManifestError))
+                return new Verdict { Text = "Cannot check", Kind = "bad", Note = ManifestError };
             int bad = sections.SelectMany(s => s.Rows).Count(r => r.Status == "bad");
             int warn = sections.SelectMany(s => s.Rows).Count(r => r.Status == "warn");
             if (bad > 0) return new Verdict { Text = "Not ready", Kind = "bad", Note = bad + " required item(s) missing" };
@@ -626,6 +651,7 @@ namespace Mgs4Launcher
             sb.AppendLine("game    : " + game);
             sb.AppendLine("checked : " + DateTime.Now.ToString("yyyy-MM-dd HH:mm"));
             sb.AppendLine("verdict : " + v.Text + " - " + v.Note);
+            if (!string.IsNullOrEmpty(ManifestSource)) sb.AppendLine("list    : " + ManifestSource);
             foreach (Section sec in sections)
             {
                 sb.AppendLine();

@@ -8,6 +8,8 @@ using System.Linq;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
 
@@ -85,6 +87,7 @@ namespace Mgs4Launcher
             _sceneList.ItemTemplate = (DataTemplate)XamlReader.Parse(Resource("SceneRow.xaml"));
 
             WireNav();
+            WireKeys();
             LoadFavourites();       // before the rows are built: each one is created knowing whether it is starred
             WirePlay();
             WireSettings();
@@ -172,6 +175,41 @@ namespace Mgs4Launcher
             _navPlay.Checked += (s, e) => ShowTab("play");
             _navSettings.Checked += (s, e) => ShowTab("settings");
             _navInstall.Checked += (s, e) => ShowTab("install");
+        }
+
+        // The keys the window says it takes, in one place because they cross the tabs: F5 is printed on the
+        // Setup button, Ctrl+F reaches the search from anywhere, Escape empties it, and Enter launches what is
+        // picked - except where a button has the focus, which Enter belongs to.
+        void WireKeys()
+        {
+            Win.PreviewKeyDown += (s, e) =>
+            {
+                bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+                if (e.Key == Key.F5)
+                {
+                    if (_installView.Visibility == Visibility.Visible) ShowSetup();
+                    else if (_settingsView.Visibility == Visibility.Visible) BuildSettings();
+                    e.Handled = true;
+                }
+                else if (ctrl && e.Key == Key.F)
+                {
+                    _navPlay.IsChecked = true;
+                    _search.Focus();
+                    _search.SelectAll();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Escape && _search.Text.Length > 0 && _playView.Visibility == Visibility.Visible)
+                {
+                    _search.Clear();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Enter && _playView.Visibility == Visibility.Visible &&
+                         !(Keyboard.FocusedElement is ButtonBase))
+                {
+                    Launch();
+                    e.Handled = true;
+                }
+            };
         }
 
         void ShowTab(string tab)

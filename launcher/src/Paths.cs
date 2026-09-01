@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
@@ -21,6 +22,35 @@ namespace Mgs4Launcher
         }
 
         public static string ConfigPath { get { return Path.Combine(Root, "config.ini"); } }
+
+        // The app's own data - the scene table, the labels, the install file list - lives in tools\ in a checkout
+        // and is built into the exe as well, so a copy of the exe carried off on its own still knows what it knows.
+        // The file wins when it is there: editing tools\scenes.csv in a checkout works the way it always has.
+        // Null means neither was found, which every caller has to survive rather than throw over.
+        public static string DataText(string name) { string from; return DataText(name, out from); }
+
+        public static string DataText(string name, out string source)
+        {
+            string path = Path.Combine(Root, "tools\\" + name);
+            try
+            {
+                if (Exists(path)) { source = "tools\\" + name; return File.ReadAllText(path); }
+            }
+            catch { }
+            try
+            {
+                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+                    if (s != null)
+                        using (var r = new StreamReader(s))
+                        {
+                            source = "the copy built into the launcher";
+                            return r.ReadToEnd();
+                        }
+            }
+            catch { }
+            source = "";
+            return null;
+        }
 
         // Exists, without throwing on a drive letter that is not mounted.
         public static bool Exists(string path)

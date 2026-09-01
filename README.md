@@ -101,6 +101,7 @@ the scroll easing ran a script block per frame there and native code here. `laun
 | --- | --- |
 | `Paths.cs` | the game folder and the Steam libraries, resolved in the order `tools\paths.*` resolve them |
 | `Checks.cs` | the install check and its text report, still reading `tools\install_manifest.json` |
+| `Paths.DataText` | those data files, from `tools\` or from the copies built into the exe |
 | `Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
 | `Catalogue.cs` | the scene list, in story order |
 | `Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
@@ -149,7 +150,13 @@ which is the one case where a tool that needs the game folder still has to be us
 The list is `tools\scenes.csv` (the stage table) with names from `tools\labels.json` and the corrections in
 `tools\scene_info.json`, plus the two ways of starting the game itself. Pick one, tick what should happen while it
 runs, press Launch. The panel shows the command line that does the same thing, so anything set up in the window can
-be pasted into a terminal or put in a shortcut.
+be pasted into a terminal or put in a shortcut — **Copy** puts it on the clipboard, and the box is selectable text.
+
+Those three files, and `tools\install_manifest.json` behind Setup, are **built into the exe as well as read from
+`tools\`**. The folder wins when it is there, so editing them in a checkout works as it always has; a copy of the
+exe carried off on its own still knows all 414 entries instead of coming up with the two it can name from memory.
+
+**Enter** launches what is picked, **Ctrl+F** reaches the search box from any tab, and **Escape** empties it.
 
 Scenes are grouped by act and every group starts collapsed, so the window opens as a short list of acts rather than
 four hundred rows; click a header to open one. The order is story order — Acts 1 to 5, then the epilogue — which the
@@ -289,7 +296,8 @@ changed - it compares each control against what its file said when the form was 
 them at once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a group whose file
 does not exist yet shows *not there* until whatever writes it has run.
 
-`mgs4-dlss-launcher --settings` prints every group the way the tab shows them, naming each group's files. `--set
+`mgs4-dlss-launcher --settings` opens the window on this tab, the way `--setup` opens its own;
+`--show-settings` prints every group the way the tab shows them, naming each group's files. `--set
 Key=Value` writes without opening a window and **routes each key to the file, and the section, that holds it**, so
 `--set api=dx12 --set MGS4_RES=3840x2160 --set NRIntensity=3 --set Sharpness=42` writes one value to each of four
 files; a key no group knows goes to the add-on's ini, which is where every key used to go.
@@ -379,7 +387,8 @@ What it reports, beyond whether a file exists:
   and says nothing about whether NR works.
 
 The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
-checks in `launcher\src\Checks.cs` only render it.
+checks in `launcher\src\Checks.cs` only render it. A copy goes into the exe at build time and is used when that
+folder is not there; with neither, Setup says so in a card and the rest of the window carries on.
 
 The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 

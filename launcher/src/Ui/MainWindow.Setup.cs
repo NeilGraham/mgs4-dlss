@@ -95,6 +95,18 @@ namespace Mgs4Launcher
             _sections = Checks.Run(_gameDir);
             _installHost.Children.Add(StatusCard(Checks.GetVerdict(_sections)));
 
+            if (!string.IsNullOrEmpty(Checks.ManifestError))
+            {
+                StackPanel lost;
+                _installHost.Children.Add(Widgets.Card("No file list",
+                    Checks.ManifestError + " The list of what an install needs is normally read from the tools folder " +
+                    "beside the launcher, with a copy built into the launcher itself as a fallback; without either " +
+                    "there is nothing to check the game folder against. Everything else in the window still works.",
+                    "bad", "cannot check", out lost));
+                Say("no file list - nothing to check against");
+                return;
+            }
+
             foreach (Section sec in _sections)
             {
                 int bad = sec.Rows.Count(r => r.Status == "bad");
@@ -117,7 +129,7 @@ namespace Mgs4Launcher
                 foreach (Row row in sec.Rows) { body.Children.Add(Widgets.CheckRow(row, first)); first = false; }
                 _installHost.Children.Add(card);
             }
-            Say("checked at " + DateTime.Now.ToString("HH:mm:ss") + "  -  file list: tools\\install_manifest.json");
+            Say("checked at " + DateTime.Now.ToString("HH:mm:ss") + "  -  file list: " + Checks.ManifestSource);
         }
 
         // The first card, and the only one that is not a step: how the check came out, the folder it ran against,

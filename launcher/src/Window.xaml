@@ -500,7 +500,7 @@
                   CornerRadius="10,10,0,0" Padding="14,12">
             <StackPanel>
               <Grid>
-                <TextBox x:Name="Search"/>
+                <TextBox x:Name="Search" ToolTip="Ctrl+F from anywhere; Escape clears it"/>
                 <TextBlock x:Name="SearchHint" Text="Search by scene name, stage id or act" FontSize="12"
                            Foreground="#5C6478" IsHitTestVisible="False" VerticalAlignment="Center" Margin="10,0,0,0"/>
               </Grid>
@@ -576,7 +576,8 @@
           <Border Grid.Row="2" Background="#1B1F29" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0"
                   CornerRadius="0,0,10,10" Padding="18,14">
             <StackPanel>
-              <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="16,11"/>
+              <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="16,11"
+                      ToolTip="Enter"/>
               <Button x:Name="StopBtn" Content="Close the game" Style="{StaticResource Flat}" Margin="0,8,0,0"/>
               <Button x:Name="ShortcutBtn" Content="Create shortcut" Style="{StaticResource Flat}" Margin="0,8,0,0"/>
             </StackPanel>

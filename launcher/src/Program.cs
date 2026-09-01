@@ -86,11 +86,10 @@ namespace Mgs4Launcher
             }
             opt.GameDir = gameDir;
 
-            string startTab = opt.Action == "install" ? "install" : opt.Action == "settings" ? "settings" : "play";
+            string startTab = opt.Action == "install" ? "install" : opt.Action == "settings-ui" ? "settings" : "play";
             if (opt.Action == "" && Prefs.FirstRun()) startTab = "install";
-            bool wantsWindow = opt.Action == "ui" || opt.Action == "install" ||
+            bool wantsWindow = opt.Action == "ui" || opt.Action == "install" || opt.Action == "settings-ui" ||
                                (opt.Action == "" && string.IsNullOrEmpty(opt.Stage));
-            if (opt.Action == "settings" && gameDir == null) wantsWindow = false;
             if (gameDir == null && wantsWindow) startTab = "install";
 
             if (gameDir == null && !wantsWindow && opt.Action != "list")

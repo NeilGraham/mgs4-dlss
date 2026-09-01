@@ -22,9 +22,10 @@ namespace Mgs4Launcher
 
     static class Catalogue
     {
-        static string ScenesCsv { get { return Path.Combine(Paths.Root, "tools\\scenes.csv"); } }
-        static string LabelsJson { get { return Path.Combine(Paths.Root, "tools\\labels.json"); } }
-        static string SceneInfoJson { get { return Path.Combine(Paths.Root, "tools\\scene_info.json"); } }
+        // Read through Paths.DataText: the tools folder when it is there, the copy inside the exe when it is not.
+        // Without the fallback a launcher moved out of its checkout came up knowing two entries instead of 414,
+        // and said nothing about why.
+        const string ScenesCsv = "scenes.csv", LabelsJson = "labels.json", SceneInfoJson = "scene_info.json";
 
         static List<Scene> _all;
         public static List<string> ActOrder = new List<string>();
@@ -69,18 +70,20 @@ namespace Mgs4Launcher
             var ser = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
 
             var labels = new Dictionary<string, string>();
-            if (Paths.Exists(LabelsJson))
+            string labelsText = Paths.DataText(LabelsJson);
+            if (labelsText != null)
             {
-                var raw = ser.DeserializeObject(File.ReadAllText(LabelsJson)) as Dictionary<string, object>;
+                var raw = ser.DeserializeObject(labelsText) as Dictionary<string, object>;
                 if (raw != null)
                     foreach (var kv in raw)
                         if (kv.Value != null) labels[kv.Key] = kv.Value.ToString();
             }
 
             var info = new Dictionary<string, Dictionary<string, object>>();
-            if (Paths.Exists(SceneInfoJson))
+            string infoText = Paths.DataText(SceneInfoJson);
+            if (infoText != null)
             {
-                var raw = ser.DeserializeObject(File.ReadAllText(SceneInfoJson)) as Dictionary<string, object>;
+                var raw = ser.DeserializeObject(infoText) as Dictionary<string, object>;
                 if (raw != null)
                 {
                     object acts;
@@ -123,9 +126,10 @@ namespace Mgs4Launcher
             const string brokenRe = "_\\d$";
             var aliasOf = new Dictionary<string, string>();
 
-            if (Paths.Exists(ScenesCsv))
+            string csv = Paths.DataText(ScenesCsv);
+            if (csv != null)
             {
-                string[] lines = File.ReadAllLines(ScenesCsv);
+                string[] lines = csv.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
                 var head = lines[0].Split(',').ToList();
                 int iEntry = head.IndexOf("stage_entry"), iKind = head.IndexOf("kind");
                 for (int i = 1; i < lines.Length; i++)

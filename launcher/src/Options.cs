@@ -48,7 +48,8 @@ namespace Mgs4Launcher
                 if (Is(a, "^(--help|-h|/\\?)$")) { o.Action = "help"; took = false; }
                 else if (Is(a, "^--(ui|window)$")) { o.Action = "ui"; took = false; }
                 else if (Is(a, "^--list$")) { o.Action = "list"; took = false; }
-                else if (Is(a, "^--(show-settings|settings)$")) { o.Action = "settings"; took = false; }
+                else if (Is(a, "^--settings$")) { o.Action = "settings-ui"; took = false; }
+                else if (Is(a, "^--(show-settings|print-settings)$")) { o.Action = "settings"; took = false; }
                 else if (Is(a, "^--(setup|install|check|check-install)$")) { o.Action = "install"; took = false; }
                 else if (Is(a, "^--install-addon$")) { o.Action = "install-addon"; took = false; }
                 else if (Is(a, "^--report$")) { o.Action = "report"; took = false; }
@@ -145,7 +146,8 @@ namespace Mgs4Launcher
   mgs4-dlss-launcher --report                the install check as text, for pasting into an issue
   mgs4-dlss-launcher --install-addon         copy the add-on that ships here next to mgs4.exe
   mgs4-dlss-launcher <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
-  mgs4-dlss-launcher --settings              print mgs4_dlss.ini the way the window shows it
+  mgs4-dlss-launcher --settings              the window, opened on Settings: what the add-on is set to
+  mgs4-dlss-launcher --show-settings         print mgs4_dlss.ini the way that tab shows it
   mgs4-dlss-launcher --set Key=Value [...]   write those keys into mgs4_dlss.ini
   mgs4-dlss-launcher --stop                  close a running game
 

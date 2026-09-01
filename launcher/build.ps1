@@ -55,10 +55,15 @@ $refs += @("PresentationFramework.dll", "PresentationCore.dll", "WindowsBase.dll
 $sources = @(Get-ChildItem -Path $src -Recurse -Filter *.cs | ForEach-Object { $_.FullName })
 # No explicit resource name: csc names a resource after the file, which is exactly "Window.xaml". Passing the
 # name after a comma made PowerShell hand csc a third comma-separated field it read as a visibility keyword.
+# The tools files go in too. Paths.DataText reads tools\<name> when it is there and this copy when it is not, so
+# an exe carried off on its own still knows every scene and can still check an install, instead of coming up with
+# two entries and falling over the moment Setup is opened.
 $resources = @(
     ("/resource:" + (Join-Path $src "Window.xaml")),
     ("/resource:" + (Join-Path $src "SceneRow.xaml"))
 )
+$resources += @("install_manifest.json", "scenes.csv", "labels.json", "scene_info.json") |
+              ForEach-Object { "/resource:" + (Join-Path $repo "tools\$_") }
 
 # One binary, windowed. It behaves like a command anyway: cmd waits for it and passes its handles through, so
 # `mgs4-dlss-launcher --report > out.txt` catches what it writes. That only works because Program.KeepCallersOutput
