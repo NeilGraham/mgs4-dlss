@@ -62,6 +62,7 @@ namespace Mgs4Launcher
             { "Game",      new StatusStyle { Bg = "#10222B", Br = "#2A5A73", Fg = "#7DD3FC" } },
             { "MGS4 DLSS", new StatusStyle { Bg = "#161B2A", Br = "#33436E", Fg = "#9FB6FF" } },
             { "Debug",     new StatusStyle { Bg = "#2A2312", Br = "#7A6220", Fg = "#F2C14E" } },
+            { "RenoDX",    new StatusStyle { Bg = "#211A33", Br = "#4B3E7A", Fg = "#B79CFF" } },
         };
 
         public static Border Badge(string text)

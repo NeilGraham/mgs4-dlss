@@ -3,6 +3,7 @@
 // API, whose cache will quietly undo an outside edit.
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -41,38 +42,40 @@ namespace Mgs4Launcher
 
             string addonIni = IniForm.IniPath(_gameDir);
             string gameIni = IniForm.PathFor(IniSource.Game, _gameDir);
-            if (!Paths.Exists(addonIni))
+
+            // Grouped first, so a card can say every file its rows write - Display writes two of them.
+            foreach (var group in IniForm.Spec.GroupBy(k => k.Group))
             {
+                var keys = group.ToList();
+                var files = new List<string>();
+                bool missing = false;
+                foreach (IniKey spec in keys)
+                {
+                    string label = IniForm.SourceLabel(spec.Source);
+                    if (!files.Contains(label)) files.Add(label);
+                    string file = IniForm.PathFor(spec.Source, _gameDir);
+                    if (spec.Source != IniSource.Launcher && (string.IsNullOrEmpty(file) || !Paths.Exists(file)))
+                        missing = true;
+                }
+                string blurb = string.Join(", ", files);
+                if (missing)
+                    blurb += group.Key == "Neural Rendering"
+                        ? " - not there; the DLSS 5 add-on writes these once it has run"
+                        : " - not there yet; run the game once and it writes them";
+
                 StackPanel body;
-                _settingsHost.Children.Add(Widgets.Card("No mgs4_dlss.ini",
-                    "There is no mgs4_dlss.ini next to mgs4.exe. The Setup tab installs the add-on and its ini together.",
-                    "warn", "not there", out body));
+                _settingsHost.Children.Add(Widgets.Card(group.Key, blurb, missing ? "warn" : "info",
+                                                        missing ? "not there" : null,
+                                                        IniForm.BadgesFor(keys[0]), out body));
+                if (missing) continue;
+                foreach (IniKey spec in keys)
+                    body.Children.Add(SettingRow(spec, IniForm.Read(spec, addonIni, gameIni)));
             }
 
-            string group = null;
-            StackPanel current = null;
-            foreach (IniKey spec in IniForm.Spec)
-            {
-                // config.ini is written when it is first needed, so a launcher key is never "not there".
-                bool missing = spec.Source == IniSource.Addon ? !Paths.Exists(addonIni)
-                             : spec.Source == IniSource.Game ? string.IsNullOrEmpty(gameIni)
-                             : false;
-                if (spec.Source == IniSource.Addon && missing) continue;   // the card above already says so
-                if (spec.Group != group)
-                {
-                    group = spec.Group;
-                    StackPanel body;
-                    // Each card says which file it writes, because they are two files with two owners.
-                    string blurb = IniForm.SourceLabel(spec.Source);
-                    if (missing) blurb += " - not there yet; run the game once and it writes them";
-                    _settingsHost.Children.Add(Widgets.Card(group, blurb, missing ? "warn" : "info",
-                                                            missing ? "not there" : null,
-                                                            IniForm.BadgesFor(spec), out body));
-                    current = body;
-                }
-                if (missing) continue;
-                current.Children.Add(SettingRow(spec, IniForm.Read(spec, addonIni, gameIni)));
-            }
+            // Building the form gives one of its controls focus, and WPF brings a focused control into view - so
+            // the tab opened part-way down its own first card. Start at the top, where the reading starts.
+            var scroller = _settingsHost.Parent as ScrollViewer;
+            if (scroller != null) scroller.ScrollToTop();
         }
 
         Border SettingRow(IniKey spec, string value)
@@ -119,6 +122,27 @@ namespace Mgs4Launcher
                     editor = combo;
                     break;
                 }
+                case "res":
+                {
+                    string[] parts = (value ?? "").Split('x', 'X');
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                    var w = new TextBox { Text = parts.Length == 2 ? parts[0].Trim() : "", MinWidth = 62 };
+                    var h = new TextBox { Text = parts.Length == 2 ? parts[1].Trim() : "", MinWidth = 62 };
+                    TextBlock by = Widgets.Text("x", 12, "#858D9E");
+                    by.Margin = new Thickness(7, 0, 7, 0);
+                    by.VerticalAlignment = VerticalAlignment.Center;
+                    row.Children.Add(w);
+                    row.Children.Add(by);
+                    row.Children.Add(h);
+                    // Both boxes or neither: half a resolution is not one, and clearing them is how it is unset.
+                    Remember(spec, () =>
+                    {
+                        string across = w.Text.Trim(), down = h.Text.Trim();
+                        return across.Length > 0 && down.Length > 0 ? across + "x" + down : "";
+                    });
+                    editor = row;
+                    break;
+                }
                 case "readonly":
                 {
                     TextBlock t = Widgets.Text(string.IsNullOrEmpty(value) ? "(not written yet)" : value, 12, "#858D9E", false, true);
@@ -151,21 +175,29 @@ namespace Mgs4Launcher
         {
             if (Checks.GameRunning()) { Say("close the game first - it owns both of these while it runs"); return; }
             var written = new List<string>();
-            foreach (IniSource source in new[] { IniSource.Addon, IniSource.Game })
+            foreach (IniSource source in new[] { IniSource.Addon, IniSource.Game, IniSource.Launcher, IniSource.Renodx })
             {
                 var values = new List<KeyValuePair<string, string>>();
+                string section = null;
                 foreach (var row in _settingReaders)
                 {
                     if (row.Key.Source != source) continue;
                     string v = row.Value();
-                    if (v != null) values.Add(new KeyValuePair<string, string>(row.Key.Key, v));
+                    if (v == null) continue;
+                    section = row.Key.Section;
+                    values.Add(new KeyValuePair<string, string>(row.Key.Key, v));
                 }
                 if (values.Count == 0) continue;
                 string file = IniForm.PathFor(source, _gameDir);
-                if (string.IsNullOrEmpty(file) || !Paths.Exists(file)) continue;
+                if (string.IsNullOrEmpty(file)) continue;
+                if (source == IniSource.Launcher && !Paths.Exists(file))
+                    System.IO.File.WriteAllText(file,
+                        "; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key." +
+                        Environment.NewLine);
+                if (!Paths.Exists(file)) continue;
                 try
                 {
-                    Checks.SetIni(file, values);
+                    Checks.SetIni(file, values, section);
                     written.Add(values.Count + " to " + IniForm.SourceLabel(source));
                 }
                 catch (Exception e) { Say("could not write " + IniForm.SourceLabel(source) + ": " + e.Message); return; }

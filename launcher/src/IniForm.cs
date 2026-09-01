@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Mgs4Launcher
@@ -13,7 +14,7 @@ namespace Mgs4Launcher
     // when it exits - so neither is safe to edit under a running game, and both are safe when it is closed.
     // Addon: MGS4\mgs4_dlss.ini. Game: the game's own mgs4.savedsettings. Launcher: config.ini in this checkout,
     // for the handful of things that belong to the app rather than to either of them.
-    enum IniSource { Addon, Game, Launcher }
+    enum IniSource { Addon, Game, Launcher, Renodx }
 
     class IniKey
     {
@@ -21,6 +22,7 @@ namespace Mgs4Launcher
         public string[] Choices, ChoiceLabels;
         public IniSource Source;
         public string TrueWord, FalseWord;      // the game writes true/false where the add-on writes 1/0
+        public string Section;                  // the [Section] inside its file, when the file has any
         public IniKey(string group, string key, string type, string label, string help,
                       string[] choices = null, string[] choiceLabels = null,
                       IniSource source = IniSource.Addon, string trueWord = "1", string falseWord = "0")
@@ -28,6 +30,7 @@ namespace Mgs4Launcher
             Group = group; Key = key; Type = type; Label = label; Help = help;
             Choices = choices; ChoiceLabels = choiceLabels;
             Source = source; TrueWord = trueWord; FalseWord = falseWord;
+            Section = source == IniSource.Renodx ? "RenoDX.DLSS5" : null;
         }
     }
 
@@ -38,42 +41,47 @@ namespace Mgs4Launcher
             // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
             // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
             // tab has a button for exactly those four; the rest are here because this is where settings live.
-            new IniKey("The game: display", "api", "choice", "Renderer",
+            new IniKey("Display", "api", "choice", "Renderer",
                 "this add-on is a D3D12 add-on and does nothing on the D3D11 backend",
                 new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
                 IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "displayIndex", "int", "Display",
+            new IniKey("Display", "displayIndex", "int", "Display",
                 "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "vsync", "bool", "Vsync",
+            new IniKey("Display", "vsync", "bool", "Vsync",
                 "off pairs better with frame generation - the limiter below is what paces the game",
                 null, null, IniSource.Game, "true", "false"),
-            new IniKey("The game: display", "fpsLimiter", "int", "Frame limiter",
+            new IniKey("Display", "fpsLimiter", "int", "Frame limiter",
                 "60. The port's physics are tied to it; frame generation is what puts more frames on screen",
                 null, null, IniSource.Game, "true", "false"),
 
-            new IniKey("The game: quality", "globalGraphicsQuality", "choice", "Overall quality",
+            // This app's own, not the game's: it has no resolution or window-mode setting of its own, it takes
+            // --res_width / --res_height / --windowing on the command line. They sit here because this is where a
+            // person looks for them, and in config.ini because that is where the launcher's machine-local values
+            // live.
+            new IniKey("Display", "MGS4_RES", "res", "Resolution",
+                "what a scene boot asks the game for; empty lets the game choose. The Play tab's own box overrides it for that run",
+                null, null, IniSource.Launcher, "true", "false"),
+            new IniKey("Display", "MGS4_WINDOWING", "choice", "Mode",
+                "how the window comes up. The port has been seen ignoring this on a --stage boot; the Master Collection launcher's own display settings are the reliable place for it",
+                new[] { "full_exclusive", "full_borderless", "windowed" },
+                new[] { "Fullscreen", "Borderless Window", "Window" },
+                IniSource.Launcher, "true", "false"),
+
+            new IniKey("Quality", "globalGraphicsQuality", "choice", "Overall quality",
                 "the preset the three below follow unless they are set apart from it",
                 new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "textureQuality", "choice", "Textures",
+            new IniKey("Quality", "textureQuality", "choice", "Textures",
                 "3 is what the game writes at its highest",
                 new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "shadowQuality", "choice", "Shadows",
+            new IniKey("Quality", "shadowQuality", "choice", "Shadows",
                 "3 is what the game writes at its highest",
                 new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "vfxQuality", "choice", "Effects",
+            new IniKey("Quality", "vfxQuality", "choice", "Effects",
                 "3 is what the game writes at its highest",
                 new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("The game: quality", "enableFXAA", "bool", "FXAA",
+            new IniKey("Quality", "enableFXAA", "bool", "FXAA",
                 "off with DLAA - it only blurs the image DLSS is given",
                 null, null, IniSource.Game, "true", "false"),
-
-            // Not one of the game's own keys: the resolution this app passes to mgs4.exe when it starts one. It
-            // lives in config.ini, because it belongs to the launcher rather than to the game - the game has no
-            // resolution setting of its own, it takes --res_width / --res_height on the command line.
-            new IniKey("The game: launch", "MGS4_RES", "text", "Default resolution",
-                "WIDTHxHEIGHT, e.g. 3840x2160. Empty lets the game choose; the Play tab's own resolution box overrides it for that run",
-                null, null, IniSource.Launcher, "true", "false"),
-
 
             new IniKey("DLSS", "Enabled", "bool", "DLSS on",
                 "read again every second; 0 leaves the add-on loaded but idle"),
@@ -114,6 +122,26 @@ namespace Mgs4Launcher
             new IniKey("Image", "PreWarm", "bool", "Pre-warm",
                 "build the DLSS / NR features on loading screens, so the stall is not in the first cutscene frames"),
 
+
+            // RenoDX's DLSS 5 add-on, out of [RenoDX.DLSS5] in MGS4\ReShade.ini. Not this project's settings and
+            // not this project's defaults - they are read from the file and written back to it, and the values
+            // this add-on was verified against are in the README's "setup this was verified on".
+            new IniKey("Neural Rendering", "NeuralUplift", "bool", "Neural uplift",
+                "the NR pass itself", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NRIntensity", "int", "Intensity",
+                "how strongly NR is applied", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NRStyle", "int", "Style",
+                "which NR look RenoDX asks for", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NRLocalTone", "bool", "Local tone",
+                "local tone handling in the NR pass", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NRLocalStructure", "bool", "Local structure",
+                "local structure handling in the NR pass", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NRSkinStructure", "int", "Skin structure",
+                "-1 is what this add-on was verified with", null, null, IniSource.Renodx),
+            new IniKey("Neural Rendering", "NREnableUpscaling", "bool", "NR upscaling",
+                "off: this add-on already runs DLAA on the final image, so NR only denoises and uplifts it",
+                null, null, IniSource.Renodx),
+
             new IniKey("Diagnostics", "DebugMode", "choice", "Debug view", "costs frames; 0 for normal play",
                 new[] { "0", "1", "2", "3", "4", "5", "9" },
                 new[] { "off", "magenta path test", "bypass DLSS (A/B)", "trace 3 frames", "draw constants",
@@ -138,6 +166,7 @@ namespace Mgs4Launcher
         {
             if (source == IniSource.Addon) return IniPath(gameDir);
             if (source == IniSource.Launcher) return Paths.ConfigPath;
+            if (source == IniSource.Renodx) return Paths.Join(gameDir, "ReShade.ini");
             return Checks.SavedSettingsPath(gameDir);
         }
 
@@ -145,6 +174,7 @@ namespace Mgs4Launcher
         {
             if (source == IniSource.Addon) return "mgs4_dlss.ini";
             if (source == IniSource.Launcher) return "config.ini";
+            if (source == IniSource.Renodx) return "ReShade.ini [RenoDX.DLSS5]";
             return "mgs4.savedsettings";
         }
 
@@ -153,6 +183,7 @@ namespace Mgs4Launcher
         public static string[] BadgesFor(IniKey spec)
         {
             if (spec.Source == IniSource.Game || spec.Source == IniSource.Launcher) return new[] { "Game" };
+            if (spec.Source == IniSource.Renodx) return new[] { "RenoDX" };
             if (spec.Group == "Diagnostics") return new[] { "Debug", "MGS4 DLSS" };
             return new[] { "MGS4 DLSS" };
         }
@@ -162,6 +193,7 @@ namespace Mgs4Launcher
         {
             string file = spec.Source == IniSource.Addon ? addonIni
                         : spec.Source == IniSource.Launcher ? Paths.ConfigPath
+                        : spec.Source == IniSource.Renodx ? Paths.Join(GameDirOf(addonIni), "ReShade.ini")
                         : gameIni;
             return string.IsNullOrEmpty(file) ? null : Checks.IniValue(file, spec.Key);
         }
@@ -180,6 +212,12 @@ namespace Mgs4Launcher
             height = int.Parse(m.Groups[2].Value);
         }
 
+        // The add-on's ini sits in the game folder, so it is also how the other files there are found.
+        static string GameDirOf(string addonIni)
+        {
+            return string.IsNullOrEmpty(addonIni) ? null : System.IO.Path.GetDirectoryName(addonIni);
+        }
+
         public static IniKey Find(string key)
         {
             foreach (IniKey spec in Spec)
@@ -191,36 +229,26 @@ namespace Mgs4Launcher
         {
             var outp = new List<string>();
             string addonIni = IniPath(gameDir), gameIni = PathFor(IniSource.Game, gameDir);
-            string group = null;
-            IniSource? shown = null;
-            foreach (IniKey spec in Spec)
+            foreach (var group in Spec.GroupBy(k => k.Group))
             {
-                if (shown != spec.Source)
+                var files = new List<string>();
+                foreach (IniKey spec in group)
                 {
-                    shown = spec.Source;
-                    string file = spec.Source == IniSource.Addon ? addonIni
-                                : spec.Source == IniSource.Launcher ? Paths.ConfigPath
-                                : gameIni;
-                    outp.Add("");
-                    outp.Add(SourceLabel(spec.Source) + ": " + (file ?? "not found"));
-                    if (spec.Source == IniSource.Addon && !Paths.Exists(addonIni))
-                        outp.Add("  (not there - the Setup tab installs the add-on and its ini together)");
-                    if (spec.Source == IniSource.Game && string.IsNullOrEmpty(gameIni))
-                        outp.Add("  (not there - run the game once and it writes them)");
-                    group = null;
+                    string file = PathFor(spec.Source, gameDir);
+                    string line = SourceLabel(spec.Source) + ": " + (string.IsNullOrEmpty(file) ? "not found" : file);
+                    if (!files.Contains(line)) files.Add(line);
                 }
-                if (spec.Group != group)
-                {
-                    group = spec.Group;
-                    outp.Add("");
-                    outp.Add("[" + group + "]");
-                }
-                outp.Add(string.Format("  {0,-22} {1,-12} {2}", spec.Key, Read(spec, addonIni, gameIni) ?? "(unset)", spec.Label));
+                outp.Add("");
+                outp.Add("[" + group.Key + "]");
+                foreach (string f in files) outp.Add("  " + f);
+                foreach (IniKey spec in group)
+                    outp.Add(string.Format("  {0,-22} {1,-12} {2}", spec.Key,
+                                           Read(spec, addonIni, gameIni) ?? "(unset)", spec.Label));
             }
             if (Checks.GameRunning())
             {
                 outp.Add("");
-                outp.Add("The game is running: it owns both of these, so leave the writing until it exits.");
+                outp.Add("The game is running: it owns these files, so leave the writing until it exits.");
             }
             return outp;
         }
@@ -257,7 +285,8 @@ namespace Mgs4Launcher
                         (kv.Key == IniSource.Game ? " - run the game once and it writes one" : ""));
                     return 1;
                 }
-                try { Checks.SetIni(file, kv.Value); }
+                IniKey first = Find(kv.Value[0].Key);
+                try { Checks.SetIni(file, kv.Value, first != null ? first.Section : null); }
                 catch (Exception e) { say(e.Message); return 1; }
                 foreach (var set in kv.Value) say(set.Key + "=" + set.Value);
                 say("written to " + file);

@@ -196,7 +196,9 @@ namespace Mgs4Launcher
                 cli.Add("--res_width"); cli.Add(w.ToString());
                 cli.Add("--res_height"); cli.Add(h.ToString());
             }
-            if (!string.IsNullOrEmpty(opt.Windowing)) { cli.Add("--windowing"); cli.Add(opt.Windowing); }
+            string windowing = opt.Windowing;
+            if (string.IsNullOrEmpty(windowing)) windowing = Paths.Setting("MGS4_WINDOWING", null);
+            if (!string.IsNullOrEmpty(windowing)) { cli.Add("--windowing"); cli.Add(windowing); }
             args = string.Join(" ", cli.ConvertAll(c => c.Contains(" ") ? "\"" + c + "\"" : c));
         }
 

@@ -107,22 +107,46 @@ namespace Mgs4Launcher
         // caller checks that first.
         public static void SetIni(string path, IEnumerable<KeyValuePair<string, string>> values)
         {
+            SetIni(path, values, null);
+        }
+
+        // With a section, only keys inside that [Section] are touched, and one is created at the end if the file
+        // has none - ReShade.ini is a long file full of other people's sections, and a key like NRStyle must not be
+        // matched wherever it happens to appear.
+        public static void SetIni(string path, IEnumerable<KeyValuePair<string, string>> values, string section)
+        {
             if (!Paths.Exists(path)) throw new IOException("no ini at " + path);
             var lines = File.ReadAllLines(path).ToList();
             var left = values.ToDictionary(v => v.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+            string current = null;
+            int lastInSection = -1;
             for (int i = 0; i < lines.Count; i++)
             {
-                Match m = Regex.Match(lines[i], "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=");
+                Match head = Regex.Match(lines[i], @"^\s*\[(.+?)\]\s*$");
+                if (head.Success) { current = head.Groups[1].Value; continue; }
+                if (section != null && !string.Equals(current, section, StringComparison.OrdinalIgnoreCase)) continue;
+                Match m = Regex.Match(lines[i], @"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=");
                 if (!m.Success) continue;
+                lastInSection = i;
                 string k = m.Groups[1].Value;
                 if (!left.ContainsKey(k)) continue;
                 string comment = "";
-                Match c = Regex.Match(lines[i], "(\\s+;.*)$");
+                Match c = Regex.Match(lines[i], @"(\s+;.*)$");
                 if (c.Success) comment = c.Groups[1].Value;
                 lines[i] = k + "=" + left[k] + comment;
                 left.Remove(k);
             }
-            foreach (var kv in left) lines.Add(kv.Key + "=" + kv.Value);
+            if (left.Count > 0 && section != null && lastInSection < 0)
+            {
+                lines.Add("[" + section + "]");
+                lastInSection = lines.Count - 1;
+            }
+            foreach (var kv in left)
+            {
+                string line = kv.Key + "=" + kv.Value;
+                if (section == null) lines.Add(line);
+                else lines.Insert(++lastInSection, line);       // stay inside the section it belongs to
+            }
             File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(false));
         }
 
