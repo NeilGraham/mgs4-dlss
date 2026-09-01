@@ -1200,16 +1200,6 @@ $script:Xaml = @'
         <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. The fade over
              the top keeps the left side flat so the logo and the paths stay readable. -->
         <Rectangle x:Name="HeroArt" Visibility="Collapsed"/>
-        <Rectangle x:Name="HeroFade" Visibility="Collapsed">
-          <Rectangle.Fill>
-            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-              <GradientStop Color="#FF141821" Offset="0.0"/>
-              <GradientStop Color="#F2141821" Offset="0.34"/>
-              <GradientStop Color="#A6141821" Offset="0.62"/>
-              <GradientStop Color="#73141821" Offset="1.0"/>
-            </LinearGradientBrush>
-          </Rectangle.Fill>
-        </Rectangle>
         <Grid Margin="22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -1490,20 +1480,41 @@ function Set-HeaderArt($ui) {
         # UniformToFill on a band this wide shows the art's full width, so the face lands on the left - which is
         # where the logo and the paths go. Mirroring the brush puts it on the right instead, under the status pill,
         # where the fade is thinnest and there is nothing to read.
+        # The whole art, uncropped: Uniform fits its full height into the band, so it takes about a quarter of the
+        # width. Aligned right, the face lands in the gap before the status pill and the art's own black half runs
+        # out under the pill into the header colour, with no edge to hide on that side.
+        # It is painted as a Rectangle's fill rather than an Image because an Image would offer the art's own
+        # 1920x620 as its desired size and drag the header open to match.
         $brush = New-Object System.Windows.Media.ImageBrush $hero
-        # Take a band across the top third of the art rather than the whole of it. Filling a header this wide from
-        # the full 1920x620 crops to the middle, which lands on the moustache; this band is centred on the eyes, and
-        # because the crop is relative to the source it stays there whatever height the header ends up.
-        $brush.Viewbox = New-Object System.Windows.Rect 0, 0.02, 1, 0.30
-        $brush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
+        $brush.Stretch = [System.Windows.Media.Stretch]::Uniform
+        $brush.AlignmentX = [System.Windows.Media.AlignmentX]::Right
         $brush.AlignmentY = [System.Windows.Media.AlignmentY]::Center
-        $brush.Opacity = 0.7
-        $flip = New-Object System.Windows.Media.ScaleTransform -1, 1, 0.5, 0.5
-        $brush.RelativeTransform = $flip
+        $brush.Opacity = 0.9
         $brush.Freeze()
         $ui.HeroArt.Fill = $brush
         $ui.HeroArt.Visibility = "Visible"
-        $ui.HeroFade.Visibility = "Visible"
+
+        # The art's left edge is a hard cut through Snake's cheek - it is drawn to sit flush against a panel - so it
+        # is faded in. Where that edge falls depends on the band's proportions, so the mask is worked out from the
+        # measured size and redone whenever the window is resized.
+        $aspect = $hero.PixelWidth / $hero.PixelHeight
+        $rect = $ui.HeroArt
+        $fade = {
+            if ($rect.ActualWidth -le 0 -or $rect.ActualHeight -le 0) { return }
+            $artFrac = [Math]::Min(1.0, ($rect.ActualHeight * $aspect) / $rect.ActualWidth)
+            $start = 1.0 - $artFrac
+            $mask = New-Object System.Windows.Media.LinearGradientBrush
+            $mask.StartPoint = New-Object System.Windows.Point 0, 0
+            $mask.EndPoint = New-Object System.Windows.Point 1, 0
+            foreach ($stop in @(@($start, 0.0), @([Math]::Min(1.0, $start + 0.30 * $artFrac), 1.0))) {
+                $c = [System.Windows.Media.Color]::FromArgb([byte](255 * $stop[1]), 0, 0, 0)
+                $mask.GradientStops.Add((New-Object System.Windows.Media.GradientStop $c, $stop[0]))
+            }
+            $mask.Freeze()
+            $rect.OpacityMask = $mask
+        }.GetNewClosure()
+        $rect.Add_SizeChanged($fade)
+        & $fade
     }
 }
 
@@ -1919,7 +1930,7 @@ function Show-AppWindow($opt, $gameDir, $startTab) {
     })
 
     $ui = @{}
-    foreach ($n in @("GamePath", "Caption", "TitleText", "LogoArt", "HeroArt", "HeroFade", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
+    foreach ($n in @("GamePath", "Caption", "TitleText", "LogoArt", "HeroArt", "NavPlay", "NavSettings", "NavInstall", "Pill", "PillText", "PillNote", "PlayView",
                      "SettingsView", "InstallView", "InstallHost", "CopyBtn", "RecheckBtn",
                      "Search", "SearchHint", "Filters", "SceneList", "PickTitle", "PickSub", "PickWarn", "AltRow", "AltPick", "OptAdvance", "OptMashX", "MashNote",
                      "OptEnd", "OptHold", "HoldSecs", "OptRes", "ResW", "ResH", "CmdPreview", "LaunchBtn", "StopBtn",
