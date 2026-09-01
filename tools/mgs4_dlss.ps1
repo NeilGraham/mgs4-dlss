@@ -1491,6 +1491,10 @@ function Set-HeaderArt($ui) {
         # where the logo and the paths go. Mirroring the brush puts it on the right instead, under the status pill,
         # where the fade is thinnest and there is nothing to read.
         $brush = New-Object System.Windows.Media.ImageBrush $hero
+        # Take a band across the top third of the art rather than the whole of it. Filling a header this wide from
+        # the full 1920x620 crops to the middle, which lands on the moustache; this band is centred on the eyes, and
+        # because the crop is relative to the source it stays there whatever height the header ends up.
+        $brush.Viewbox = New-Object System.Windows.Rect 0, 0.02, 1, 0.30
         $brush.Stretch = [System.Windows.Media.Stretch]::UniformToFill
         $brush.AlignmentY = [System.Windows.Media.AlignmentY]::Center
         $brush.Opacity = 0.7
