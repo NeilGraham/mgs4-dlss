@@ -218,7 +218,8 @@ What can be ticked (all of it also works from the command line):
   created. Tick **Keep pressing X** as well and the tapping moves to the pad's Cross, because that is the one the
   flashback prompts want. `--press-key <name>` taps that key instead of either.
 - **Keep pressing X** (`--mash-x`) — a virtual DualShock 4 taps **Cross** about six times a second for the whole
-  scene. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
+  scene. It is the only thing that creates one: the pad is made when such a run starts and removed when it ends,
+  and opening the window does not make one at all. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
   prompts but does not trigger them. It needs the [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver plus
   `ViGEmClient.dll` in `tools\` (both Nefarius, BSD-3; the DLL also ships inside the `vgamepad` PyPI package, or set
   `VIGEM_CLIENT_DLL`) — the same pair `tools\ds4.py` uses, and the Install tab reports whether both are there.

@@ -119,15 +119,15 @@ namespace Mgs4Launcher
                 };
             }).ToList();
 
-            string padNote;
-            string dll = Pad.FindDll();
-            if (dll != null && Pad.Open(dll))
-                padNote = "A virtual DualShock 4 taps Cross about six times a second, which is what MGS4's in-cutscene flashback prompts want. The game must stay in the foreground.";
-            else
-                padNote = "Needs ViGEmBus and ViGEmClient.dll (" + (dll == null ? "ViGEmClient.dll not found" : Pad.Error) +
-                          "). Without them the launcher can only press Enter, which gets past the prompts but does not fire the flashbacks.";
-            Pad.Close();
-            _mashNote.Text = padNote;
+            // Whether the pad *could* be used, asked without using one. This line used to be worked out by opening
+            // a virtual DualShock and closing it again, every time the window opened - which really did connect a
+            // controller, sound and all, to answer a question about a note under a checkbox. The two things that
+            // decide it are a file on disk and a driver's state, and both can simply be looked at.
+            Row vigem = Checks.VigemRow();
+            _mashNote.Text = vigem.Status == "ok"
+                ? "A virtual DualShock 4 taps Cross about six times a second, which is what MGS4's in-cutscene flashback prompts want. The game must stay in the foreground. It is created when a run starts and removed when it ends."
+                : "Needs ViGEmBus and ViGEmClient.dll (" + vigem.Value +
+                  "). Without them the launcher can only press Enter, which gets past the prompts but does not fire the flashbacks.";
 
             foreach (string name in CatNames)
             {
