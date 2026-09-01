@@ -319,8 +319,12 @@ namespace Mgs4Launcher
             }
             if (hwnd == IntPtr.Zero) { say("no game window appeared"); return 1; }
 
+            // A virtual DualShock exists for one reason: MGS4's in-cutscene flashback prompts want Cross, and a
+            // keyboard Enter does not fire them. The boot prompts are not like that - the auto-save notice and
+            // "press any button" take any button at all, and Enter is one. So a run that is only pressing through
+            // those stays on the keyboard and never creates a controller for the game to notice.
             bool padOk = false;
-            if (((opt.Advance && string.IsNullOrEmpty(opt.Keys)) || opt.MashX) && string.IsNullOrEmpty(opt.PressKey))
+            if (opt.MashX && string.IsNullOrEmpty(opt.PressKey))
             {
                 string dll = Pad.FindDll();
                 if (dll == null) say("no ViGEmClient.dll - falling back to Enter, flashback prompts will not fire");
@@ -328,11 +332,14 @@ namespace Mgs4Launcher
                 {
                     padOk = Pad.Open(dll);
                     if (padOk) say("virtual DualShock 4 on " + Path.GetFileName(dll));
-                    else if (opt.MashX) say("no controller: " + Pad.Error + " - falling back to Enter, flashback prompts will not fire");
+                    else say("no controller: " + Pad.Error + " - falling back to Enter, flashback prompts will not fire");
                 }
             }
             ushort vk = VirtualKey(string.IsNullOrEmpty(opt.PressKey) ? "ENTER" : opt.PressKey);
             bool usePad = padOk && string.IsNullOrEmpty(opt.PressKey);
+            if (opt.Advance && !usePad && string.IsNullOrEmpty(opt.Keys))
+                say("pressing " + (string.IsNullOrEmpty(opt.PressKey) ? "Enter" : opt.PressKey.ToUpperInvariant()) +
+                    " on the keyboard" + (opt.MashX ? "" : " (no controller needed for the boot prompts)"));
             Action press = () =>
             {
                 if (!Win.Focus(hwnd)) Win.Focus(hwnd);

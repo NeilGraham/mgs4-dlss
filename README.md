@@ -212,8 +212,11 @@ alone. The options below are greyed out while one of them is picked.
 
 What can be ticked (all of it also works from the command line):
 
-- **Skip the boot prompts** (`--advance`, on by default) — taps a button until the add-on log reports the first 3D
+- **Skip the boot prompts** (`--advance`, on by default) — taps **Enter** until the add-on log reports the first 3D
   frame, which is what gets a `--stage` boot past the auto-save notice, the "press any button" screen and the load.
+  On its own it stays on the keyboard: those prompts take any button, so nothing needs a controller, and none is
+  created. Tick **Keep pressing X** as well and the tapping moves to the pad's Cross, because that is the one the
+  flashback prompts want. `--press-key <name>` taps that key instead of either.
 - **Keep pressing X** (`--mash-x`) — a virtual DualShock 4 taps **Cross** about six times a second for the whole
   scene. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
   prompts but does not trigger them. It needs the [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver plus
