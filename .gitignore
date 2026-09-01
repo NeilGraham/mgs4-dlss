@@ -9,4 +9,4 @@ config.ini
 work/
 __pycache__/
 mgs4-dlss-launcher.exe
-cs-launcher.exe
+mgs4-dlss-launcher-cli.exe

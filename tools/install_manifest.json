@@ -1,7 +1,7 @@
 {
   "_comment": [
     "The install, in the order you do it. Each group is one download and one instruction, and every row is a path",
-    "relative to the folder holding mgs4.exe. tools/install_checks.ps1 reads this; tools/mgs4_dlss_launcher.ps1 renders it as",
+    "relative to the folder holding mgs4.exe. launcher/src/Checks.cs reads this and renders it as the Setup tab",
     "the Setup tab and as --report, and its drag-and-drop uses 'accepts' to know what a dropped file is for.",
     "Versions match the 'setup this was verified on' table in README.md - change both together.",
     "",

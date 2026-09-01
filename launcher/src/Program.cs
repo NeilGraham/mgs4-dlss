@@ -20,19 +20,22 @@ namespace Mgs4Launcher
         static extern int MessageBox(IntPtr hWnd, string text, string caption, uint type);
         const int ATTACH_PARENT_PROCESS = -1;
 
-        static bool _console;
-
+        // Just write. Attached to a console the text lands there; redirected to a pipe or a file it lands there;
+        // double-clicked, with neither, .NET hands Console.Out a null stream and it goes nowhere - which is what
+        // should happen, and no window flashes to say so. Deciding in advance whether a console exists got this
+        // wrong in both directions: `start /b` hands the process one that AttachConsole then refuses to attach to,
+        // and a redirected run has no console window at all yet still has somewhere to write.
         static void Say(string line)
         {
-            if (_console) Console.WriteLine(line);
+            try { Console.WriteLine(line); } catch { }
         }
 
         [STAThread]
         static int Main(string[] argv)
         {
             // Started from a terminal, this behaves like a command and prints where it was typed; double-clicked,
-            // it is a window and never flashes a console. AttachConsole is what tells the two apart.
-            _console = AttachConsole(ATTACH_PARENT_PROCESS);
+            // it is a window and never flashes a console of its own.
+            AttachConsole(ATTACH_PARENT_PROCESS);
 
             Options opt;
             try { opt = Options.Parse(argv); }

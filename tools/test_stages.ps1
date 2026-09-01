@@ -1,5 +1,5 @@
 # Runs the add-on through a series of stages / cutscenes: for each stage it boots the game straight into it
-# (mgs4_dlss_launcher.ps1, the same code the launcher window and the desktop shortcuts use), waits, takes screenshots (normal frame + optionally the motion-vector visualiser), collects a
+# (mgs4-dlss-launcher, the same code the launcher window and the desktop shortcuts use), waits, takes screenshots (normal frame + optionally the motion-vector visualiser), collects a
 # digest of the add-on log (DRS, object motion, evaluation rate, crashes) and moves on. Results land in
 # <MGS4_OUT>\stage_tests\<timestamp>\ : <stage>_1.png, <stage>_mv.png, <stage>.log and summary.txt.
 #
@@ -45,7 +45,7 @@ foreach ($stage in $list) {
     Log "=== ${stage}"
     $logStart = if (Test-Path $addonLog) { (Get-Content $addonLog).Count } else { 0 }
     $t0 = Get-Date
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $tools "mgs4_dlss_launcher.ps1") $stage --start-timeout 60 --game-dir $GameDir 2>&1 | Select-Object -Last 1 | ForEach-Object { Log "  launcher: $_" }
+    & (Join-Path (Split-Path -Parent $tools) "mgs4-dlss-launcher.bat") $stage --start-timeout 60 --game-dir $GameDir 2>&1 | Select-Object -Last 1 | ForEach-Object { Log "  launcher: $_" }
     $p = Get-Process mgs4 -ErrorAction SilentlyContinue
     if (-not $p) { Log "  game did not start"; continue }
     Start-Sleep $HoldSeconds

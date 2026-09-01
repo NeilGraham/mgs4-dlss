@@ -1,8 +1,9 @@
 # Boots MGS4 straight into a stage and presses keys to set the scene up.
 #
-# This is now a thin shim over tools\mgs4_dlss_launcher.ps1, which does the same job with more of it (a scene list, the Cross
-# tapping that fires the flashback prompts, ending a scene when gameplay starts, and a window). The parameters below
-# are kept because older notes use them; new callers should use the app directly:
+# This is now a thin shim over the app - mgs4-dlss-launcher.exe, built from launcher\ - which does the same job
+# with more of it (a scene list, the Cross tapping that fires the flashback prompts, ending a scene when gameplay
+# starts, and a window). The parameters below are kept because older notes use them; new callers should use the
+# app directly:
 #
 #   mgs4-dlss-launcher.bat s00a00l                                    what -Stage s00a00l does
 #   mgs4-dlss-launcher.bat s00a00l --no-advance                       ... -PressFor 0
@@ -38,5 +39,6 @@ $fwd += @("--settle", "$settle")
 if ($NoRestart) { $fwd += "--no-restart" }
 if ($GameDir) { $fwd += @("--game-dir", $GameDir) }
 
-& (Join-Path $PSScriptRoot "mgs4_dlss_launcher.ps1") @fwd
+# The exe is built on first use by mgs4-dlss-launcher.bat, so that is what this calls rather than the exe itself.
+& (Join-Path (Split-Path -Parent $PSScriptRoot) "mgs4-dlss-launcher.bat") @fwd
 exit $LASTEXITCODE

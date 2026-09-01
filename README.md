@@ -51,8 +51,9 @@ Run **`mgs4-dlss-launcher`** at any point: its Install tab says which of those p
 
 ## The app (`mgs4-dlss-launcher`)
 
-One window for the whole add-on, and the same things as a command line. It needs nothing installed — PowerShell
-ships with Windows and the `.bat` handles the execution policy — so it runs straight out of an unzipped release.
+One window for the whole add-on, and the same things as a command line. It is a C# WPF program built from
+`launcher\src` by the compiler that ships with Windows, so it still needs nothing installed and still runs straight
+out of an unzipped release.
 
 | tab | what it is for |
 | --- | --- |
@@ -73,22 +74,47 @@ mgs4-dlss-launcher --set FrameGen=0        :: write ini keys without opening any
 mgs4-dlss-launcher --help                  :: every option
 ```
 
-**Two files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works. Running
+**Three files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works: on its first run
+it builds the app, once, and every run after that just starts it. The build produces two binaries from the one set
+of sources, the way `python.exe` and `pythonw.exe` are two:
+
+| | |
+| --- | --- |
+| `mgs4-dlss-launcher.exe` | the window. A Windows-subsystem program, so a double-click never flashes a console the way a `.bat` must, and it wears the game's icon - in the title bar and on the file. |
+| `mgs4-dlss-launcher-cli.exe` | the command. A console program, so `cmd` waits for it and `mgs4-dlss-launcher.bat --report > out.txt` catches what it writes. |
+
+A windowed program cannot be both: cmd does not wait for one, and `start /b /wait` - which does wait - hands the
+child its own handles, so a redirect catches nothing (measured: 0 bytes). Scripts should call the `.bat`, which
+calls the console twin; a failing run prints why and exits non-zero without pausing, so nothing hangs waiting for a
+keypress.
+
+Neither exe is in the repo: the icon inside them is read from the `mgs4.exe` on this machine, and that artwork is
+Konami's, so they are built locally rather than redistributed. To rebuild by hand:
 
 ```bat
-powershell -ExecutionPolicy Bypass -File tools\build_app_exe.ps1
+powershell -ExecutionPolicy Bypass -File launcher\build.ps1
 ```
 
-once builds **`mgs4-dlss-launcher.exe`** next to it: the same thing, but a Windows-subsystem program, so double-clicking it
-never flashes a console the way a `.bat` must (cmd.exe owns one before it can hide anything), and it wears the
-game's icon - in the title bar and on the file. Nothing has to be installed for that: the C# compiler ships with
-Windows, and the icon is read out of the `mgs4.exe` already on this machine, which is also why the exe is not in the
-repo - the artwork inside it is Konami's, so it is built locally rather than redistributed. Every example below
-works with either, since `mgs4-dlss-launcher` resolves to whichever is there.
+**Why C# and not PowerShell.** It was a PowerShell app until 2026-08-31, and the port kept every flag, every file
+it reads and writes, and the window's own XAML. What changed is what PowerShell cost: **1.66 s** to put the window
+up against **0.34 s** (three runs each, median), and a scripting engine in the per-frame path of every animation -
+the scroll easing ran a script block per frame there and native code here. `launcher\src` is laid out as
 
-The exe passes arguments through and prints where you typed them, but cmd does not wait for a windowed program, so
-a script that needs to capture output or check an exit code should call `mgs4-dlss-launcher.bat` or
-`tools\mgs4_dlss_launcher.ps1`.
+| file | what it holds |
+| --- | --- |
+| `Paths.cs` | the game folder and the Steam libraries, resolved in the order `tools\paths.*` resolve them |
+| `Checks.cs` | the install check and its text report, still reading `tools\install_manifest.json` |
+| `Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
+| `Catalogue.cs` | the scene list, in story order |
+| `Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
+| `Ui\` | the window: shell, Play, Settings, Setup, artwork, smooth scrolling |
+
+There is no MSBuild and no compiled XAML: `csc` alone cannot produce BAML, so `Window.xaml` is an embedded resource
+loaded with `XamlReader` at startup - the same markup the PowerShell app used, lifted whole. Two things that cost a
+debugging round each, kept here so they are not rediscovered: `XamlReader` returns a fully formed `Window` and it
+has to be used as-is - re-parenting its content into a `Window` subclass takes the process down with an access
+violation before anything is drawn; and `Scene` and `SceneRow` are `public` because WPF's binding engine reflects
+over public members of public types only.
 
 **The window wears the game's own artwork** when Steam has it cached on this machine: the Metal Gear Solid 4 logo
 in place of the title, the key art behind the header band (mirrored, so Snake sits on the right where there is
@@ -197,7 +223,7 @@ double-click. The same thing from a terminal:
 mgs4-dlss-launcher s02a50l_D1 --mash-x --end-on-gameplay --shortcut "%USERPROFILE%\Desktop\Naomi lab.lnk"
 ```
 
-The shortcut runs `tools\mgs4_dlss_launcher.ps1` **by absolute path**, which is the one thing that can break it: move or
+The shortcut holds `mgs4-dlss-launcher.exe`'s **absolute path**, which is the one thing that can break it: move or
 re-clone the checkout and it points at a folder that is no longer there. Make a new one rather than editing it.
 
 The port's own command line, for reference (read out of `mgs4.exe`): `--stage <id>`, `--skip-to-main-menu`,
@@ -294,54 +320,9 @@ What it reports, beyond whether a file exists:
   and says nothing about whether NR works.
 
 The file list, the verified versions and the download links are one data file, `tools\install_manifest.json`; the
-checks in `tools\install_checks.ps1` only render it.
+checks in `launcher\src\Checks.cs` only render it.
 
 The shipped ini is the configuration v1.1.1 was verified with: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
-
-### The C# build (`launcher/`, branch `csharp-wpf-launcher`)
-
-The same app, ported to C# and compiled with the `csc.exe` that ships with Windows - the compiler
-`tools\build_app_exe.ps1` already used for the wrapper exe, so this still needs nothing installed:
-
-```bat
-powershell -ExecutionPolicy Bypass -File launcher\build.ps1     :: -> mgs4-dlss-launcher.exe
-```
-
-**Why**, measured rather than assumed: PowerShell takes **1.66 s** to put the window up against the C# build's
-**0.34 s** (three runs each, median on this machine), and it keeps a scripting engine in the per-frame path of
-every animation - the scroll easing runs a script block per frame there and native code here.
-
-**It is a port, not a redesign.** `--report`, `--list` and `--settings` are byte-identical to the PowerShell app's
-output against this install; `--help` differs by one word, because the third tab is called Setup and the C# help
-says so. The file list is still `tools\install_manifest.json`, the scene list is still `tools\scenes.csv` +
-`labels.json` + `scene_info.json`, and the window is the same XAML, lifted whole into `launcher\src\Window.xaml`.
-
-| file | what it holds |
-| --- | --- |
-| `src\Paths.cs` | the game folder and the Steam libraries, resolved in the order `tools\paths.*` resolve them |
-| `src\Checks.cs` | the install check and its text report |
-| `src\Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
-| `src\Catalogue.cs` | the scene list, in story order |
-| `src\Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
-| `src\Ui\` | the window: shell, Play, Settings, Setup, artwork, smooth scrolling |
-
-**No MSBuild, so no compiled XAML**: `csc` alone cannot produce BAML, so `Window.xaml` is an embedded resource
-loaded with `XamlReader` at startup. Two things that cost a debugging round each, kept here so they are not
-rediscovered: `XamlReader` returns a fully formed `Window` and it has to be used as-is - re-parenting its content
-into a `Window` subclass takes the process down with an access violation before anything is drawn; and `Scene` and
-`SceneRow` are `public` because WPF's binding engine reflects over public members of public types only.
-
-The C# build also carries three things the PowerShell one does not yet: a wheel notch of **48 px** rather than 72,
-a precision touchpad **eased** (22 ms) rather than applied as it arrives, so a trackpad scrubs rather than steps,
-and a **title bar that follows the desktop's light/dark setting** - the bar is Windows' to draw, so it ignores the
-dark XAML and comes up white until `DwmSetWindowAttribute` asks otherwise.
-
-**Verified so far**: the three tabs render and switch, the install check and its buttons, the settings form, the
-scene list with its grouping and filters, `--install-addon`, `--shortcut` (which now targets the exe directly
-rather than `powershell -File`), a scene run in attach mode, the game-state poll (pill and Close the game follow
-the game starting and stopping), and scrolling measured from the shipped code: a notch settles at exactly 48.0 px,
-three at 144.0, ten touchpad deltas at 48.0 while tracking continuously on the way. **Not yet exercised**: drag-and-drop onto the C# Setup tab, and a real scene boot
-with the game actually starting. The PowerShell app is untouched and is still the one that ships.
 
 ### The setup this was verified on
 
@@ -713,7 +694,7 @@ config.example.ini            machine-local paths; copy to config.ini (git-ignor
 d3d12-switch/                 mgs4_d3d12.c, MGS4_D3D12.ini, build.sh, install.sh
 dlss-addon/                   src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh         where the game / the output folder live on this machine
-tools/mgs4_dlss_launcher.ps1  the app itself; tools/install_checks.ps1 the checks behind its Install tab
+launcher/src, build.ps1      the app itself: Program, Paths, Checks, Install, Catalogue, Runner, Ui/
 tools/install_manifest.json   the file list, verified versions and download links the checks render
 tools/scenes.csv              every launchable scene; labels.json the names, scene_info.json the corrections
 third_party/minhook/          MinHook (BSD-2), vendored
