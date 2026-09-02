@@ -57,20 +57,109 @@ namespace Mgs4Launcher
         // The checks are about a third of a second of file reads and log parsing, and the cards on top of that.
         // Run synchronously they hold the click, so the tab looks like it is refusing to open: put a placeholder
         // up, let WPF paint, and do the work at Background priority once the frame is on screen.
+        // Opening the tab paints the last check straight away and runs the next one behind it. What the check
+        // looks at - which files are installed, what the add-on wrote on its last run - changes when somebody
+        // installs something, which is not something that happens between two clicks on a tab. So the answer on
+        // screen is almost always already the right one, and when it is not, the fresh one replaces it a moment
+        // later. Only a real difference redraws: an identical result leaves the cards exactly where they were.
         void ShowSetup()
         {
             if (_installView.Visibility != Visibility.Visible) return;
-            _installHost.Children.Clear();
-            StackPanel body;
-            _installHost.Children.Add(Widgets.Card("Setup", "Reading the files, the settings and the last run...",
-                                                   "info", "checking", out body));
-            Say("checking...");
-            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(BuildSetup));
+
+            // Nothing checked yet this run: the last run left one on disk, and it is almost certainly still true -
+            // nothing installs itself between closing the window and opening it again. Tried once, so a folder
+            // with no cache does not go back to the file on every visit.
+            if (_sections == null && !_setupCacheTried)
+            {
+                _setupCacheTried = true;
+                DateTime taken;
+                List<Section> kept = SetupCache.Read(_gameDir, out taken);
+                if (kept != null) { _sections = kept; _setupDir = _gameDir; _setupAt = taken; }
+            }
+
+            bool cached = _sections != null
+                       && string.Equals(_setupDir ?? "", _gameDir ?? "", StringComparison.OrdinalIgnoreCase);
+            if (cached)
+            {
+                PaintSetup();
+                Say("checked at " + _setupAt.ToString("HH:mm:ss") + "  -  rechecking...");
+            }
+            else if (!string.IsNullOrEmpty(_gameDir))
+            {
+                _installHost.Children.Clear();
+                StackPanel checking;
+                _installHost.Children.Add(Widgets.Card("Setup", "Reading the files, the settings and the last run...",
+                                                       "info", "checking", out checking));
+                Say("checking...");
+            }
+            StartSetupRefresh();
         }
 
-        void BuildSetup()
+        // Checks.Run is file reads, PE version stamps and a driver lookup - thirty-five milliseconds with the disk
+        // warm and a good deal more without. None of it touches a control, so it runs off the window's thread and
+        // hands the result back to be compared where controls may be touched.
+        void StartSetupRefresh()
         {
+            if (string.IsNullOrEmpty(_gameDir))
+            {
+                _sections = null; _setupDir = null;
+                if (_installView.Visibility == Visibility.Visible) PaintSetup();
+                return;
+            }
+            if (_setupBusy) return;
+            _setupBusy = true;
+            string dir = _gameDir;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                List<Section> fresh = null;
+                try { fresh = Checks.Run(dir); }
+                catch { fresh = null; }
+                Win.Dispatcher.BeginInvoke(new Action(delegate { EndSetupRefresh(dir, fresh); }));
+            });
+        }
+
+        void EndSetupRefresh(string dir, List<Section> fresh)
+        {
+            _setupBusy = false;
+            if (fresh == null) return;
+            if (!string.Equals(dir ?? "", _gameDir ?? "", StringComparison.OrdinalIgnoreCase)) return;
+
+            bool same = _sections != null && SetupSignature(_sections) == SetupSignature(fresh);
+            _sections = fresh;
+            _setupDir = dir;
+            _setupAt = DateTime.Now;
+            if (!same) SetupCache.Write(dir, fresh);   // only when it moved; an identical check is already on disk
+
+            // The tab's own badge, whichever tab is showing: a window that opened on Play primes it from the
+            // cache and this is what corrects it, so it cannot sit on a verdict the check has moved past.
+            try { SetSetupIcon(Checks.GetVerdict(fresh)); } catch { }
+
             if (_installView.Visibility != Visibility.Visible) return;
+            if (!same) PaintSetup();
+            Say("checked at " + _setupAt.ToString("HH:mm:ss") + "  -  file list: " + Checks.ManifestSource);
+        }
+
+        // Everything a card is drawn from, in one string: the rows a section ended up with, and the two things a
+        // section carries besides them. Two runs that read the same are the same check, and nothing has to move.
+        static string SetupSignature(List<Section> sections)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (Section sec in sections)
+            {
+                sb.Append(sec.Id).Append('|').Append(sec.SavedSettings).Append('|');
+                foreach (string k in sec.WrongKeys) sb.Append(k).Append(',');
+                sb.Append('\n');
+                foreach (Row r in sec.Rows)
+                    sb.Append(r.Status).Append('\t').Append(r.Name).Append('\t')
+                      .Append(r.Detail).Append('\t').Append(r.Value).Append('\n');
+            }
+            return sb.ToString();
+        }
+
+        void PaintSetup()
+        {
+            // A repaint from a refresh happens under the reader's eyes, so the page stays where they left it.
+            double keep = _installView.VerticalOffset;
             _installHost.Children.Clear();
 
             if (string.IsNullOrEmpty(_gameDir))
@@ -93,7 +182,7 @@ namespace Mgs4Launcher
                 return;
             }
 
-            _sections = Checks.Run(_gameDir);
+            if (_sections == null) return;
             Verdict verdict = Checks.GetVerdict(_sections);
             _installHost.Children.Add(StatusCard(verdict));
             SetSetupIcon(verdict);
@@ -132,7 +221,9 @@ namespace Mgs4Launcher
                 foreach (Row row in sec.Rows) { body.Children.Add(Widgets.CheckRow(row, first)); first = false; }
                 _installHost.Children.Add(card);
             }
-            Say("checked at " + DateTime.Now.ToString("HH:mm:ss") + "  -  file list: " + Checks.ManifestSource);
+            if (keep > 0)
+                Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+                                           new Action(delegate { _installView.ScrollToVerticalOffset(keep); }));
         }
 
         // The first card, and the only one that is not a step: how the check came out, the folder it ran against,
@@ -253,7 +344,8 @@ namespace Mgs4Launcher
             if (dir == null) { Say("no mgs4.exe in that folder"); return; }
             _gameDir = dir;
             Paths.SetConfiguredGameDir(dir);
-            Art.SetWindowIcon(Win, _gameDir);
+            // The icon used to be re-read from the new folder's mgs4.exe here. It is the exe's own now, chosen
+            // when this was built, so pointing at a different install does not change what the window wears.
             Say("game folder set to " + dir + " (written to config.ini)");
             ShowSetup();
         }
@@ -261,7 +353,7 @@ namespace Mgs4Launcher
         // The game's own options, which the add-on needs set a particular way.
         Border GameSettingsRow(Section sec)
         {
-            bool running = Checks.GameRunning();
+            bool running = _gameUp;
             string text = sec.WrongKeys.Count > 0
                 ? "The game is set to " + string.Join(", ", sec.WrongKeys) + " differently from what the add-on needs."
                 : "DirectX 12, vsync off, FXAA off and the 60 fps limiter are all set as the add-on wants them.";
@@ -302,7 +394,7 @@ namespace Mgs4Launcher
             Install.FindBundled(out addon, out ini);
             if (addon == null) return new Border();     // an unbuilt checkout has none; the drop area still works
 
-            bool running = Checks.GameRunning();
+            bool running = _gameUp;
             bool have = Paths.Exists(Paths.Join(_gameDir, "mgs4_dlss.addon64"));
             string text = have
                 ? "The add-on is in place. Installing again replaces mgs4_dlss.addon64 with the copy that ships here and keeps the mgs4_dlss.ini you have."

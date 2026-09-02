@@ -24,13 +24,25 @@ namespace Mgs4Launcher
 
         readonly Options _opt;
         string _gameDir;
-        List<Section> _sections;
+        List<Section> _sections;        // the last install check, kept so returning to Setup paints at once
+        string _setupDir;               // the folder it ran against; a different one makes it worthless
+        DateTime _setupAt;
+        bool _setupBusy;
+        bool _setupCacheTried;   // the disk is read for a check once a run, not once a visit
+
+        // Is mgs4.exe up? Asking costs eight milliseconds - it walks the whole process table - and the answer is
+        // wanted constantly: every poll, every rebuild of a card, and every keystroke in a settings box, because
+        // Save is only offered when the game is closed. So it is asked off the window's thread and read from here.
+        // Anything about to write a file asks Checks.GameRunning itself: a cache is not a lock, and there the
+        // file is what matters, not a label.
+        bool _gameUp;
+        bool _pollBusy;
         string _pickedId = "";
         // Scene ids the user has starred. Kept in the preferences file next to everything else the window
         // remembers, and written the moment a star is clicked rather than only when the window closes.
-        readonly HashSet<string> _favourites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<string> _favorites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, bool> _collapsed = new Dictionary<string, bool>();
-        // Names and descriptions typed over the catalogue's own. The catalogue reads the same file for itself when
+        // Names and descriptions typed over the catalog's own. The catalog reads the same file for itself when
         // it builds the list; this copy is what the window edits and writes back.
         readonly Dictionary<string, Prefs.SceneEdit> _sceneEdits = Prefs.SceneEdits();
         bool _hadSavedActs;     // false on a first run, when nothing has been left in any particular state yet
@@ -87,7 +99,7 @@ namespace Mgs4Launcher
             DarkenMenus();
             Bind();
             TitleBar.Follow(Win);
-            Art.SetWindowIcon(Win, _gameDir);
+            Art.SetTaskbarIdentity();
             Art.ApplyHeader(Win, _logoArt, _titleText, _navTabs, _heroArt, _headerBar, _artBand);
             TitleBar.Buttons(Win, _minBtn, _maxBtn, _closeBtn, _headerBar);
             SmoothScroll.Attach(Win);
@@ -96,7 +108,7 @@ namespace Mgs4Launcher
 
             WireNav();
             WireKeys();
-            LoadFavourites();       // before the rows are built: each one is created knowing whether it is starred
+            LoadFavorites();       // before the rows are built: each one is created knowing whether it is starred
             WirePlay();
             WireSettings();
             WireSetup();
@@ -105,7 +117,13 @@ namespace Mgs4Launcher
             RestoreSelection();
             ShowTab(startTab);
             StartStatePolling();
-            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(PrimeSetupIcon));
+
+            // Two things that used to be paid for on the way up, moved to the gap after it. ApplicationIdle is
+            // below input, so a click that arrives first is still served first; these fill the pause instead.
+            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                                       new Action(PrimeSetupIcon));
+            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                                       new Action(WarmSettings));
             Win.Closing += (s, e) => SavePrefs();
         }
 
@@ -247,7 +265,7 @@ namespace Mgs4Launcher
                 tab == "play" ? Visibility.Visible : Visibility.Collapsed;
 
             if (tab == "install") ShowSetup();
-            else if (tab == "settings") BuildSettings();
+            else if (tab == "settings") ShowSettings();
             RefreshState();
         }
 
@@ -257,7 +275,7 @@ namespace Mgs4Launcher
         // idle/running/driving badge as well; it said what Close the game and the Settings banner already say.
         void RefreshState()
         {
-            bool running = Checks.GameRunning();
+            bool running = _gameUp;
             bool busy = _runProc != null && !_runProc.HasExited;
 
             _stopBtn.IsEnabled = running || busy;
@@ -282,9 +300,30 @@ namespace Mgs4Launcher
         void StartStatePolling()
         {
             var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
-            timer.Tick += (s, e) => RefreshState();
+            timer.Tick += (s, e) => PollState();
             timer.Start();
             Win.Closed += (s, e) => timer.Stop();
+            PollState();        // seed it now rather than showing an idle window for a second and a half
+        }
+
+        // The process table off the window's thread; only the answer comes back to it. The window opens believing
+        // the game is not running, which is right on all but the run where it is, and wrong there for as long as
+        // one process listing takes.
+        void PollState()
+        {
+            if (_pollBusy) return;
+            _pollBusy = true;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                bool up;
+                try { up = Checks.GameRunning(); } catch { up = false; }
+                Win.Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    _pollBusy = false;
+                    _gameUp = up;
+                    RefreshState();
+                }));
+            });
         }
 
         public void Say(string text)
@@ -294,13 +333,17 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------------------- prefs
 
-        void LoadFavourites()
+        // The key was "Favourites" before the spelling was settled, and a saved file still holds it, so it is read
+        // under the old name when the new one is absent. The next save writes the new one, and the old key goes.
+        void LoadFavorites()
         {
             Dictionary<string, object> p = Prefs.Read();
             object list;
-            if (p == null || !p.TryGetValue("Favourites", out list) || !(list is object[])) return;
+            if (p == null) return;
+            if (!p.TryGetValue("Favorites", out list) && !p.TryGetValue("Favourites", out list)) return;
+            if (!(list is object[])) return;
             foreach (object o in (object[])list)
-                if (o != null) _favourites.Add(o.ToString());
+                if (o != null) _favorites.Add(o.ToString());
         }
 
         void RestorePrefs()
@@ -343,20 +386,21 @@ namespace Mgs4Launcher
             }
 
             // Which acts were left closed. Stored as the closed ones rather than the open ones, so an act added to
-            // the catalogue later starts closed like every other act does on a first run.
+            // the catalog later starts closed like every other act does on a first run.
             object acts;
             if (p.TryGetValue("Collapsed", out acts) && acts is object[])
             {
                 _hadSavedActs = true;
                 var shut = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (object o in (object[])acts) if (o != null) shut.Add(o.ToString());
-                foreach (string key in Catalogue.ActOrder) _collapsed[key] = shut.Contains(key);
+                foreach (string key in Catalog.ActOrder) _collapsed[key] = shut.Contains(key);
             }
         }
 
         // The chips used to be named for the lists they showed rather than for the badge a scene wears. A saved
         // file still names those, so it is read as the chips that replaced them; "Named scenes" has no successor -
-        // every scene can be named now - and simply goes unticked.
+        // every scene can be named now - and simply goes unticked. Favourites is the same chip under its old
+        // spelling: the tag is what gets saved, so a file written before the sweep still names it that way.
         static string MigrateFilter(string name)
         {
             switch (name)
@@ -365,6 +409,7 @@ namespace Mgs4Launcher
                 case "Mission briefings": return "Briefing";
                 case "Stage entries": return "Stage";
                 case "Known broken": return "Broken";
+                case "Favourites": return FavoritesCat;
                 default: return name;
             }
         }
@@ -381,7 +426,7 @@ namespace Mgs4Launcher
             {
                 { "Stage", _pickedId },
                 { "Filters", filters },
-                { "Favourites", new List<string>(_favourites) },
+                { "Favorites", new List<string>(_favorites) },
                 { "SceneEdits", SceneEditsForSaving() },
                 { "Collapsed", _collapsed.Where(kv => kv.Value).Select(kv => kv.Key).ToList() },
                 { "Advance", _optAdvance.IsChecked == true },
@@ -396,7 +441,7 @@ namespace Mgs4Launcher
         }
     
         // Only the halves actually typed are written, so a scene given a description but not a name comes back
-        // wearing the catalogue's name and the typed description.
+        // wearing the catalog's name and the typed description.
         Dictionary<string, object> SceneEditsForSaving()
         {
             var outp = new Dictionary<string, object>();
@@ -411,25 +456,29 @@ namespace Mgs4Launcher
         }
 
         // The Setup tab's icon is its verdict: a checklist until the checks have run, then the tick, the warning
-        // or the cross the Setup card itself shows, in the same colour. Set as a local value, so it wins over the
+        // or the cross the Setup card itself shows, in the same color. Set as a local value, so it wins over the
         // style's checked-tab accent - what the install is doing matters more than which tab is open.
         void SetSetupIcon(Verdict v)
         {
-            string glyph = "", colour = "#97979F", tip = "Setup";
+            string glyph = "", color = "#97979F", tip = "Setup";
             if (v != null)
             {
                 tip = "Setup - " + v.Text.ToLowerInvariant() + (string.IsNullOrEmpty(v.Note) ? "" : ", " + v.Note);
-                if (v.Kind == "ok") { glyph = ""; colour = "#62C98A"; }
-                else if (v.Kind == "warn") { glyph = ""; colour = "#F2C14E"; }
-                else if (v.Kind == "bad") { glyph = ""; colour = "#FF6B66"; }
+                if (v.Kind == "ok") { glyph = ""; color = "#62C98A"; }
+                else if (v.Kind == "warn") { glyph = ""; color = "#F2C14E"; }
+                else if (v.Kind == "bad") { glyph = ""; color = "#FF6B66"; }
             }
             _navInstall.Content = glyph;
-            _navInstall.Foreground = Widgets.Brush(colour);
+            _navInstall.Foreground = Widgets.Brush(color);
             _navInstall.ToolTip = tip;
         }
 
         // The verdict is worth having before the Setup tab is ever opened, because it is what the tab's own icon
         // says. Same trick as ShowSetup: let the window paint first, then spend the third of a second on files.
+        // The tab badge, for a window that opened on Play. This used to run the whole install check on the way up
+        // to colour one icon: thirty-five milliseconds of file reads and a driver lookup, on the window's thread.
+        // Now it takes the check the last run left on disk, and when there is none it starts the same background
+        // refresh the Setup tab uses and lets that set the icon when it lands.
         void PrimeSetupIcon()
         {
             if (_installView.Visibility == Visibility.Visible) return;   // ShowSetup is about to do it properly
@@ -438,8 +487,28 @@ namespace Mgs4Launcher
                 SetSetupIcon(new Verdict { Text = "No game folder", Kind = "bad", Note = "nothing to check against yet" });
                 return;
             }
-            try { SetSetupIcon(Checks.GetVerdict(Checks.Run(_gameDir))); }
-            catch { SetSetupIcon(null); }
+            if (_sections == null && !_setupCacheTried)
+            {
+                _setupCacheTried = true;
+                DateTime taken;
+                List<Section> kept = SetupCache.Read(_gameDir, out taken);
+                if (kept != null) { _sections = kept; _setupDir = _gameDir; _setupAt = taken; }
+            }
+            if (_sections != null)
+            {
+                try { SetSetupIcon(Checks.GetVerdict(_sections)); } catch { SetSetupIcon(null); }
+            }
+            StartSetupRefresh();
+        }
+
+        // The Settings form built before it is asked for. It is forty-three rows of controls - the reading behind
+        // them is four milliseconds, the building is the rest - so the first visit used to stall exactly as every
+        // visit did before the form was kept. Built here into a collapsed panel, it is already there.
+        void WarmSettings()
+        {
+            if (_settingsView.Visibility == Visibility.Visible) return;  // ShowSettings has already done it
+            if (_settingReaders.Count > 0) return;
+            try { BuildSettings(); } catch { }
         }
 
         // The Play tab's resolution list: the game's 16:9 sizes as "WxH" tags. The port takes --res_width / --res_height
