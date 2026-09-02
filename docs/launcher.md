@@ -62,7 +62,7 @@ the scroll easing ran a script block per frame there and native code here. `laun
 | `Checks.cs` | the install check and its text report, still reading `tools\install_manifest.json` |
 | `Paths.DataText` | those data files, from `tools\` or from the copies built into the exe |
 | `Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
-| `Catalogue.cs` | the scene list, in story order |
+| `Catalog.cs` | the scene list, in story order |
 | `Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
 | `Ui\` | the window: shell, Play, Settings, Setup, artwork, smooth scrolling |
 
@@ -83,7 +83,7 @@ not there.
 **Scrolling.** WPF gives a wheel notch three "lines" and applies it in one jump - and in a `ListBox` a "line" is a
 whole row, so the scene list moved three scenes at a time. Three things fix that:
 
-- the scene list scrolls **by pixel** (`VirtualizingPanel.ScrollUnit`), keeping recycling virtualisation for its
+- the scene list scrolls **by pixel** (`VirtualizingPanel.ScrollUnit`), keeping recycling virtualization for its
   400+ rows - without it an offset of 72 would mean 72 rows rather than 72 pixels;
 - a **wheel notch** moves a target offset 72 px and the real offset eases toward it, so a flick glides and repeated
   notches accumulate instead of fighting each other. The step is taken on `CompositionTarget.Rendering` - once per
@@ -104,7 +104,7 @@ opens on Play. `--setup` and `--settings` override that at any time.
 
 **The Setup tab's icon is its verdict**, so the window says whether the install is sound without being asked: a
 green tick when everything checked out, an amber warning when something is worth a look, a red cross when a
-required file is missing or no game folder was found. It is a grey checklist only until the checks have run, which
+required file is missing or no game folder was found. It is a gray checklist only until the checks have run, which
 happens a moment after the window opens as well as every time Setup is refreshed.
 
 The window opens even when no MGS4 install can be found — it starts on Setup and says which folder it looked in,
@@ -133,26 +133,29 @@ that matched.
 it, what kind it is, a name and a one-line description of what you actually see. The stage table can say a scene
 exists; only booting it says what it is, so everything in that file was checked by launching it.
 
-**Each row says what kind of scene it is.** A coloured badge sits between the stage id and the name, in the same
-colour families the rest of the window uses: violet **Cutscene** for what you watch, amber **Briefing** for the
-Nomad briefings, dim grey **Stage** for a plain stage boot, bright grey **Start** for the two entries that start
-the game, and red **Broken** for the numbered sections that crash. The badge column is a fixed width, so the names
-line up down the list. Green **Gameplay** still exists and nothing wears it: every numbered section in the stage
-table is broken, so none of them can be booted far enough to confirm the table's word for it - the badge is there
-for a section that turns out to work, set by hand in `scene_info.json`.
+**Each row says what kind of scene it is.** A colored badge sits between the stage id and the name, in the same
+color families the rest of the window uses: violet **Cutscene** for what you watch, amber **Briefing** for the
+Nomad briefings, blue **Stage** for a plain stage boot, green **Start** for the two entries that start the game,
+and red **Broken** for the numbered sections that crash. The badge column is a fixed width, so the names line up
+down the list. Stage leans cyan rather than taking a truer blue because the stage id beside it is already the
+window's blue accent. Gray is left to a kind the launcher does not recognize.
+
+Mint **Gameplay** still exists and nothing wears it: every numbered section in the stage table is broken, so none
+of them can be booted far enough to confirm the table's word for it - the badge is there for a section that turns
+out to work, set by hand in `scene_info.json`. Its green is kept clear of Start's for that day.
 
 **Any scene can be renamed.** The panel on the right has a **Rename** link under the scene's name: it opens a name
 and a description, **Save** keeps them, **Reset** drops them and lets the data files speak again. They are stored
 per stage id in `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`, not in `tools\labels.json`, so rebuilding the
-data files cannot lose them - and because the catalogue reads them wherever it is used, a renamed scene keeps its
+data files cannot lose them - and because the catalog reads them wherever it is used, a renamed scene keeps its
 name in `--list` and in the shortcuts you make from it. Either half stands alone: a description typed over a scene
-whose name you left alone keeps the catalogue's name.
+whose name you left alone keeps the catalog's name.
 
 **Double-click a scene to start it** - the same thing the Launch button does with the options as they are
 ticked. Act headers and the star are not double-clickable: their clicks are handled before the list sees
 them, so neither can pair into one.
 
-**Favourites.** Every scene row has a star on the right: click the outline to add it, click the filled one to take
+**Favorites.** Every scene row has a star on the right: click the outline to add it, click the filled one to take
 it out. It is saved the moment it is clicked - not when the window closes - so a scene starred and a window shut
 straight after keeps it. The list of ids lives with the rest of the window's memory in
 `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`.
@@ -166,8 +169,8 @@ the act the picked scene is in so it can be seen - after that the acts are yours
 bring a row into view.
 
 **The filter chips are the badges.** One chip per kind - **Start**, **Stage**, **Cutscene**, **Briefing**,
-**Broken** - each wearing that kind's own colour: an outline while the filter is off, the colour filled in while it
-is on, so the row of chips reads as the same legend as the list under it. **Favourites** leads them, in the star's
+**Broken** - each wearing that kind's own color: an outline while the filter is off, the color filled in while it
+is on, so the row of chips reads as the same legend as the list under it. **Favorites** leads them, in the star's
 amber, because it is the one category that is a list you curate rather than something a scene is.
 
 The filter row under the search box is a checklist rather than a dropdown: nothing ticked shows everything (bar the
@@ -200,7 +203,7 @@ lists both, not their overlap.
 
 The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
 to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
-alone. The options below are greyed out while one of them is picked.
+alone. The options below are grayed out while one of them is picked.
 
 What can be ticked (all of it also works from the command line):
 
@@ -268,7 +271,7 @@ the file - or files - its rows are written to.
   settings and not its defaults; the values this add-on was verified with are in "the setup this was verified on".
 
 The files spell booleans differently — the add-on and RenoDX write `1` / `0`, the game writes `true` / `false` — so
-each key carries its own spelling and a tick box writes whichever its file expects. **Save settings** is greyed until something is actually
+each key carries its own spelling and a tick box writes whichever its file expects. **Save settings** is grayed until something is actually
 changed - it compares each control against what its file said when the form was built - and then writes all of
 them at once and says what went where (`written: 23 to mgs4_dlss.ini, 9 to mgs4.savedsettings`); a group whose file
 does not exist yet shows *not there* until whatever writes it has run.
@@ -353,7 +356,7 @@ What it reports, beyond whether a file exists:
   is the one add-on key a form cannot judge on its own. The add-on's own keys live on the Settings tab and only
   appear here when they are a problem (`Enabled=0`, a diagnostic left on), so this is not a second read-only copy
   of that tab.
-- **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialised, whether DLSS came from
+- **Last run**, parsed from `logs\mgs4_dlss.log` and `ReShade.log`: whether NGX initialized, whether DLSS came from
   the local DLL or the driver override, whether Neural Rendering actually ran, the insertion point, the Streamline
   and driver versions, and how many frames DLSS evaluated. This is the part a file list cannot tell you — a
   ReShade build **without** add-on support looks perfectly correct on disk and silently loads nothing.

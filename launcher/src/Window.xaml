@@ -90,9 +90,11 @@
       <Setter Property="Padding" Value="10,3"/>
       <Setter Property="FontSize" Value="11"/>
     </Style>
-    <!-- A filter chip is its category's badge: the badge's own colour as an outline while the filter is off, and
-         filled with it while the filter is on. The colours are per chip and set in code (MainWindow.Play), so the
-         template only says where they go - a trigger here could not know which category it was drawing. -->
+    <!-- A filter chip is its category's badge: outline, fill and light ink while the filter is on, and the fill
+         dropped and the ink lowered while it is off. The on fill is the badge's own lifted a little, because a
+         chip has to say which state it is in where a badge sitting in a row does not. The colors are per chip
+         and set in code (MainWindow.Play), so the template only says where they go - a trigger here could not
+         know which category it was drawing. -->
     <Style x:Key="Chip" TargetType="ToggleButton">
       <Setter Property="FontSize" Value="11"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
@@ -102,13 +104,18 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ToggleButton">
-            <Border x:Name="b" CornerRadius="4" Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="10,4">
-              <ContentPresenter VerticalAlignment="Center"/>
-            </Border>
+            <Grid>
+              <Border x:Name="b" CornerRadius="4" Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="10,4">
+                <ContentPresenter VerticalAlignment="Center"/>
+              </Border>
+              <!-- Hover is a wash laid over the chip rather than a fade of it: an unpicked chip is already the
+                   quiet one, and dimming it further to say "hover" says the opposite of what a hover should. -->
+              <Border x:Name="wash" CornerRadius="4" Background="Transparent" IsHitTestVisible="False"/>
+            </Grid>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="b" Property="Opacity" Value="0.78"/>
+                <Setter TargetName="wash" Property="Background" Value="#16FFFFFF"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -145,7 +152,7 @@
       </Setter>
     </Style>
     <!-- No padding on the border: it ate the height the text needed, so a box with a set height clipped whatever was
-         typed into it. The content host is inset horizontally and centred vertically instead, which cannot clip. -->
+         typed into it. The content host is inset horizontally and centered vertically instead, which cannot clip. -->
     <Style TargetType="TextBox">
       <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="CaretBrush" Value="#ECECEE"/>
@@ -180,7 +187,7 @@
         </Setter.Value>
       </Setter>
     </Style>
-    <!-- Minimise, maximise and close, in Windows' own metrics (46x32) and its own glyph font, because they are
+    <!-- Minimize, maximize and close, in Windows' own metrics (46x32) and its own glyph font, because they are
          no longer Windows' to draw. -->
     <Style x:Key="Caption" TargetType="Button">
       <Setter Property="Width" Value="46"/>
@@ -405,7 +412,7 @@
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
       <!-- By default a ListBox scrolls in whole rows, so an offset of 1 is one scene and the smooth scrolling
-           below would move 72 rows rather than 72 pixels. ScrollUnit=Pixel keeps recycling virtualisation (the
+           below would move 72 rows rather than 72 pixels. ScrollUnit=Pixel keeps recycling virtualization (the
            list is 400+ rows) while making the offset a pixel count like every other ScrollViewer here. -->
       <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
       <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
@@ -451,7 +458,7 @@
       <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. It sits on the
            left, the full height of the band; the logo is offset past Snake's face rather than over it. -->
       <Rectangle x:Name="HeroArt" HorizontalAlignment="Stretch" Visibility="Collapsed"/>
-      <!-- One translucent grey over the lot, art and bare black alike, so they stay the same colour while the
+      <!-- One translucent gray over the lot, art and bare black alike, so they stay the same color while the
            black is lifted towards the rest of the window. -->
       <Rectangle Fill="#18B4B4BE"/>
     </Grid>
@@ -491,8 +498,8 @@
     <!-- Over the art, and told the chrome to let clicks through to it rather than treating it as draggable bar. -->
     <StackPanel x:Name="CaptionButtons" Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right"
                 VerticalAlignment="Top" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-      <Button x:Name="MinBtn" Content="&#xE921;" Style="{StaticResource Caption}" ToolTip="Minimise"/>
-      <Button x:Name="MaxBtn" Content="&#xE922;" Style="{StaticResource Caption}" ToolTip="Maximise"/>
+      <Button x:Name="MinBtn" Content="&#xE921;" Style="{StaticResource Caption}" ToolTip="Minimize"/>
+      <Button x:Name="MaxBtn" Content="&#xE922;" Style="{StaticResource Caption}" ToolTip="Maximize"/>
       <Button x:Name="CloseBtn" Content="&#xE8BB;" Style="{StaticResource CaptionClose}" ToolTip="Close"/>
     </StackPanel>
 
@@ -549,7 +556,7 @@
                            VerticalAlignment="Center"/>
                 <ComboBox x:Name="AltPick" Width="140" Height="26" Margin="8,0,0,0"/>
               </StackPanel>
-              <!-- The catalogue's names are read off the stage table and the labels file, and most scenes have
+              <!-- The catalog's names are read off the stage table and the labels file, and most scenes have
                    none at all. Anything can be given a name and a note of its own here; they are kept in the
                    preferences file, so rebuilding labels.json cannot lose them. -->
               <Button x:Name="EditBtn" Content="Rename" Style="{StaticResource Link}" HorizontalAlignment="Left"
@@ -563,7 +570,7 @@
                   <Button x:Name="EditSaveBtn" Content="Save" Style="{StaticResource Primary}"/>
                   <Button x:Name="EditCancelBtn" Content="Cancel" Style="{StaticResource Flat}" Margin="8,0,0,0"/>
                   <Button x:Name="EditResetBtn" Content="Reset" Style="{StaticResource Flat}" Margin="8,0,0,0"
-                          ToolTip="Drop what you have typed and go back to the catalogue's own name"/>
+                          ToolTip="Drop what you have typed and go back to the catalog's own name"/>
                 </StackPanel>
               </StackPanel>
             </StackPanel>
@@ -634,7 +641,10 @@
               CornerRadius="8" Padding="16,11" Margin="0,0,0,14" Visibility="Collapsed">
         <TextBlock x:Name="LockText" FontSize="12" Foreground="#F2C14E" TextWrapping="Wrap"/>
       </Border>
-      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0">
+      <!-- Transparent rather than unset: a panel with no brush at all takes no hit test, so the gaps between the
+           cards would hand the wheel to whatever is behind and the page would not know it had been scrolled over.
+           The Setup tab's ScrollViewer says the same thing for the same reason. -->
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0" Background="Transparent">
         <StackPanel x:Name="SettingsHost"/>
       </ScrollViewer>
     </Grid>

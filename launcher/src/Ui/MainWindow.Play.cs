@@ -13,14 +13,20 @@ using System.Windows.Media;
 
 namespace Mgs4Launcher
 {
-    // What a scene is, as a badge: a short word and a colour of its own, so the kind reads before the name does.
+    // What a scene is, as a badge: a short word and a color of its own, so the kind reads before the name does.
     // The families are the ones the rest of the window already uses - violet for what is watched, amber for a
-    // briefing, red for the ids that crash, and two weights of grey: dim for a plain stage boot, bright for the
-    // two entries that start the game. These same words and colours are the filter chips over the list.
+    // briefing, red for the ids that crash, green for the two entries that start the game and blue for a plain
+    // stage boot. These same words and colors are the filter chips over the list.
     //
     // Gameplay is still here, and nothing wears it: every numbered section in the stage table crashes, so the
-    // catalogue calls them "broken" instead. It stays because the kind can still arrive from scene_info.json,
+    // catalog calls them "broken" instead. It stays because the kind can still arrive from scene_info.json,
     // and a section that turns out to boot should look like what it is.
+    //
+    // Every kind that a scene can actually wear has a hue of its own. Start and Stage used to be the two grays,
+    // which cost them the thing the color is for: a gray chip lit is barely a gray chip unlit. The two are far
+    // enough from the rest, and from each other, to be told apart at a glance - Stage leans cyan rather than
+    // taking a truer blue because the scene id it sits beside is already the #7C9CFF accent. Gray is left to the
+    // fallback below, which is what an unrecognized kind should look like.
     class Badge
     {
         public string Text, Back, Edge, Ink;
@@ -34,8 +40,8 @@ namespace Mgs4Launcher
                 case "gameplay":    return new Badge("Gameplay", "#142117", "#2E6B45", "#62C98A");
                 case "cutscene":    return new Badge("Cutscene", "#211A33", "#4B3E7A", "#B79CFF");
                 case "briefing":    return new Badge("Briefing", "#2A2312", "#7A6220", "#F2C14E");
-                case "start":       return new Badge("Start", "#1D1D21", "#4A4A55", "#D2D2DA");
-                case "stage-entry": return new Badge("Stage", "#1C1C20", "#3A3A44", "#8A8A94");
+                case "start":       return new Badge("Start", "#1E2410", "#557F26", "#9BE04F");
+                case "stage-entry": return new Badge("Stage", "#0F2328", "#22697A", "#4ED2E8");
                 case "broken":      return new Badge("Broken", "#2A1315", "#7A2A2F", "#FF6B66");
                 default:            return new Badge(string.IsNullOrEmpty(kind) ? "Scene" : kind,
                                                      "#1C1C20", "#3A3A44", "#8A8A94");
@@ -66,44 +72,54 @@ namespace Mgs4Launcher
         public Brush BadgeEdge { get; set; }
         public Brush BadgeInk { get; set; }
 
-        // A filled star for a favourite, an outline for the rest. Both are one character wide, so the column does
+        // A filled star for a favorite, an outline for the rest. Both are one character wide, so the column does
         // not shift as rows are starred.
-        public bool Favourite { get; set; }
-        public string Star { get { return Favourite ? "\u2605" : "\u2606"; } }
-        public Brush StarInk { get { return Widgets.Brush(Favourite ? "#F2C14E" : "#4A4A52"); } }
-        public string StarTip { get { return Favourite ? "In Favourites - click to remove" : "Add to Favourites"; } }
+        public bool Favorite { get; set; }
+        public string Star { get { return Favorite ? "\u2605" : "\u2606"; } }
+        public Brush StarInk { get { return Widgets.Brush(Favorite ? "#F2C14E" : "#4A4A52"); } }
+        public string StarTip { get { return Favorite ? "In Favorites - click to remove" : "Add to Favorites"; } }
     }
 
     partial class MainWindow
     {
-        // The chips are the badges, one per kind and in the kind's own colour, plus Favourites - the one category
+        // The chips are the badges, one per kind and in the kind's own color, plus Favorites - the one category
         // that is not a property of the scene but a list someone curates. Named scenes went with the rename: any
         // scene can have a name now, so it stopped dividing anything.
-        public const string FavouritesCat = "Favourites";
+        public const string FavoritesCat = "Favorites";
         const string BrokenCat = "Broken";
-        static readonly string[] CatNames = { FavouritesCat, "Start", "Stage", "Cutscene", "Briefing", BrokenCat };
+        static readonly string[] CatNames = { FavoritesCat, "Start", "Stage", "Cutscene", "Briefing", BrokenCat };
 
-        // The star's own amber for Favourites; every other chip takes its colour from the badge it names.
-        static string CatInk(string name)
+        // Every chip is the badge it names. Favorites names a list rather than a kind, so it has no badge of its
+        // own and takes the briefing one's, which is already the star's amber.
+        static Badge CatBadge(string name)
         {
-            if (name == FavouritesCat) return "#F2C14E";
+            if (name == FavoritesCat) return Badge.For("briefing");
             foreach (string kind in new[] { "gameplay", "cutscene", "briefing", "start", "stage-entry", "broken" })
             {
                 Badge b = Badge.For(kind);
-                if (b.Text == name) return b.Ink;
+                if (b.Text == name) return b;
             }
-            return "#97979F";
+            return Badge.For("");
         }
 
-        // Outline while the filter is off, filled while it is on. Done here rather than in the chip's style
-        // because the colour is the category's, and a trigger cannot know which category it is drawing.
+        // On, the chip is its badge: the badge's outline, its ink, and its fill lifted a fifth of the way towards
+        // that ink. The badge's own fill is 1.1:1 against the card both of them sit on - which is fine for a badge,
+        // because a badge is identified by being there at all, and useless for a chip, which has to say on or off
+        // in the same place either way. A fifth up puts the fill at 1.4-1.9:1, seen at a glance without shouting,
+        // and still holds the ink at 4.5:1 on top of it.
+        //
+        // Off, the fill goes and what is left steps back: the same outline, and the ink walked a third of the way
+        // down to the fill it would have sat on. The outline's own color as the text would be truer to the badge,
+        // but Stage outlines at 1.6:1 against the card and Cutscene at 2.0:1, which at 11px is not text any more;
+        // a third down holds every chip at 3:1 or better while still reading as the quiet one. Done here and not
+        // in the style because the color is the category's, and a trigger cannot know which one it is drawing.
         static void PaintChip(ToggleButton chip)
         {
-            Brush ink = Widgets.Brush(CatInk(chip.Tag.ToString()));
+            Badge b = CatBadge(chip.Tag.ToString());
             bool on = chip.IsChecked == true;
-            chip.BorderBrush = ink;
-            chip.Background = on ? ink : Brushes.Transparent;
-            chip.Foreground = on ? Widgets.Brush("#0B0B0C") : ink;
+            chip.BorderBrush = Widgets.Brush(b.Edge);
+            chip.Background = on ? Widgets.Mix(b.Back, b.Ink, 0.20) : Brushes.Transparent;
+            chip.Foreground = on ? Widgets.Brush(b.Ink) : Widgets.Mix(b.Ink, b.Back, 0.35);
         }
 
         List<SceneRow> _allRows;
@@ -113,14 +129,14 @@ namespace Mgs4Launcher
         List<string> CatsOf(Scene e)
         {
             var c = new List<string>();
-            if (_favourites.Contains(e.Id)) c.Add(FavouritesCat);
+            if (_favorites.Contains(e.Id)) c.Add(FavoritesCat);
             c.Add(Badge.For(e.Kind).Text);      // the badge it wears is the chip it answers to
             return c;
         }
 
         void WirePlay()
         {
-            _allRows = Catalogue.All().Select(e =>
+            _allRows = Catalog.All().Select(e =>
             {
                 Badge badge = Badge.For(e.Kind);
                 return new SceneRow
@@ -138,7 +154,7 @@ namespace Mgs4Launcher
                     BadgeBack = Widgets.Brush(badge.Back),
                     BadgeEdge = Widgets.Brush(badge.Edge),
                     BadgeInk = Widgets.Brush(badge.Ink),
-                    Favourite = _favourites.Contains(e.Id),
+                    Favorite = _favorites.Contains(e.Id),
                 };
             }).ToList();
 
@@ -174,10 +190,10 @@ namespace Mgs4Launcher
                 var row = item.DataContext as SceneRow;
                 if (row == null) return;
 
-                // The star is its own click: toggling a favourite must not also pick the scene.
+                // The star is its own click: toggling a favorite must not also pick the scene.
                 if (!row.IsHeader && HitTheStar(e.OriginalSource))
                 {
-                    ToggleFavourite(row.Id);
+                    ToggleFavorite(row.Id);
                     e.Handled = true;
                     return;
                 }
@@ -253,7 +269,7 @@ namespace Mgs4Launcher
             _shortcutBtn.Click += (s, e) => MakeShortcut();
 
             // Every act starts collapsed, so the window opens as a short list of acts rather than 400 rows.
-            foreach (string key in Catalogue.ActOrder) _collapsed[key] = true;
+            foreach (string key in Catalog.ActOrder) _collapsed[key] = true;
             ApplyFilter();
         }
 
@@ -261,7 +277,7 @@ namespace Mgs4Launcher
         // after the preferences are read, because that is where the last one comes from.
         void RestoreSelection()
         {
-            Scene entry = Catalogue.Find(_pickedId);
+            Scene entry = Catalog.Find(_pickedId);
             if (entry != null)
             {
                 _pickedId = entry.Id;
@@ -297,20 +313,20 @@ namespace Mgs4Launcher
             return false;
         }
 
-        void ToggleFavourite(string id)
+        void ToggleFavorite(string id)
         {
-            if (!_favourites.Remove(id)) _favourites.Add(id);
+            if (!_favorites.Remove(id)) _favorites.Add(id);
             foreach (SceneRow r in _allRows)
             {
                 if (r.Id != id) continue;
-                r.Favourite = _favourites.Contains(id);
+                r.Favorite = _favorites.Contains(id);
                 r.Cats = CatsOf(r.Entry);
             }
             SavePrefs();            // a starred scene should still be starred if the window is closed on the spot
             ApplyFilter();
-            Say(_favourites.Contains(id)
-                ? id + " added to Favourites (" + _favourites.Count + ")"
-                : id + " removed from Favourites (" + _favourites.Count + ")");
+            Say(_favorites.Contains(id)
+                ? id + " added to Favorites (" + _favorites.Count + ")"
+                : id + " removed from Favorites (" + _favorites.Count + ")");
         }
 
         void ApplyFilter()
@@ -330,7 +346,7 @@ namespace Mgs4Launcher
             // A search is a request to see what matched, so it overrides the collapsed groups.
             bool searching = q.Length > 0;
             var outRows = new List<SceneRow>();
-            foreach (string key in Catalogue.ActOrder)
+            foreach (string key in Catalog.ActOrder)
             {
                 var inAct = list.Where(r => r.ActKey == key).ToList();
                 if (inAct.Count == 0) continue;
@@ -340,7 +356,7 @@ namespace Mgs4Launcher
                     IsHeader = true,
                     ActKey = key,
                     Chevron = collapsed ? "▶" : "▼",
-                    HeadText = Catalogue.ActTitles.ContainsKey(key) ? Catalogue.ActTitles[key] : key,
+                    HeadText = Catalog.ActTitles.ContainsKey(key) ? Catalog.ActTitles[key] : key,
                     HeadCount = inAct.Count.ToString(),
                 });
                 if (!collapsed) outRows.AddRange(inAct);
@@ -363,7 +379,7 @@ namespace Mgs4Launcher
             _pickSub.Text = string.IsNullOrEmpty(scene.Description) ? scene.Note : scene.Description;
 
             // The game-start entries take none of the run options: a menu has no boot prompts to press through.
-            bool isStart = Catalogue.IsStartEntry(scene.Id);
+            bool isStart = Catalog.IsStartEntry(scene.Id);
             foreach (Control c in new Control[] { _optAdvance, _optMashX, _optEnd, _optHold, _holdSecs })
                 c.IsEnabled = !isStart;
             _pickWarn.Text = scene.Hidden && scene.Id == "@main"
@@ -385,12 +401,12 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------- renaming a scene
 
-        // The catalogue's names come off the stage table and labels.json, and most scenes have none: what a scene
+        // The catalog's names come off the stage table and labels.json, and most scenes have none: what a scene
         // actually is only shows once it has been booted and watched. Whatever is typed here is kept in the
         // preferences file under the scene's id, so it outlives any rebuild of the data files.
         void BeginEdit()
         {
-            Scene scene = Catalogue.Find(_pickedId);
+            Scene scene = Catalog.Find(_pickedId);
             if (scene == null) { Say("pick a scene first"); return; }
             _editName.Text = scene.Name ?? "";
             _editDesc.Text = scene.Description ?? "";
@@ -408,17 +424,17 @@ namespace Mgs4Launcher
 
         // Save writes what is in the boxes; Reset drops the entry and lets the data files speak again. Either way
         // the Scene object is updated in place, so the list row, the details panel and a shortcut made afterwards
-        // all say the same thing without rebuilding the catalogue.
+        // all say the same thing without rebuilding the catalog.
         void CommitEdit(bool reset)
         {
-            Scene scene = Catalogue.Find(_pickedId);
+            Scene scene = Catalog.Find(_pickedId);
             if (scene == null) return;
             if (reset)
             {
                 _sceneEdits.Remove(scene.Id);
                 scene.Name = scene.BaseName;
                 scene.Description = scene.BaseDescription;
-                Say(scene.Id + " back to the name the catalogue gives it");
+                Say(scene.Id + " back to the name the catalog gives it");
             }
             else
             {
@@ -434,7 +450,7 @@ namespace Mgs4Launcher
                 scene.Description = desc;
                 Say(_sceneEdits.ContainsKey(scene.Id)
                     ? scene.Id + " renamed - kept in " + Prefs.Path
-                    : scene.Id + " is as the catalogue has it");
+                    : scene.Id + " is as the catalog has it");
             }
 
             foreach (SceneRow r in _allRows)
@@ -500,7 +516,7 @@ namespace Mgs4Launcher
 
         void MakeShortcut()
         {
-            Scene scene = Catalogue.Find(_pickedId);
+            Scene scene = Catalog.Find(_pickedId);
             if (scene == null) { Say("pick a scene first"); return; }
             var dlg = new Microsoft.Win32.SaveFileDialog
             {

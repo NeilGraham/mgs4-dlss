@@ -1,4 +1,4 @@
-// The pieces every tab is built from: text, cards, rows, and the status colours. Built in code rather than XAML
+// The pieces every tab is built from: text, cards, rows, and the status colors. Built in code rather than XAML
 // because the content is data - a card per manifest group, a row per file - and the XAML holds the chrome.
 using System;
 using System.Collections.Generic;
@@ -25,6 +25,17 @@ namespace Mgs4Launcher
         public static Brush Brush(string hex)
         {
             return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        }
+
+        // The same hue at a lower key: a color walked part of the way towards another, for the states that want
+        // what they already have, quieter. t is how far, 0 being all of a and 1 all of b.
+        public static Brush Mix(string a, string b, double t)
+        {
+            var x = (Color)ColorConverter.ConvertFromString(a);
+            var y = (Color)ColorConverter.ConvertFromString(b);
+            return new SolidColorBrush(Color.FromRgb((byte)(x.R + (y.R - x.R) * t),
+                                                     (byte)(x.G + (y.G - x.G) * t),
+                                                     (byte)(x.B + (y.B - x.B) * t)));
         }
 
         public static TextBlock Text(string text, double size, string color, bool bold = false, bool mono = false)
