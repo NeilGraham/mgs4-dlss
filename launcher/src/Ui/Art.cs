@@ -154,10 +154,10 @@ namespace Mgs4Launcher
                 artBand.OpacityMask = Fade(h / band);
                 if (aspect <= 0) return;
                 double push = band * aspect * 0.32;          // clear of the face, over the shoulder
-                double lift = (h - Caption) * 0.12;          // a little above the centre line of the bar's content
+                double lift = (h - Caption) * 0.12;          // a little above the center line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);
-                // The tabs are centred down the same row, so they need the same lift or they sit low against
+                // The tabs are centered down the same row, so they need the same lift or they sit low against
                 // the logo across from them. Only the bottom is ours; the rest is the XAML's and stays as set.
                 navTabs.Margin = new Thickness(navTabs.Margin.Left, 0, navTabs.Margin.Right, lift);
             };
@@ -176,23 +176,28 @@ namespace Mgs4Launcher
             return g;
         }
 
-        // Windows groups taskbar buttons by AppUserModelID, and a process that never sets one inherits its host's.
-        public static void SetWindowIcon(Window win, string gameDir)
+        // The window used to be given mgs4.exe's icon here, which is what the taskbar button shows - so the
+        // launcher sat next to the running game wearing the game's own face, and the two buttons could not be
+        // told apart. Worse, it overrode the icon the build had embedded, including the one a release draws for
+        // itself: that artwork was never once seen in a taskbar.
+        //
+        // Nothing replaces it. A WPF window with no Icon of its own falls back to the win32 icon of the exe it
+        // came from, at whatever size Windows is asking for, which is better than anything set here could be -
+        // one icon, chosen at build time, in every size the .ico carries. Both builds badge that icon
+        // (tools\launcher_badge.ps1), so it is a tile with a play mark rather than the game's own art.
+        //
+        // What does need saying is who this process is. Windows groups taskbar buttons by AppUserModelID and a
+        // process that never sets one inherits its host's - so a launcher started from a terminal could share a
+        // button with it, under the host's icon, whatever this exe wears. That is the thing the old comment here
+        // described and the old code did not do.
+        [System.Runtime.InteropServices.DllImport("shell32.dll")]
+        static extern int SetCurrentProcessExplicitAppUserModelID(
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)] string id);
+
+        public static void SetTaskbarIdentity()
         {
-            string exe = Paths.Join(gameDir, "mgs4.exe");
-            if (!Paths.Exists(exe)) return;
-            try
-            {
-                using (System.Drawing.Icon ico = System.Drawing.Icon.ExtractAssociatedIcon(exe))
-                {
-                    if (ico == null) return;
-                    ImageSource src = Imaging.CreateBitmapSourceFromHIcon(
-                        ico.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-                    src.Freeze();
-                    win.Icon = src;
-                }
-            }
-            catch { }
+            try { SetCurrentProcessExplicitAppUserModelID("NeilGraham.Mgs4DlssLauncher"); }
+            catch { }      // pre-Win7 or a locked-down shell: the button groups as it always did
         }
     }
 }

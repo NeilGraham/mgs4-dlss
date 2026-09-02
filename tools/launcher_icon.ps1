@@ -11,6 +11,7 @@
 # The .ico holds each size as a PNG, the same layout game_icon.ps1 writes, so both builds embed the same way.
 
 Add-Type -AssemblyName System.Drawing
+. "$PSScriptRoot\launcher_badge.ps1"
 
 function New-LauncherIconBitmap([int]$s) {
     $bmp = New-Object System.Drawing.Bitmap $s, $s
@@ -76,10 +77,13 @@ function Write-LauncherIconFile([string]$icoPath) {
     $blobs = @()
     foreach ($s in $sizes) {
         $bmp = New-LauncherIconBitmap $s
+        # The same play badge the local build wears, so the two exes read as one app over different art. The tile
+        # is drawn rounded already; Add-LauncherBadge rounds it again to the same radius, which changes nothing.
+        $badged = Add-LauncherBadge $bmp
         $ms = New-Object System.IO.MemoryStream
-        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $badged.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
         $blobs += , @{ Size = $s; Bytes = $ms.ToArray() }
-        $ms.Dispose(); $bmp.Dispose()
+        $ms.Dispose(); $badged.Dispose(); $bmp.Dispose()
     }
     $fs = [System.IO.File]::Create($icoPath)
     $bw = New-Object System.IO.BinaryWriter $fs

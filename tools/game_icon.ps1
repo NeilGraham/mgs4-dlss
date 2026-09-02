@@ -9,8 +9,13 @@
 #
 # The icon is read out of the mgs4.exe already on the machine, which is why neither exe is committed: that artwork
 # is Konami's, so it is built locally rather than redistributed.
+#
+# It does not go in as the game's icon, though - it goes in rounded off and wearing a play badge (launcher_badge.ps1).
+# Straight, the launcher sat in the taskbar as a second copy of the game and there was no telling which button was
+# which.
 
 Add-Type -AssemblyName System.Drawing
+. "$PSScriptRoot\launcher_badge.ps1"
 Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 public static class Mgs4Icons {
@@ -38,10 +43,11 @@ function Write-Mgs4IconFile([string]$fromExe, [string]$icoPath) {
                 $g.DrawImage($bmp, 0, 0, $s, $s)
                 $g.Dispose(); $bmp.Dispose(); $bmp = $scaled
             }
+            $badged = Add-LauncherBadge $bmp
             $ms = New-Object System.IO.MemoryStream
-            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+            $badged.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
             $blobs += , @{ Size = $s; Bytes = $ms.ToArray() }
-            $ms.Dispose(); $bmp.Dispose(); $icon.Dispose()
+            $ms.Dispose(); $badged.Dispose(); $bmp.Dispose(); $icon.Dispose()
         } finally { [void][Mgs4Icons]::DestroyIcon($handles[0]) }
     }
     if ($blobs.Count -eq 0) { return $false }
