@@ -13,7 +13,7 @@ namespace fg {
         int reflex = 1;            // 0 off, 1 low latency, 2 low latency + boost
     };
     struct Status {
-        bool loaded = false, initialised = false, supported = false, swapchainProxied = false, active = false;
+        bool loaded = false, initialized = false, supported = false, swapchainProxied = false, active = false;
         bool dynamicSupported = false, vsyncSupported = false;
         uint32_t maxFrames = 1, framesPresented = 0, statusFlags = 0;
         uint64_t vramBytes = 0;
@@ -34,7 +34,7 @@ namespace fg {
         ID3D12Resource* depth; DXGI_FORMAT depthFormat; uint32_t depthState;
         ID3D12Resource* mv;    uint32_t mvState;         // R16G16_FLOAT, pixels
         ID3D12Resource* hudless; DXGI_FORMAT hudlessFormat; uint32_t hudlessState;   // optional
-        ID3D12Resource* ui; DXGI_FORMAT uiFormat; uint32_t uiState;                  // optional UI colour + alpha layer (same size as hudless)
+        ID3D12Resource* ui; DXGI_FORMAT uiFormat; uint32_t uiState;                  // optional UI color + alpha layer (same size as hudless)
         uint32_t renderW, renderH;                        // valid region of depth / vectors (dynamic resolution sub-rect)
         uint32_t texW, texH;                              // real size of the depth / vector textures (0 = renderW/H)
         uint32_t hudlessW, hudlessH;                      // real size of the HUD-less / UI textures (0 = renderW/H)
@@ -46,7 +46,7 @@ namespace fg {
     };
 
     // Call once the D3D12 device exists and BEFORE the game creates its swapchain. Loads sl.interposer.dll from gameDir,
-    // initialises Streamline in manual-hooking mode and hooks IDXGIFactory::CreateSwapChain* so the game's swapchain is
+    // initializes Streamline in manual-hooking mode and hooks IDXGIFactory::CreateSwapChain* so the game's swapchain is
     // created through Streamline's proxy (that is how generated frames get presented).
     void init(ID3D12Device* device, const wchar_t* gameDirW, LogFn log);
     void shutdown();

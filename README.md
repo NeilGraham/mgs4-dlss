@@ -26,7 +26,7 @@ no upscaling hooks. Everything above is reconstructed from the outside, without 
   reconstruct detail rather than just smoothing what it is handed.
 - **Depth of field re-applied after DLSS.** DLAA runs on the finished image so DLSS 5 Neural Rendering sees the whole
   picture, then the game's own DoF is re-run on top - out-of-focus characters keep the detail NR gave them.
-- **A HUD-less colour buffer and a separate UI layer** for frame generation, so the interpolator never sees the HUD and
+- **A HUD-less color buffer and a separate UI layer** for frame generation, so the interpolator never sees the HUD and
   the HUD is never warped on a generated frame.
 - **The port's quirks handled**: its dynamic resolution, the HUD drawn before the composite, the frozen backgrounds of
   the pause menu and the Codec, the Codec caller's 3D window - DLSS, NR and frame generation stay consistent through

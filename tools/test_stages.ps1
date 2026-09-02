@@ -1,5 +1,5 @@
 # Runs the add-on through a series of stages / cutscenes: for each stage it boots the game straight into it
-# (mgs4-dlss-launcher, the same code the launcher window and the desktop shortcuts use), waits, takes screenshots (normal frame + optionally the motion-vector visualiser), collects a
+# (mgs4-dlss-launcher, the same code the launcher window and the desktop shortcuts use), waits, takes screenshots (normal frame + optionally the motion-vector visualizer), collects a
 # digest of the add-on log (DRS, object motion, evaluation rate, crashes) and moves on. Results land in
 # <MGS4_OUT>\stage_tests\<timestamp>\ : <stage>_1.png, <stage>_mv.png, <stage>.log and summary.txt.
 #
@@ -10,7 +10,7 @@ param(
     [string]$Stages = "s00a00l,s02a50l_D1,s02a40l,s02a60l",
     [int]$HoldSeconds = 40,        # time in the stage after the first 3D frame before the screenshots
     [int]$Screens = 1,             # normal screenshots per stage (5 s apart)
-    [switch]$MvVis,                # also capture the motion-vector visualiser (DebugMode 5)
+    [switch]$MvVis,                # also capture the motion-vector visualizer (DebugMode 5)
     [switch]$ObjectMV,             # test with per-object motion vectors on (restored afterwards)
     [string]$GameDir = "",         # default: MGS4_DIR / config.ini / the Steam libraries (tools\paths.ps1)
     [string]$OutDir = "",          # default: MGS4_OUT\stage_tests (tools\paths.ps1)
@@ -55,7 +55,7 @@ foreach ($stage in $list) {
     else {
         $p = Get-Process mgs4
         for ($i = 1; $i -le $Screens; $i++) { if (Snapshot $p (Join-Path $out "${stage}_$i.png")) { Log "  screenshot $i" } else { Log "  screenshot $i failed" }; if ($i -lt $Screens) { Start-Sleep 5 } }
-        if ($MvVis) { SetKey "DebugMode" 5; Start-Sleep 5; if (Snapshot $p (Join-Path $out "${stage}_mv.png")) { Log "  MV visualiser screenshot" }; SetKey "DebugMode" 0; Start-Sleep 2 }
+        if ($MvVis) { SetKey "DebugMode" 5; Start-Sleep 5; if (Snapshot $p (Join-Path $out "${stage}_mv.png")) { Log "  MV visualizer screenshot" }; SetKey "DebugMode" 0; Start-Sleep 2 }
     }
     $all = @(Get-Content $addonLog); if ($all.Count -lt $logStart) { $logStart = 0 }   # log was rotated
     $lines = @($all | Select-Object -Skip $logStart)

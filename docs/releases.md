@@ -62,7 +62,7 @@ it is what NR worked on. The pieces that make it hold up:
   of saturated motion vectors on the body that DLSS-G warped into a visible pulse. Captures are now paired by their
   per-instance constant signature, and the velocity shader discards vectors that are implausibly long or vary wildly
   across one surface (`ObjectMVMaxPixels`, `ObjectMVMaxGradient`).
-- **Aiming no longer resets the DLSS history.** The game's units are millimetres; the old camera-cut limit of 1500
+- **Aiming no longer resets the DLSS history.** The game's units are millimeters; the old camera-cut limit of 1500
   units fired on every 2 m aim / cover snap, a third of all history resets in gameplay, each a frame of raw aliasing on
   the characters. The limit is 6000 (`CutPosLimit`).
 - Skinned character shaders whose view-projection sits past the first registers of their constants are now jittered
@@ -128,13 +128,13 @@ gameplay.
 DLSS runs before the game's HUD, and the HUD / UI handling is stable under any input.
 
 - **DLSS inserted before the HUD, on the final texture.** In the DLSS 5 NR configuration the HUD used to be inside the
-  image DLSS reprojected (HUD ghosting opposite to camera turns) and the HUD-less colour for frame generation was patched
+  image DLSS reprojected (HUD ghosting opposite to camera turns) and the HUD-less color for frame generation was patched
   together from a raw pre-HUD capture. DLSS (and the inline NR add-on) now run at the frame's first HUD draw, after the
   game's upscale / tonemap wrote the scene into the final texture: the game draws the HUD on top of the DLSS output,
-  that output is the HUD-less colour for DLSS-G, and the replayed UI layer is tagged valid-until-present.
+  that output is the HUD-less color for DLSS-G, and the replayed UI layer is tagged valid-until-present.
 - **HUD classifier rewritten** around the shape and place of the draws, replacing heuristics that mis-filed a third of
   the HUD every frame and failed under stress input.
-- `UIMask=1`: bias-current-colour mask + zero vectors on bright HUD detail, as the fallback for the composite insertion.
+- `UIMask=1`: bias-current-color mask + zero vectors on bright HUD detail, as the fallback for the composite insertion.
 - Debug views 6 (UI layer), 7 (HUD-less), 9 (vector field over the image).
 
 ## v1.0 (2026-08-29)
@@ -148,7 +148,7 @@ Real DLSS for the PC port of Metal Gear Solid 4 (Master Collection Vol. 2), as a
 - **DLSS 5 Neural Rendering compatible**: NGX-hooking add-ons (`renodx-dlss5.addon64`) are auto-detected; the add-on
   runs DLAA on the final image so NR works at full strength.
 - **Frame generation** (Streamline DLSS-G: 2x / 3x / 4x or dynamic to a target fps, Reflex) with depth, vectors,
-  HUD-less colour and a replayed UI layer.
+  HUD-less color and a replayed UI layer.
 - **Dynamic resolution handled correctly**: the port renders its scene into a variable sub-rect and upscales it before
   the composite; the add-on brings depth and vectors to the full grid so DLSS, NR and DLSS-G stay aligned.
 - Stable temporal history: resets only on real camera cuts. Overlay controls with GPU / CPU timing; debug views.

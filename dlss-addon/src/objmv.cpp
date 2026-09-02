@@ -220,7 +220,7 @@ void forget_pso(ID3D12PipelineState* pso)
     g_psos.erase(it);   // shared stream-out variants stay cached (the same VS comes back with the next pipeline object)
 }
 
-// Stream-out variant of a game pipeline: the same vertex shader and input layout, no rasterisation, bound under the
+// Stream-out variant of a game pipeline: the same vertex shader and input layout, no rasterization, bound under the
 // game's (stream-out enabled) root signature. Shared by VS + layout + root signature, since bgfx hands the same draw a
 // new pipeline object all the time.
 static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso, const PsoRec** recOut)
@@ -386,7 +386,7 @@ static bool create_pass_resources()
     return true;
 }
 
-// Velocity pipeline matching the game pipeline's rasteriser settings (cull mode, winding, depth bias), so the pass
+// Velocity pipeline matching the game pipeline's rasterizer settings (cull mode, winding, depth bias), so the pass
 // covers exactly the surfaces the game rendered, plus a small bias towards the camera so equal depths pass.
 static ID3D12PipelineState* vel_pso(const PsoRec* rec, DXGI_FORMAT dsvFmt, bool manualDepth, uint64_t* keyOut)
 {

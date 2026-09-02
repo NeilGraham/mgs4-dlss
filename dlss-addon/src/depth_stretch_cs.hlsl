@@ -1,6 +1,6 @@
 // Dynamic resolution: the game renders the 3D scene into the top-left (scale x scale) part of its full-size targets and
 // its post chain upscales that to the full final image before the composite. DLSS runs on the full image, so the
-// depth has to be brought to the same grid: nearest-neighbour stretch of the sub-rect depth into a full-size R32 copy.
+// depth has to be brought to the same grid: nearest-neighbor stretch of the sub-rect depth into a full-size R32 copy.
 cbuffer CB : register(b0)
 {
     float2 outSize;   // full size

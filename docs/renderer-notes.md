@@ -135,7 +135,7 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
   ReShade's `dxgi.dll` underneath (there SL's own D3D12 proxies wrap ReShade's), so it is a supported configuration.
 - **Queue/device.** Streamline's `queryDevice` passes a plain `ID3D12CommandQueue` through to the base factory
   (warning "expecting SL proxy", then the "AMD AGS / other SDK" path). The game holds ReShade's queue proxy, so ReShade
-  still recognises the queue and wraps the real swapchain. `slSetD3DDevice` receives `queue->GetDevice()` (ReShade's
+  still recognizes the queue and wraps the real swapchain. `slSetD3DDevice` receives `queue->GetDevice()` (ReShade's
   device proxy) so Streamline/DLSS-G create their resources and queues through the same object SL's swapchain proxy
   reports; the add-on's native device pointer is only used for the adapter LUID. Routing `CreateCommandQueue` through
   an SL device proxy was rejected: SL would unwrap to the native queue and ReShade would then not wrap the swapchain.
@@ -147,10 +147,10 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
   therefore moved to a hook on the proxy swapchain's `Present`/`Present1` (the game's call, render thread); the ReShade
   `present` event is ignored while the swapchain is proxied.
 - **Per frame:** first scene draw -> frame token for `g_frame`, `slReflexSleep`, PCL markers SimulationStart/End +
-  RenderSubmitStart; at the DLSS insertion (after the NGX evaluate, depth/colour/MV in NPSR, output in UAV) ->
+  RenderSubmitStart; at the DLSS insertion (after the NGX evaluate, depth/color/MV in NPSR, output in UAV) ->
   `slSetConstants` (P and clip<->prev clip from the same unjittered VP the MV pass uses, transposed for SL's row-vector
   convention, `depthInverted`, `cameraMotionIncluded`, pixel `mvecScale = 1/size`, jitter, reset) and
-  `slSetTagForFrame` (depth + MVs `eOnlyValidNow` with the command list; HUD-less colour = DLSS output in pre-post
+  `slSetTagForFrame` (depth + MVs `eOnlyValidNow` with the command list; HUD-less color = DLSS output in pre-post
   insertion; backbuffer tag with the game-image extent when letter/pillar-boxed); game Present hook -> RenderSubmitEnd +
   PresentStart, rollover, SL present, PresentEnd.
 - **Options** live via `slDLSSGSetOptions`: Off / 2x / 3x / 4x / Dynamic(`eDynamic`, `dynamicTargetFrameRate`). If
@@ -162,13 +162,13 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
 ### What the testing showed (same night)
 - bgfx resizes with `ResizeBuffers1` right after creation; through Streamline that crashed inside the plugin /
   ReShade / DXGI chain, so the proxy's `ResizeBuffers1` is turned into `ResizeBuffers`.
-- Streamline must get the **native** device: with ReShade's proxy device NGX (process-wide, initialised first by
+- Streamline must get the **native** device: with ReShade's proxy device NGX (process-wide, initialized first by
   sl.common) made the DLSS SR DLL crash in D3D12Core at `CreateFeature`.
 - DLSS-G creates its own high-priority present queue *inside its CreateSwapChain hook* and creates the real swapchain
   on it. ReShade only wraps swapchains whose queue is one of its proxies, so the add-on hooks the native device's
   `CreateCommandQueue`/`CreateCommandQueue1` and routes calls that do not come from ReShade's own module through
   ReShade's device proxy (return-address check). Result: ReShade overlay/add-ons keep working under DLSS-G.
-- Streamline is loaded only when `FrameGen != 0` at startup; the default build is the pre-FG behaviour.
+- Streamline is loaded only when `FrameGen != 0` at startup; the default build is the pre-FG behavior.
 
 ## PostDof findings (2026-09-01)
 
@@ -180,7 +180,7 @@ Design of `dlss-addon/src/fg.cpp` and the facts it rests on (Streamline 2.12 hea
   heap (12 descriptors) was likewise rewritten every frame with no ring. Both are ring-buffered now (8 frames).
 - The circle of confusion is evaluated at the game's own CoC draw (the draw is still skipped), from the depth copy and
   constants of that draw, into a half-res R16F texture on the full grid; the insertion only adds the DLSS output's
-  colour (`dof_pack_cs`) before the gather and the blend. Any missing input at the CoC draw (constants, depth copy,
+  color (`dof_pack_cs`) before the gather and the blend. Any missing input at the CoC draw (constants, depth copy,
   dispatch) leaves the game's own DoF in place for that whole frame.
 - The depth de-jitter offset is in depth-copy texels (sub-rect pixels): scaled by k on dynamic-resolution frames.
 - The game's upload-heap constant buffers are mapped once and kept (a map per scene draw before); `read_cbv` and the
@@ -214,7 +214,7 @@ RTV draw instead of a UAV (the game's targets lack UAV access).
 Read from a 13-minute gameplay log (Act 1, Snake among PMC soldiers, FrameGen dynamic to 240, PostDof switched off from
 the overlay mid-run to test):
 - 94 history resets; 31 of them with rotation delta 0.0000-0.007 and a position jump of 1600-2600 units, one every
-  ~30 s in gameplay. The game's units are millimetres (near plane ~49, camera ~30 m from the origin), so these are 2 m
+  ~30 s in gameplay. The game's units are millimeters (near plane ~49, camera ~30 m from the origin), so these are 2 m
   camera snaps - aiming in/out, cover - not cuts. Every one cleared the DLSS + NR history for a frame. `CutPosLimit`
   (default 6000) replaces the hard-coded 1500; real cuts in the same log had rotation deltas of 0.5-2.0 and are still caught.
 - Object vectors looked healthy (captured == with history, no overflow), but the pairing across frames was geometry key +
@@ -223,13 +223,13 @@ the overlay mid-run to test):
   carry the head of their vertex constants (32 floats: per-instance transform / first bones) and pair with the nearest
   unclaimed previous occurrence of the same geometry and vertex count. The stats line reports `re-paired by signature N`.
 - 165-174 scene draws per frame have no clip matrix in their first 9 registers; the logged samples into the geometry
-  target are screen-space effects (colour constants, 3784x2128 / 1892x1064 sizes), not characters.
+  target are screen-space effects (color constants, 3784x2128 / 1892x1064 sizes), not characters.
 - Remaining suspects if the on-body flicker persists: DLSS-G's interpolated frames (switch Frame generation to Off in
   the overlay - live - and compare), and `DebugMode=9` to see whether the vector silhouette of a soldier sits on the
   soldier every frame.
 - Follow-up the same afternoon: the on-body flicker only shows with frame generation on. Since the windowed state
   (3619x2036 backbuffer, 3784x2128 render) fg.cpp had been *dropping* the HUD-less and UI hints because DLSS-G only takes
-  them at the colour size - so DLSS-G was guessing the HUD from the backbuffer every frame, and its UI heuristics act on
+  them at the color size - so DLSS-G was guessing the HUD from the backbuffer every frame, and its UI heuristics act on
   any high-contrast detail (a soldier's gear). The hints are now rescaled (resample_cs, bilinear supersample) into
   backbuffer-sized copies at the composite draw - when the frame's HUD layer is complete - and tagged valid-until-present
   (`FG: HUD-less / UI hints rescaled to the backbuffer size` in the log). DebugMode 9 (vector field over the image) and
@@ -246,14 +246,14 @@ the overlay mid-run to test):
   suit saturated green, 777 saturated red (a sign flip = two captures of one geometry swapping roles between frames:
   the same mesh drawn twice a frame in two spaces, with the order or the count changing); frame 779 the lying soldier's
   torso + arm saturated magenta for one frame (previous positions from another instance of the same mesh or another
-  space). DLSS SR hides such a frame behind its colour validation; DLSS-G warps geometry with it - the FG-only flicker.
+  space). DLSS SR hides such a frame behind its color validation; DLSS-G warps geometry with it - the FG-only flicker.
   Two nets now: (a) objmv pairs occurrences of one geometry by the head of their vertex constants (instances), and
-  (b) object vectors are rasterised into their own texture over a sentinel and merged into the camera vectors only
+  (b) object vectors are rasterized into their own texture over a sentinel and merged into the camera vectors only
   where |object - camera| <= ObjectMVMaxDelta (64 px; wrong pairings are tens to hundreds of pixels) - mvmerge_cs.
   objmv logs `geometry X drawn N+ times this frame (M last frame)` with VS/PS hashes to identify the second pass.
 - The first build with the merge pass (14:00) was broken: an appended comment had swallowed the tail of the shared
   constant buffer's one-line resource description, `MV: constant buffer creation failed 0x80070057`, the motion-vector
-  pass never initialised and every evaluation ran with reset = 1 - raw jitter visibly shaking on a paused screen. Fixed
+  pass never initialized and every evaluation ran with reset = 1 - raw jitter visibly shaking on a paused screen. Fixed
   14:13. From that run's log: the bone-first vertex shaders (3f0517db..., 975b7a68..., c9e1924f..., f00558961...) have
   **no camera matrix in their first 256 registers** either - the VP is deeper than 1 KB or those shaders get the view
   and projection some other way (a projection at a fixed register with bones pre-multiplied by the view?). Only 2-4

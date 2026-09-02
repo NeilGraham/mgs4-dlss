@@ -8,7 +8,7 @@ triggers flashbacks; Options would skip it), and the recording stops at the firs
   * a static no-3D screen (act result / continue prompt / load) held for 120 s - a load followed by the cutscene
     resuming never ends the scene,
   * the hard cap.
-Prerecorded (Bink) demos are recognised (moving picture, never a 3D cutscene) and skipped. Wall-clock times of the
+Prerecorded (Bink) demos are recognized (moving picture, never a 3D cutscene) and skipped. Wall-clock times of the
 scene's start and end are stored with each raw clip; finalize_gold.py trims to the exact frames from the picture.
 
   python record_gold.py [--stages a,b] [--limit N] [--cap-minutes 20] [--dry-run]

@@ -1,4 +1,4 @@
-"""Semantic labelling helper for the recorded cutscenes.
+"""Semantic labeling helper for the recorded cutscenes.
 
   python label_recordings.py thumbs          - pull 3 frames out of every recording into <MGS4_OUT>\\thumbs
                                                (contact sheets to look at, one per recording)

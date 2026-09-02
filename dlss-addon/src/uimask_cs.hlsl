@@ -1,5 +1,5 @@
 // UI mask: wherever the replayed UI layer has content (the game's HUD is drawn into the final texture before the
-// composite, so DLSS sees it), mark the pixel in DLSS's bias-current-colour mask and zero its motion vector. DLSS then
+// composite, so DLSS sees it), mark the pixel in DLSS's bias-current-color mask and zero its motion vector. DLSS then
 // takes the HUD from the current frame instead of reprojecting it with the camera - no HUD ghosting under motion -
 // and frame generation gets zero motion on the HUD as well.
 cbuffer CB : register(b0)

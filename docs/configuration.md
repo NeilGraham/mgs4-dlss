@@ -16,7 +16,7 @@ Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=0          ; 0 = never re-create the feature (NGX-hooking add-ons are detected and handled automatically)
-DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyse draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
+DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyze draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
 JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
 JitterSignY=-1
@@ -40,7 +40,7 @@ FGTargetFps=240          ; match your display's refresh rate; the game itself ru
 Reflex=1
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 ObjectMVProps=0          ; live: 1 = object vectors also for rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes; one extra stream-out draw per such prop
-CutPosLimit=6000         ; live: camera-cut heuristic - a position jump above this many game units (millimetres) in one frame resets the DLSS history; 1500 fired on every 2 m aim / cover snap
+CutPosLimit=6000         ; live: camera-cut heuristic - a position jump above this many game units (millimeters) in one frame resets the DLSS history; 1500 fired on every 2 m aim / cover snap
 ObjectMVMaxPixels=200    ; live: an object vector longer than this (pixels per frame) is dropped for the camera vector - a wrong capture pairing gives hundreds; 0 = no limit
 ObjectMVMaxGradient=4    ; live: an object vector field changing by more than this many pixels per screen pixel across one surface is dropped (the same mesh paired with a capture in another projection); 0 = no limit
 FGHintRescale=0          ; live: 1 = in a window that is not the render size, rescale the HUD-less / UI hints to the backbuffer for DLSS-G (two 4K passes + DLSS-G's UI work; benefit not shown in testing)
@@ -48,7 +48,7 @@ SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
 FrozenBackground=1       ; live: pause menu / Codec: run DLSS before the game captures the still background it shows behind those screens
-UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-colour mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
+UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-color mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
 
 TraceFreeze=0            ; diagnostics: log the full-size draw chain around the moment the world stops rendering
 TraceFrames=0            ; diagnostics: N = trace every full-frame draw for the next N frames (live)
@@ -110,10 +110,10 @@ checkbox: with it off the "Game dynamic resolution" line should climb back to fu
 | 1 | magenta path test: the displayed image is painted magenta (proves the insertion path) |
 | 2 | bypass DLSS (A/B against the native image) |
 | 3 | trace three frames to the log |
-| 4 | analyse draw constants (log) |
+| 4 | analyze draw constants (log) |
 | 5 | the motion-vector field on its own |
 | 6 | the replayed UI layer (frame generation input) |
-| 7 | the HUD-less colour (frame generation input) |
+| 7 | the HUD-less color (frame generation input) |
 | 9 | the motion-vector field blended over the image - a character's vector silhouette must sit on the character |
 | 10 | PostDof: the blurred layer only |
 | 11 | PostDof: blur coverage |

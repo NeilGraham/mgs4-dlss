@@ -1,7 +1,7 @@
 #include "dof_common.hlsli"
-Texture2D<float4> src : register(t0);        // half-res colour + CoC
+Texture2D<float4> src : register(t0);        // half-res color + CoC
 Texture2D<float4> unused : register(t1);
-RWTexture2D<float4> dst : register(u0);      // rgb = blurred colour, a = blur coverage (0 = in focus)
+RWTexture2D<float4> dst : register(u0);      // rgb = blurred color, a = blur coverage (0 = in focus)
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID)

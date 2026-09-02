@@ -1,5 +1,5 @@
 // Velocity pass vertex shader: reads the stream-out captures of one object (clip positions of every emitted vertex,
-// this frame and last frame, same order) and rasterises the current ones. Vertices past the captured count (the draw
+// this frame and last frame, same order) and rasterizes the current ones. Vertices past the captured count (the draw
 // is issued with an upper bound) collapse to a point so their triangles have no area.
 StructuredBuffer<float4> curPos  : register(t0);
 StructuredBuffer<float4> prevPos : register(t1);

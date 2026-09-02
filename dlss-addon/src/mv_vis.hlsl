@@ -1,10 +1,10 @@
-// Debug: paint the motion-vector field into the output texture. Grey = no motion; red/green shift = x/y motion;
+// Debug: paint the motion-vector field into the output texture. Gray = no motion; red/green shift = x/y motion;
 // blue = dynamic-object mask.
 cbuffer CB : register(b0)
 {
     float2 inSize;    // motion vector texture size
     float2 outSize;   // output texture size
-    float  scale;     // colour units per pixel of motion
+    float  scale;     // color units per pixel of motion
     float  blend;     // > 0: blend the field over the existing output instead of replacing it
     float2 pad;
 };

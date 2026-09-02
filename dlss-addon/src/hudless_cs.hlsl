@@ -1,4 +1,4 @@
-// Builds the HUD-less colour for frame generation in composite mode: the DLAA output (already copied into the
+// Builds the HUD-less color for frame generation in composite mode: the DLAA output (already copied into the
 // target) keeps its anti-aliased pixels everywhere except where the replayed UI layer has content; there the
 // pre-HUD capture of the game's final texture (post-processed scene, before the HUD was drawn) is used instead.
 Texture2D<float4>   preHud : register(t0);

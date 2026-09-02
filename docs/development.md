@@ -19,7 +19,7 @@ sh dlss-addon/install.sh                    # -> <game>\MGS4\ (keeps an existing
 
 ```
 mgs4-dlss-launcher           the app, and the only entry point: Play / Settings / Setup
-launcher/src, build.ps1      the app itself: Program, Paths, Checks, Install, Catalogue, Runner, Ui/
+launcher/src, build.ps1      the app itself: Program, Paths, Checks, Install, Catalog, Runner, Ui/
 config.example.ini           machine-local paths; copy to config.ini (git-ignored)
 dlss-addon/                  src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh        where the game / the output folder live on this machine
@@ -86,4 +86,4 @@ Pushing a tag `v<version>` does the same on GitHub: `.github\workflows\release.y
 
 ## Stage rotation for testing
 
-`tools\test_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualiser with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `<MGS4_OUT>\stage_tests\<timestamp>\` (`-OutDir` overrides).
+`tools\test_stages.ps1 -Stages "s00a00l,s02a50l_D1,s03a30l_D1" -HoldSeconds 40 [-MvVis] [-ObjectMV]` boots each stage/cutscene in turn (`tools\stages.md` lists the 75 stage ids from the executable and their `_D<n>` cutscene / `_<n>` section variants; `s02a50l_D1` is the Naomi lab scene), waits for the first 3D frame, holds, takes screenshots (and the motion-vector visualizer with `-MvVis`), and writes a per-stage log digest plus `summary.txt` (evaluations, DRS frames, last scene viewport, crashes) to `<MGS4_OUT>\stage_tests\<timestamp>\` (`-OutDir` overrides).

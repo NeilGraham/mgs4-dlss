@@ -22,8 +22,8 @@
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_helpers.h>
 #include "mv_cs.h"   // g_mv_cs[]: compiled src/mv_cs.hlsl (camera-only motion vectors from depth)
-#include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualisation of the motion vectors)
-#include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less colour for frame generation)
+#include "mv_vis.h"  // g_mv_vis[]: compiled src/mv_vis.hlsl (debug visualization of the motion vectors)
+#include "hudless_cs.h"  // g_hudless_cs[]: compiled src/hudless_cs.hlsl (HUD-less color for frame generation)
 #include "resample_cs.h"
 #include "depth_stretch_cs.h"   // g_depth_stretch_cs
 #include "probe_cs.h"          // g_probe_cs: per-frame 240x135 luminance readback of pipeline stages (Probe=1)
@@ -278,7 +278,7 @@ static bool g_warmDone = false; static uint32_t g_warmEvals = 0, g_noSceneFrames
 // ---- pipeline probe (Probe=1): programmatic layout verification ---------------------------------------------------
 // Each frame, up to three pipeline stages are downsampled to 240x135 luminance on the GPU and read back through an
 // 8-frame ring. On the CPU every image is scanned for a dynamic-resolution sub-rect signature: a sharp vertical /
-// horizontal gradient wall at x = k*W (k in 0.4..0.97). Stages: 0 = the colour DLSS evaluates, 1 = our output after
+// horizontal gradient wall at x = k*W (k in 0.4..0.97). Stages: 0 = the color DLSS evaluates, 1 = our output after
 // the DoF re-apply, 2 = the texture the game's composite actually samples (what is displayed).
 static int g_cfgProbe = 0;
 static ID3D12PipelineState* g_probePso = nullptr; static ID3D12DescriptorHeap* g_probeHeap = nullptr;
@@ -293,7 +293,7 @@ static void probe_dispatch(command_list* cmd, resource src, resource_usage srcSt
 static bool g_dofReady = false, g_dofInitTried = false;
 static uint32_t g_dofSkipped = 0, g_dofFrames = 0, g_dofMissed = 0;      // draws skipped / frames re-applied / frames skipped but not re-applied
 // The circle of confusion is evaluated at the game's own CoC draw (the depth copy, constants and viewport are exactly
-// the game's at that moment) into a half-res R16F texture on the full grid; the insertion only adds the colour.
+// the game's at that moment) into a half-res R16F texture on the full grid; the insertion only adds the color.
 static resource g_dofCocOnly = { 0 }; static resource_usage g_dofCocOnlyState = resource_usage::unordered_access;
 static bool g_dofCocReadyThisFrame = false; static uint32_t g_dofCocFrame = 0;   // this frame's CoC was written (and for which frame)
 static uint32_t g_dofFallbacks = 0;                                              // frames whose inputs could not be gathered at the CoC draw: the game's DoF ran
@@ -329,14 +329,14 @@ static bool g_forceReset = false; static int g_lastEvalWindow = -1; static uint3
 static uint32_t g_fgCutFrames = 0;   // evaluations after a discontinuity during which DLSS-G is told 'cut' (no interpolation)
 // Resuming from a frozen screen (unpause, a dismissed dialog) with the camera where it was: the DLSS / NR history from
 // the last live frame is still valid, so nothing is reset; only the rectangle a 3D window (pause-menu model) occupied
-// in the meantime is excluded from the history for that frame (bias-current-colour mask), since window-mode
+// in the meantime is excluded from the history for that frame (bias-current-color mask), since window-mode
 // evaluations overwrote the history there.
 static float g_liveVP[16]; static bool g_haveLiveVP = false;
 static viewport g_lastWinRect = {}; static bool g_lastWinRectValid = false;
 static uint32_t g_resumesKept = 0;
 static bool camera_position(const float* m, float* out);
 // Camera-cut heuristic: a history reset when the orientation turns by more than ~20 degrees in a frame, or the position
-// jumps by more than CutPosLimit units. The game's units are millimetres (near plane ~49, camera ~30 m from the origin):
+// jumps by more than CutPosLimit units. The game's units are millimeters (near plane ~49, camera ~30 m from the origin):
 // the old limit of 1500 fired on every 2 m camera snap - aiming in and out, cover - a third of all resets in gameplay,
 // each a frame of raw aliasing on the characters. Real cuts turn the camera as well; 6000 keeps them.
 static float g_cfgCutPosLimit = 6000.0f;
@@ -392,7 +392,7 @@ static int g_cfgPrePost = 1;                 // effective: DLAA runs before the 
 static bool g_nrAddonLoaded = false;         // one of the CompositeIfLoaded modules is present in the process
 static char g_nrAddonName[64] = "";          // which one
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
-// into a private depth buffer; the MV pass turns that into DLSS's bias-current-colour mask (and optionally zero motion).
+// into a private depth buffer; the MV pass turns that into DLSS's bias-current-color mask (and optionally zero motion).
 static int g_cfgDynMask = 0;
 static int g_cfgUiMask = 1;
 static int g_cfgWindowScene = 1;
@@ -401,7 +401,7 @@ static int g_cfgDynZeroMV = 1;
 static resource g_dynDepth = { 0 }; static resource_view g_dynDsv = { 0 };
 static resource_usage g_dynState = resource_usage::depth_stencil_write;
 // HUD layer for frame generation in composite mode: the game's HUD draws are replayed into this RGBA target (cleared to
-// zero each frame) and handed to DLSS-G as UI colour + alpha, so generated frames get the HUD re-composited unwarped.
+// zero each frame) and handed to DLSS-G as UI color + alpha, so generated frames get the HUD re-composited unwarped.
 static resource g_ui = { 0 }; static resource_view g_uiRtv = { 0 };
 static resource_usage g_uiState = resource_usage::render_target;
 static uint32_t g_uiDrawsThisFrame = 0, g_uiDrawsLast = 0, g_uiPostSkippedThisFrame = 0, g_uiPostSkippedLast = 0;
@@ -714,7 +714,7 @@ static bool mv_init()
     if (FAILED(hr)) { logmsg("MV: CreateComputePipelineState failed 0x%08lX", (unsigned long)hr); return false; }
     pso.CS = { g_mv_vis, sizeof(g_mv_vis) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_visPso));
-    if (FAILED(hr)) { logmsg("MV: visualisation PSO failed 0x%08lX", (unsigned long)hr); return false; }
+    if (FAILED(hr)) { logmsg("MV: visualization PSO failed 0x%08lX", (unsigned long)hr); return false; }
     pso.CS = { g_hudless_cs, sizeof(g_hudless_cs) };
     hr = g_d3d->CreateComputePipelineState(&pso, IID_PPV_ARGS(&g_hudlessPso));
     if (FAILED(hr)) { logmsg("MV: HUD-less PSO failed 0x%08lX", (unsigned long)hr); return false; }
@@ -849,7 +849,7 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
 }
 
 
-// Dynamic resolution: nearest-neighbour stretch of the sub-rect scene depth into the full-size R32 copy (g_depthFull).
+// Dynamic resolution: nearest-neighbor stretch of the sub-rect scene depth into the full-size R32 copy (g_depthFull).
 static void depth_stretch_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t fullW, uint32_t fullH, float kx, float ky)
 {
     if (!g_mvReady || !g_stretchPso || !g_depthFull.handle) return;
@@ -894,7 +894,7 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
     cbSlot++;
 }
 
-// UI mask: the replayed UI layer marks HUD pixels in the bias-current-colour mask and zeroes their motion vectors.
+// UI mask: the replayed UI layer marks HUD pixels in the bias-current-color mask and zeroes their motion vectors.
 static uint32_t g_uiMaskFrames = 0;
 static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forceAll)
 {
@@ -991,7 +991,7 @@ static bool dof_init()
     logmsg("PostDof: compute passes ready (%s; %u-frame ring of constants and descriptors)", g_dofReady ? "ok" : "map failed", DOF_RING);
     return g_dofReady;
 }
-// The half-resolution textures for a fullW x fullH output: colour + CoC (the gather input), the CoC alone (written at
+// The half-resolution textures for a fullW x fullH output: color + CoC (the gather input), the CoC alone (written at
 // the game's CoC draw), the blurred layer. Re-created on a size change.
 static bool dof_ensure_textures(device* dev, uint32_t fullW, uint32_t fullH)
 {
@@ -1005,7 +1005,7 @@ static bool dof_ensure_textures(device* dev, uint32_t fullW, uint32_t fullH)
         for (resource* r : { &g_dofCoc, &g_dofCocOnly, &g_dofBlur }) if (r->handle) { dev->destroy_resource(*r); *r = { 0 }; }
         g_dofW = g_dofH = 0; return false;
     }
-    dev->set_resource_name(g_dofCoc, "MGS4DLSS DoF colour+CoC"); dev->set_resource_name(g_dofCocOnly, "MGS4DLSS DoF CoC"); dev->set_resource_name(g_dofBlur, "MGS4DLSS DoF blur");
+    dev->set_resource_name(g_dofCoc, "MGS4DLSS DoF color+CoC"); dev->set_resource_name(g_dofCocOnly, "MGS4DLSS DoF CoC"); dev->set_resource_name(g_dofBlur, "MGS4DLSS DoF blur");
     g_dofCocState = g_dofCocOnlyState = g_dofBlurState = resource_usage::unordered_access; g_dofW = hw; g_dofH = hh;
     logmsg("PostDof: half-res textures %ux%u", hw, hh);
     return true;
@@ -1060,7 +1060,7 @@ static bool dof_coc_dispatch(command_list* cmd, device* dev, const cl_state& s, 
     g_dofCocReadyThisFrame = true; g_dofCocFrame = g_frame;
     return true;
 }
-// Passes 1b..3 on g_out (in unordered_access state, left in that state): the half-res colour of the DLSS output is
+// Passes 1b..3 on g_out (in unordered_access state, left in that state): the half-res color of the DLSS output is
 // packed with this frame's CoC, the spiral gather runs, and the blurred layer is blended over the output. kx/ky = this
 // frame's dynamic-resolution scale (spiral step, and the overlay mask was replayed at the sub-rect viewport). Returns
 // false when this frame's CoC is missing or on another grid.
@@ -1090,13 +1090,13 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavOut = uavHalf; uavOut.Format = outFmt;
     ID3D12Resource* outRes = reinterpret_cast<ID3D12Resource*>(g_out.handle); ID3D12Resource* cocOnlyRes = reinterpret_cast<ID3D12Resource*>(g_dofCocOnly.handle);
     ID3D12Resource* cocRes = reinterpret_cast<ID3D12Resource*>(g_dofCoc.handle); ID3D12Resource* blurRes = reinterpret_cast<ID3D12Resource*>(g_dofBlur.handle);
-    // pass 1b: [out srv, coc-only srv, colour+coc uav, colour+coc uav]
+    // pass 1b: [out srv, coc-only srv, color+coc uav, color+coc uav]
     g_d3d->CreateShaderResourceView(outRes, &srvOut, dof_cpu(4)); g_d3d->CreateShaderResourceView(cocOnlyRes, &srvCoc, dof_cpu(5));
     g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, dof_cpu(6)); g_d3d->CreateUnorderedAccessView(cocRes, nullptr, &uavHalf, dof_cpu(7));
-    // pass 2: [colour+coc srv, colour+coc srv, blur uav, blur uav]
+    // pass 2: [color+coc srv, color+coc srv, blur uav, blur uav]
     g_d3d->CreateShaderResourceView(cocRes, &srvHalf, dof_cpu(8)); g_d3d->CreateShaderResourceView(cocRes, &srvHalf, dof_cpu(9));
     g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, dof_cpu(10)); g_d3d->CreateUnorderedAccessView(blurRes, nullptr, &uavHalf, dof_cpu(11));
-    // pass 3: [blur srv, overlay mask srv (or the colour+coc texture when there is no mask layer), out uav, out uav]
+    // pass 3: [blur srv, overlay mask srv (or the color+coc texture when there is no mask layer), out uav, out uav]
     if (haveMask) {
         if (!g_dofMaskCleared) {   // no overlay this frame: an empty mask
             if (g_dofMaskState != resource_usage::render_target) { cmd->barrier(g_dofMask, g_dofMaskState, resource_usage::render_target); g_dofMaskState = resource_usage::render_target; }
@@ -1133,7 +1133,7 @@ static bool dof_apply(command_list* cmd, device* dev, uint32_t outW, uint32_t ou
 }
 
 // Debug: paint the motion-vector field into g_out (must be in unordered_access state).
-// HUD-less colour: g_hudless (a copy of the DLAA output, in UAV state) gets the pre-HUD capture wherever the UI layer has content.
+// HUD-less color: g_hudless (a copy of the DLAA output, in UAV state) gets the pre-HUD capture wherever the UI layer has content.
 static void hudless_dispatch(command_list* cmd, uint32_t w, uint32_t h, DXGI_FORMAT fmt)
 {
     if (!g_mvReady || !g_hudlessPso) return;
@@ -1197,7 +1197,7 @@ static void resample_dispatch(command_list* cmd, resource src, resource dst, uin
     native->Dispatch((dstW + 7) / 8, (dstH + 7) / 8, 1);
 }
 // Frame generation in a window whose backbuffer is not the render size (3619x2036 window, 3784x2128 render): DLSS-G only
-// takes the HUD-less colour and the UI layer at the colour (backbuffer) size, and dropping them leaves it to guess the
+// takes the HUD-less color and the UI layer at the color (backbuffer) size, and dropping them leaves it to guess the
 // HUD from the backbuffer - artefacts on high-contrast detail in generated frames. So they are rescaled into
 // backbuffer-sized copies at the composite draw (when the HUD layer of the frame is complete) and tagged valid-until-present.
 static resource g_fgHudlessBb = { 0 }, g_fgUiBb = { 0 }; static resource_usage g_fgHudlessBbState = resource_usage::unordered_access, g_fgUiBbState = resource_usage::unordered_access;
@@ -1281,7 +1281,7 @@ static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t
 }
 
 // ---- draw-constant analysis (Phase 1b: find the view-projection matrix) --------------------------------------------
-static uint32_t g_dumpUntil = 0;           // frame index until which scene draw constants are analysed
+static uint32_t g_dumpUntil = 0;           // frame index until which scene draw constants are analyzed
 static uint32_t g_dumpDrawsLogged = 0;
 struct block_stat { uint32_t count = 0; float row0[4] = {}; };
 static std::unordered_map<uint64_t, block_stat> g_blockHist;   // (offset << 48) ^ hash(64 bytes) -> stats
@@ -1347,8 +1347,8 @@ static bool ngx_init(device* dev)
     info.LoggingInfo.LoggingCallback = [](const char* msg, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature f) { if (msg) { char b[600]; strncpy_s(b, msg, _TRUNCATE); size_t n = strlen(b); while (n && (b[n - 1] == 10 || b[n - 1] == 13)) b[--n] = 0; logmsg("[NGX %d] %s", (int)f, b); } };
 
     wchar_t appData[MAX_PATH]; swprintf_s(appData, L"%s\\logs", g_gameDirW);
-    // NGX is process-wide. When Streamline is active its common plugin has already initialised NGX with the device
-    // the game's queue reports (ReShade's proxy); initialising again with the native device gives NGX two device
+    // NGX is process-wide. When Streamline is active its common plugin has already initialized NGX with the device
+    // the game's queue reports (ReShade's proxy); initializing again with the native device gives NGX two device
     // objects for one adapter and the DLSS DLL crashed in D3D12Core at CreateFeature. Use the same object.
     ID3D12Device* ngxDev = fg::sl_device() ? fg::sl_device() : g_d3d;
     NVSDK_NGX_Result r = NVSDK_NGX_D3D12_Init_with_ProjectID("7a2f8c3e-5d41-4b9a-9e0c-3f6d2b1a8c47", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "0.1",
@@ -1506,7 +1506,7 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r32_float, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource), nullptr, resource_usage::unordered_access, &g_depthFull)) { dev->set_resource_name(g_depthFull, "MGS4DLSS depth (full grid)"); g_depthFullState = resource_usage::unordered_access; }
     else logmsg("create full-grid depth texture failed (dynamic resolution will not be corrected)");
     dev->set_resource_name(g_out, "MGS4DLSS output");
-    // Phase 2: private depth for replayed dynamic draws + the mask DLSS gets as bias-current-colour
+    // Phase 2: private depth for replayed dynamic draws + the mask DLSS gets as bias-current-color
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r24_g8_typeless, 1, memory_heap::default_, resource_usage::depth_stencil | resource_usage::shader_resource),
                              nullptr, resource_usage::depth_stencil_write, &g_dynDepth)) {
         dev->set_resource_name(g_dynDepth, "MGS4DLSS dynamic depth");
@@ -1527,7 +1527,7 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     else logmsg("pre-HUD capture texture failed");
     if (dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::shader_resource), nullptr, resource_usage::copy_dest, &g_keep)) { dev->set_resource_name(g_keep, "MGS4DLSS frozen frame"); g_keepState = resource_usage::copy_dest; g_keepValid = false; }
     else logmsg("frozen-frame texture failed (the frozen background will be the game's 1080p seed)");
-    if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::copy_dest, &g_hudless)) { dev->set_resource_name(g_hudless, "MGS4DLSS HUD-less colour"); g_hudlessState = resource_usage::copy_dest; }
+    if (dev->create_resource(resource_desc(w, h, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_dest | resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::copy_dest, &g_hudless)) { dev->set_resource_name(g_hudless, "MGS4DLSS HUD-less color"); g_hudlessState = resource_usage::copy_dest; }
     else logmsg("HUD-less texture failed");
     if (dev->create_resource(resource_desc(outW, outH, 1, 1, fmt, 1, memory_heap::default_, resource_usage::copy_source | resource_usage::shader_resource | resource_usage::unordered_access), nullptr, resource_usage::unordered_access, &g_scratch)) { dev->set_resource_name(g_scratch, "MGS4DLSS DRS resample"); g_scratchState = resource_usage::unordered_access; }
     else logmsg("DRS scratch texture failed");
@@ -1646,7 +1646,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // The port renders the 3D scene into the top-left sub-rect and its post chain upscales it to the full final image
     // before the composite (the composite samples the whole texture). DLSS therefore sees a full-size image, and depth
     // and motion vectors must be on that full grid: the depth is stretched into g_depthFull, the camera vectors are
-    // computed per full-grid pixel from the sub-res depth, object vectors are rasterised with the full viewport.
+    // computed per full-grid pixel from the sub-res depth, object vectors are rasterized with the full viewport.
     // DRS=2 (legacy) instead evaluates DLSS on the sub-rect and resamples the output back into it.
     const bool fullGrid = g_cfgDRS != 2;
     // Windowed scene (Codec caller / pause-menu model): no full-frame 3D viewport this frame, but a window one. The
@@ -1677,7 +1677,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     const bool geoIsFinal = !g_curGeoRt || g_curGeoRt == g_finalRt[0] || g_curGeoRt == g_finalRt[1] || g_curGeoRt == color.handle;
     if (g_frozen && (g_freshWrite || (!g_windowMode && g_haveFrameVP && g_depthOnDrawsThisFrame >= 400 && !geoIsFinal))) {
         g_frozen = false;
-        static uint32_t nlog = 0; if (nlog++ < 40) logmsg("frozen state cleared at frame %u: %s (scene write from %s, geo target %p, finals %p/%p, colour %p, depth-tested %u, window %d)", g_frame, g_freshWrite ? "fresh scene write" : "live scene into a geometry target", desc_str(dev, resource{ g_finalSceneSrc }).c_str(), (void*)g_curGeoRt, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)color.handle, g_depthOnDrawsThisFrame, (int)g_windowMode);
+        static uint32_t nlog = 0; if (nlog++ < 40) logmsg("frozen state cleared at frame %u: %s (scene write from %s, geo target %p, finals %p/%p, color %p, depth-tested %u, window %d)", g_frame, g_freshWrite ? "fresh scene write" : "live scene into a geometry target", desc_str(dev, resource{ g_finalSceneSrc }).c_str(), (void*)g_curGeoRt, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)color.handle, g_depthOnDrawsThisFrame, (int)g_windowMode);
     }
     // Pass-through only from the seed state, and only from the second consecutive frame without a fresh scene write:
     // a single frame whose camera matrix or scene write was missed inside a live cutscene must never be shown raw
@@ -1696,7 +1696,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, mvW, mvH, kx, ky, mvRect);
 
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
-    // Per-object motion: rasterise the stream-out captures over the camera vectors (depth-tested against the scene depth).
+    // Per-object motion: rasterize the stream-out captures over the camera vectors (depth-tested against the scene depth).
     if (g_cfgObjectMV && objmv::has_captures() && g_mvRtv.handle) {
         auto itv = g_dsvForDs.find(depth.handle);
         const bool haveDsv = itv != g_dsvForDs.end() && itv->second.handle;
@@ -1706,7 +1706,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             const float k = (g_scaling && g_internalW) ? float(g_renderW) / float(g_internalW) : 1.0f, ky2 = (g_scaling && g_internalH) ? float(g_renderH) / float(g_internalH) : 1.0f;
             const viewport& sv = scene_vp_now();
             // full grid: the captured clip positions are viewport-independent, so the full viewport puts each object where
-            // the (upscaled) image shows it; legacy sub-rect mode rasterises into the scene viewport
+            // the (upscaled) image shows it; legacy sub-rect mode rasterizes into the scene viewport
             D3D12_VIEWPORT svp = (!fullGrid && scene_vp_now_valid()) ? D3D12_VIEWPORT{ sv.x * k, sv.y * ky2, sv.width * k, sv.height * ky2, sv.min_depth, sv.max_depth }
                                : g_windowMode ? D3D12_VIEWPORT{ g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height, 0, 1 }
                                : D3D12_VIEWPORT{ 0, 0, float(cd.texture.width), float(cd.texture.height), 0, 1 };
@@ -1719,17 +1719,17 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             g_objMvFrames++;
         }
     }
-    // HUD: bias-current-colour mask + zero vectors from the replayed UI layer (the HUD is inside the image DLSS sees)
+    // HUD: bias-current-color mask + zero vectors from the replayed UI layer (the HUD is inside the image DLSS sees)
     bool uiMasked = g_cfgUiMask && !g_cfgPrePost && !upscale && g_cfgDRS != 2 && g_ui.handle && g_uiDrawsThisFrame > 0 && g_uimaskPso;
     // No depth-tested draw at all this frame (Codec call: the face is rendered without depth into an HDR buffer over the
-    // previous frame's image): nothing to reconstruct temporally, so every pixel is bias-current-colour with zero motion -
+    // previous frame's image): nothing to reconstruct temporally, so every pixel is bias-current-color with zero motion -
     // no ghosting or smearing anywhere, while the NR add-on still processes the frame.
     const bool no3d = g_depthOnDrawsThisFrame == 0 && !upscale && g_cfgDRS != 2 && g_ui.handle && g_mask.handle && g_uimaskPso;
-    { static bool was = false; if (no3d != was) { was = no3d; logmsg("no 3D scene this frame (%s): %s", no3d ? "e.g. Codec" : "3D scene back", no3d ? "whole frame bias-current-colour, zero motion" : "normal reconstruction"); } }
+    { static bool was = false; if (no3d != was) { was = no3d; logmsg("no 3D scene this frame (%s): %s", no3d ? "e.g. Codec" : "3D scene back", no3d ? "whole frame bias-current-color, zero motion" : "normal reconstruction"); } }
     if (no3d) { uimask_dispatch(cmd, cd.texture.width, cd.texture.height, true); uiMasked = true; }
     else if (uiMasked) uimask_dispatch(cmd, cd.texture.width, cd.texture.height, false);
     if (resumeKept && g_lastWinRectValid && g_mask.handle && g_mvHeap && g_lastWinRect.width > 0) {
-        // the pause-menu model was evaluated in this rectangle: its history is not the world's - current colour there
+        // the pause-menu model was evaluated in this rectangle: its history is not the world's - current color there
         const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(23) * 4 * inc;
         D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_mvHeap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(23) * 4 * inc;
@@ -1772,7 +1772,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     if (g_cfgDebugMode == 5) {
         vis_dispatch(cmd, visInW, visInH, outW, outH);   // show the MV field instead of the DLSS result
     } else if (g_cfgDebugMode == 7 && g_hudless.handle && g_preHudCaptured && !upscale) {
-        // show the HUD-less colour DLSS-G would get: build it here (same steps as the tagging path), then copy it over the output
+        // show the HUD-less color DLSS-G would get: build it here (same steps as the tagging path), then copy it over the output
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (!NVSDK_NGX_FAILED(r)) {
             cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_source);
@@ -1788,7 +1788,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
         }
     } else if (g_cfgDebugMode == 6 && g_ui.handle && !upscale) {
-        // show the replayed UI layer instead of the DLSS result (what DLSS-G gets as UI colour + alpha)
+        // show the replayed UI layer instead of the DLSS result (what DLSS-G gets as UI color + alpha)
         cmd->barrier(g_out, resource_usage::unordered_access, resource_usage::copy_dest);
         if (g_uiState != resource_usage::copy_source) { cmd->barrier(g_ui, g_uiState, resource_usage::copy_source); g_uiState = resource_usage::copy_source; }
         cmd->copy_resource(g_ui, g_out);
@@ -1823,17 +1823,17 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
 
     if (g_cfgPostDof && g_dofSeenThisFrame && g_dofCbValid && g_dofCbGValid && !upscale && !frozenPass && !g_windowMode && !NVSDK_NGX_FAILED(r)
         && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9 && g_cfgDRS != 2) {
-        // g_out is always the DLSS output size; the colour texture must match it (a smaller texture - e.g. a 1920x1080 seed -
+        // g_out is always the DLSS output size; the color texture must match it (a smaller texture - e.g. a 1920x1080 seed -
         // would squeeze the blur layer into the top-left quadrant of the output)
-        if (outW != g_dlssOutW || outH != g_dlssOutH) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: skipped on frame %u - colour %ux%u is not the DLSS output size %ux%u", g_frame, outW, outH, g_dlssOutW, g_dlssOutH); g_dofMissed++; }
+        if (outW != g_dlssOutW || outH != g_dlssOutH) { static uint32_t n = 0; if (n++ < 5) logmsg("PostDof: skipped on frame %u - color %ux%u is not the DLSS output size %ux%u", g_frame, outW, outH, g_dlssOutW, g_dlssOutH); g_dofMissed++; }
         else if (dof_apply(cmd, dev, g_dlssOutW, g_dlssOutH, static_cast<DXGI_FORMAT>(cd.texture.format), g_dofKx, g_dofKy)) g_dofFrames++; else g_dofMissed++;
     } else if (g_cfgPostDof && g_dofSeenThisFrame) g_dofMissed++;
     if (g_cfgProbe && !upscale && !NVSDK_NGX_FAILED(r)) probe_dispatch(cmd, g_out, g_outState, 1);
     objmv::mark_frame_end(native);
 
-    if (fg::status().initialised && g_cfgFgMode != 0) {
+    if (fg::status().initialized && g_cfgFgMode != 0) {
         // Frame generation inputs: depth + motion vectors (render res) and, before post/HUD, the anti-aliased image as
-        // HUD-less colour. In composite mode the UI is baked into the image so no HUD-less colour is tagged.
+        // HUD-less color. In composite mode the UI is baked into the image so no HUD-less color is tagged.
         fg::FrameInputs fi = {};
         fi.cmd = native;
         fi.depth = reinterpret_cast<ID3D12Resource*>(dlssDepth.handle); fi.depthFormat = depthStretched ? DXGI_FORMAT_R32_FLOAT : static_cast<DXGI_FORMAT>(dd.texture.format); fi.depthState = depthStretched ? (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
@@ -1865,7 +1865,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             static bool once = false; if (!once) { once = true; logmsg("FG: HUD-less = DLSS output (pre-HUD insertion on the final texture); UI layer tagged valid-until-present"); }
         } else if (g_cfgPrePost && !upscale && g_cfgDebugMode != 5) { fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS; }
         else if (!g_cfgPrePost && !upscale && !drsActive && g_cfgDebugMode != 5 && g_ui.handle && g_uiDrawsThisFrame > 0) {
-            // composite mode: the image DLSS-G sees has the HUD baked in; hand it the replayed HUD layer as UI colour+alpha
+            // composite mode: the image DLSS-G sees has the HUD baked in; hand it the replayed HUD layer as UI color+alpha
             // so it re-composites the HUD on generated frames instead of warping it with the scene
             if (g_uiState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_ui, g_uiState, resource_usage::shader_resource_non_pixel); g_uiState = resource_usage::shader_resource_non_pixel; }
             fi.hudless = reinterpret_cast<ID3D12Resource*>(g_out.handle); fi.hudlessFormat = static_cast<DXGI_FORMAT>(cd.texture.format); fi.hudlessState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
@@ -2281,7 +2281,7 @@ static void probe_analyze(int stage, uint32_t slot)
     if (!frame) return;
     g_probeMeta[stage][slot] = 0;
     const uint8_t* img = g_probeRbPtr + (UINT64((uint32_t)stage * 8 + slot) * PROBE_SLOT_BYTES);
-    // TRANSIENT walls: analyse the difference against the previous frame of the same stage. Static UI edges (HUD bars,
+    // TRANSIENT walls: analyze the difference against the previous frame of the same stage. Static UI edges (HUD bars,
     // Codec panel borders) cancel out; a layout flash (sub-rect content appearing for a frame) leaves a sharp wall.
     const uint32_t prevSlot = (slot + 7) % 8;
     const uint32_t prevFrame = g_probeMeta[stage][prevSlot] ? g_probeMeta[stage][prevSlot] : frame - 1;
@@ -2306,7 +2306,7 @@ static void probe_analyze(int stage, uint32_t slot)
     for (uint32_t x = 0; x + 1 < PROBE_W; ++x) { colGrad[x] /= PROBE_H; colBase += colGrad[x]; }
     for (uint32_t y = 0; y + 1 < PROBE_H; ++y) { rowGrad[y] /= PROBE_W; rowBase += rowGrad[y]; }
     colBase /= PROBE_W - 1; rowBase /= PROBE_H - 1;
-    // strongest wall in the k = 0.40..0.97 range, compared against its own neighbourhood
+    // strongest wall in the k = 0.40..0.97 range, compared against its own neighborhood
     float bestC = 0; uint32_t bestX = 0;
     for (uint32_t x = PROBE_W * 2 / 5; x < PROBE_W * 97 / 100; ++x) {
         const float nb = 0.25f * (colGrad[x - 2] + colGrad[x - 1] + colGrad[x + 1] + colGrad[x + 2]);
@@ -2343,7 +2343,7 @@ static void probe_analyze(int stage, uint32_t slot)
 static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
 {
     if (g_scaling || g_bbW == 0 || g_bbH == 0) { g_warmDone = true; return; }   // only the DLAA layout is known in advance
-    if (!ngx_init(dev)) { logmsg("pre-warm: NGX init failed - giving up"); g_warmDone = true; return; }   // with Streamline, NGX is not initialised at device creation
+    if (!ngx_init(dev)) { logmsg("pre-warm: NGX init failed - giving up"); g_warmDone = true; return; }   // with Streamline, NGX is not initialized at device creation
     LARGE_INTEGER f, t0, t1; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
     const format fmt = g_dlssFmt != format::unknown ? g_dlssFmt : format::r8g8b8a8_unorm;
     if (!g_dlss) {
@@ -2398,7 +2398,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // frozen screens (Codec / pause): log the full-frame draw chain so the snapshot the background is built
             // from can be identified (source texture -> blur target -> the blit into the final image)
             if ((g_cfgTraceFreeze || tracing()) && s.rt_w >= 1280 && s.rt_h >= 720) {
-                // blits / fullscreen passes (few vertices) and any draw whose first texture is frame-sized; geometry is summarised per frame
+                // blits / fullscreen passes (few vertices) and any draw whose first texture is frame-sized; geometry is summarized per frame
                 resource src0 = { 0 }; uint32_t sw = 0, sh = 0;
                 if (s.table_set[1]) { resource r = resolve_descriptor(dev, s.tables[1], 0); if (r.handle && is_live(r.handle)) { resource_desc d = dev->get_resource_desc(r); if (d.type == resource_type::texture_2d) { src0 = r; sw = d.texture.width; sh = d.texture.height; } } }
                 if (da.count <= 8 || sw >= 640) {
@@ -2688,7 +2688,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // 2048x4096 and the like - large, but not frame-shaped)
                     auto sceneSized = [&](const resource_desc& d) {
                         if (d.type != resource_type::texture_2d || d.texture.width * 2 < g_dlssW || d.texture.height * 2 < g_dlssH) return false;
-                        // a depth texture (the port's depth copies / fog passes sample it full-screen) is not scene colour: the
+                        // a depth texture (the port's depth copies / fog passes sample it full-screen) is not scene color: the
                         // pause menu's closing frame samples it into the final texture and looked like a fresh scene write
                         switch (d.texture.format) { case format::r24_g8_typeless: case format::d24_unorm_s8_uint: case format::r32_typeless: case format::d32_float: case format::r16_typeless: case format::d16_unorm: case format::r32_g8_typeless: case format::d32_float_s8_uint: return false; default: break; }
                         const float a = float(d.texture.width) / float(d.texture.height), fa = float(g_dlssW) / float(g_dlssH);
@@ -2717,7 +2717,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     else if (!g_injectedThisFrame && !g_windowInjectedThisFrame && !g_cfgPrePost && !g_scaling && g_cfgEnabled && g_cfgDebugMode != 2) {
                         // Composite mode with a HUD: run DLSS on the final texture now, before its first HUD draw. DLSS (and
                         // any NGX post-processing add-on evaluating inline) then never sees the HUD, the HUD is drawn by the
-                        // game on top of the DLSS output, and the DLSS output is the HUD-less colour for frame generation.
+                        // game on top of the DLSS output, and the DLSS output is the HUD-less color for frame generation.
                         static bool once = false; if (!once) { once = true; logmsg("pre-HUD insertion (final): DLSS on the final texture %s before its first HUD draw (composite skipped)", desc_str(dev, s.rt).c_str()); }
                         t_reentrant = true; cmd->bind_render_targets_and_depth_stencil(0, nullptr, resource_view{ 0 }); t_reentrant = false;
                         g_finalPreHudThisFrame = true;
@@ -2815,7 +2815,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
     if (g_sceneDrawsThisFrame < 20) return;
     if (!g_traceArmed) {
         g_traceArmed = true; g_traceUntil = g_frame + 3; logmsg("tracing backbuffer draws/copies for frames %u..%u", g_frame, g_traceUntil - 1);
-        if (g_dumpPending) { g_dumpPending = false; g_dumpUntil = g_frame + 3; g_dumpDrawsLogged = 0; logmsg("analysing scene draw constants for frames %u..%u", g_frame + 1, g_dumpUntil - 1); }
+        if (g_dumpPending) { g_dumpPending = false; g_dumpUntil = g_frame + 3; g_dumpDrawsLogged = 0; logmsg("analyzing scene draw constants for frames %u..%u", g_frame + 1, g_dumpUntil - 1); }
     }
 
     uint32_t drawIdx;
@@ -2981,7 +2981,7 @@ static void reload_config()
     if (g_cfgDebugMode != g_cfgLastDebugMode) {
         logmsg("DebugMode -> %d", g_cfgDebugMode); g_cfgLastDebugMode = g_cfgDebugMode;
         if (g_cfgDebugMode == 3) { g_traceUntil = g_frame + 3; logmsg("tracing backbuffer draws/copies for frames %u..%u", g_frame, g_traceUntil - 1); }
-        if (g_cfgDebugMode == 4) { if (g_traceArmed) { g_dumpUntil = g_frame + 2; g_dumpDrawsLogged = 0; logmsg("analysing scene draw constants for frames %u..%u", g_frame, g_dumpUntil - 1); } else g_dumpPending = true; }
+        if (g_cfgDebugMode == 4) { if (g_traceArmed) { g_dumpUntil = g_frame + 2; g_dumpDrawsLogged = 0; logmsg("analyzing scene draw constants for frames %u..%u", g_frame, g_dumpUntil - 1); } else g_dumpPending = true; }
     }
 }
 
@@ -3132,8 +3132,8 @@ static void on_init_device(device* dev)
     else {
         logmsg("frame generation off at startup: Streamline not loaded (set FrameGen in the ini / overlay and restart to use it)");
         // Without Streamline nothing loads NGX before our first CreateFeature, and NGX-hooking add-ons (renodx-dlss5)
-        // install their hooks when _nvngx.dll loads: initialise NGX now so the first create is already hooked.
-        if (g_cfgEnabled && ngx_init(dev)) logmsg("NGX initialised at device creation (no Streamline): NGX-hooking add-ons can hook before the first CreateFeature");
+        // install their hooks when _nvngx.dll loads: initialize NGX now so the first create is already hooked.
+        if (g_cfgEnabled && ngx_init(dev)) logmsg("NGX initialized at device creation (no Streamline): NGX-hooking add-ons can hook before the first CreateFeature");
     }
     if (g_cfgEnabled && (g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA || g_cfgRenderResW)) {
         if (!g_internalW) logmsg("%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgRenderResW ? "RenderRes" : g_cfgModeName);
@@ -3209,12 +3209,12 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
     if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
     static const int dbgModes[] = { 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12 };
-    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyse draw constants", "Motion vectors (field only)", "UI layer (frame generation)", "HUD-less colour (frame generation)",
+    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyze draw constants", "Motion vectors (field only)", "UI layer (frame generation)", "HUD-less color (frame generation)",
                           "Motion vectors blended over the image (a character's vector silhouette must sit on the character)", "DoF: blurred layer only", "DoF: blur coverage", "DoF: overlay mask" };
     int d = 0; for (int i = 0; i < 12; ++i) if (dbgModes[i] == g_cfgDebugMode) d = i;
     if (ImGui::Combo("Debug", &d, dbg, 12)) { write_ini_int("DebugMode", dbgModes[d]); reload_config(); }
     ImGui::Separator();
-    ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialised yet"));
+    ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
     else ImGui::Text("Feature: none yet");
     ImGui::Text("Evaluations: %u  (%.0f/s)", g_evalCount, g_evalRate);
@@ -3244,7 +3244,7 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Combo("Insertion point (DLAA)", &ppSel, ppNames, 3)) { write_ini("PrePost", ppSel == 0 ? "auto" : (ppSel == 1 ? "1" : "0")); reload_config(); }
     ImGui::Text("Active: %s | DLSS post-processing add-on: %s | pre-post %u frames, composite %u frames", g_cfgPrePost ? "pre-post" : "composite", g_nrAddonLoaded ? g_nrAddonName : "none (CompositeIfLoaded list in ini)", g_prePostInjections, g_compositeInjections);
     bool dm = g_cfgDynMask != 0;
-    if (ImGui::Checkbox("Character mask (skinned meshes -> bias current colour)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
+    if (ImGui::Checkbox("Character mask (skinned meshes -> bias current color)", &dm)) { g_cfgDynMask = dm ? 1 : 0; write_ini_int("DynamicMask", g_cfgDynMask); }
     bool dp2 = g_cfgDynMaskProps != 0;
     if (ImGui::Checkbox("Also mask props with their own transform", &dp2)) { g_cfgDynMaskProps = dp2 ? 1 : 0; write_ini_int("DynamicMaskProps", g_cfgDynMaskProps); }
     bool dz = g_cfgDynZeroMV != 0;
@@ -3273,18 +3273,18 @@ static void draw_overlay(effect_runtime*)
         if (g_cfgFgMode == 4) {
             float t = g_cfgFgTargetFps;
             if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }
-            if (!st.dynamicSupported && st.initialised) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
+            if (!st.dynamicSupported && st.initialized) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
         }
         const char* rfNames[] = { "Off", "On", "On + Boost" };
         int rf = g_cfgReflex;
         if (ImGui::Combo("NVIDIA Reflex", &rf, rfNames, 3)) { write_ini_int("Reflex", rf); reload_config(); }
         if (!st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline runtime (sl.interposer.dll, sl.dlss_g.dll, ...) not found next to mgs4.exe");
-        else if (!st.initialised) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline failed to initialise: %s", st.lastError);
+        else if (!st.initialized) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline failed to initialize: %s", st.lastError);
         else if (!st.supported) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS Frame Generation not supported: %s", st.lastError[0] ? st.lastError : "adapter/driver");
         else if (!st.swapchainProxied) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Swapchain was not created through Streamline (restart the game)");
         else {
             ImGui::Text("%s | status 0x%X | max %ux | dynamic MFG %s | vsync %s | VRAM %.0f MB", st.slVersion, st.statusFlags, st.maxFrames + 1, st.dynamicSupported ? "yes" : "no", st.vsyncSupported ? "ok" : "off required", st.vramBytes / 1048576.0);
-            ImGui::Text("Presented %u frames | HUD-less colour: %s", st.framesPresented, g_cfgPrePost ? "yes (pre-post)" : "composite: DLAA output + replayed UI layer");
+            ImGui::Text("Presented %u frames | HUD-less color: %s", st.framesPresented, g_cfgPrePost ? "yes (pre-post)" : "composite: DLAA output + replayed UI layer");
             if (!g_cfgPrePost) ImGui::Text("UI layer: %u HUD draws replayed last frame, %u post passes skipped; HUD-less frames built %u", g_uiDrawsLast, g_uiPostSkippedLast, g_hudlessFrames);
             if (st.lastError[0]) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", st.lastError);
         }

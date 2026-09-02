@@ -1,11 +1,11 @@
 """Finds depth-of-field flash frames in a recording: frames where the picture's high-frequency (sharpness) energy
-jumps against its neighbours - a lost/misplaced blur layer sharpens a region for a frame or two - and, for each hit,
-where the change sits (quadrant profile), so a blur layer that collapsed into the top-left sub-rect is recognised.
+jumps against its neighbors - a lost/misplaced blur layer sharpens a region for a frame or two - and, for each hit,
+where the change sits (quadrant profile), so a blur layer that collapsed into the top-left sub-rect is recognized.
 
   python dof_flash.py <file.mkv> [--ss S] [--t T] [--out DIR] [--thresh 0.18]
 
 Prints one line per flash with the frame time, the sharpness jump, and the left/right + top/bottom split of the
-change; writes the flagged frames (and one neighbour each side) as PNGs into --out for visual confirmation.
+change; writes the flagged frames (and one neighbor each side) as PNGs into --out for visual confirmation.
 """
 import argparse, os, subprocess, sys
 import numpy as np
@@ -72,7 +72,7 @@ def main():
     if cur:
         runs.append(cur)
 
-    print(f"{n} frames analysed, {len(hits)} flash frames in {len(runs)} runs (thresh {a.thresh})")
+    print(f"{n} frames analyzed, {len(hits)} flash frames in {len(runs)} runs (thresh {a.thresh})")
     for r in runs:
         i, rel, rel_tl = max(r, key=lambda x: abs(x[1]))
         t = a.ss + i / a.fps

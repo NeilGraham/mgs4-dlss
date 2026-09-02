@@ -28,7 +28,7 @@ add-on. None of those can be redistributed here.
      the launcher next to `mgs4.exe` (an ini already there is kept).
 4. Press **Re-check** (F5): every row should be green. Then start the game from the **Play** tab.
 
-Setup's **Last run** card reads the logs of the previous game run and says whether NGX initialised, whether Neural
+Setup's **Last run** card reads the logs of the previous game run and says whether NGX initialized, whether Neural
 Rendering ran, and how many frames DLSS evaluated - the part a file list cannot tell you. `mgs4-dlss-launcher --report`
 prints the same check as text for an issue.
 

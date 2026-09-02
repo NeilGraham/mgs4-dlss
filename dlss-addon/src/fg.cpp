@@ -67,7 +67,7 @@ static bool g_reflexDirty = true;
 static ULONGLONG g_lastPoll = 0;
 static uint32_t g_gameFramesSincePoll = 0;
 static uint32_t g_lastOptFrames = 1; static int g_lastOptMode = -1; static float g_lastOptTarget = -1;
-static uint32_t g_lastSizes[4] = { 0, 0, 0, 0 };   // render w/h, colour w/h of the last apply_options call
+static uint32_t g_lastSizes[4] = { 0, 0, 0, 0 };   // render w/h, color w/h of the last apply_options call
 
 // swapchain hooking
 typedef HRESULT (STDMETHODCALLTYPE* PFN_CreateSwapChain)(IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
@@ -131,7 +131,7 @@ static bool ensure_device(IUnknown* pDevice)
     if (FAILED(pDevice->QueryInterface(IID_PPV_ARGS(&q))) || !q) return false;
     if (!g_slDevice) {
         // Streamline gets the native device: NGX is process-wide and the DLSS SR feature this add-on creates on the
-        // game's native command lists crashed in D3D12Core when NGX had been initialised (by Streamline's common
+        // game's native command lists crashed in D3D12Core when NGX had been initialized (by Streamline's common
         // plugin) with ReShade's proxy device instead. The queue's own device (ReShade's proxy) is only logged.
         ID3D12Device* d = g_device; if (d) d->AddRef();
         { ID3D12Device* qd = nullptr; q->GetDevice(IID_PPV_ARGS(&qd)); LOG("FG: queue reports device %p (native %p)", (void*)qd, (void*)g_device); if (qd && qd != g_device) g_reshadeDevice = qd; else if (qd) qd->Release(); }
@@ -237,7 +237,7 @@ static void hook_present(IDXGISwapChain* proxy)
 
 static HRESULT STDMETHODCALLTYPE hk_CreateSwapChain(IDXGIFactory* self, IUnknown* pDevice, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** out)
 {
-    if (t_inside || !g_st.initialised || !ensure_device(pDevice)) return o_CreateSwapChain(self, pDevice, desc, out);
+    if (t_inside || !g_st.initialized || !ensure_device(pDevice)) return o_CreateSwapChain(self, pDevice, desc, out);
     IDXGIFactory* proxy = reinterpret_cast<IDXGIFactory*>(proxy_factory(self));
     if (!proxy) return o_CreateSwapChain(self, pDevice, desc, out);
     g_renderThread = GetCurrentThreadId();
@@ -248,7 +248,7 @@ static HRESULT STDMETHODCALLTYPE hk_CreateSwapChain(IDXGIFactory* self, IUnknown
 }
 static HRESULT STDMETHODCALLTYPE hk_CreateSwapChainForHwnd(IDXGIFactory2* self, IUnknown* pDevice, HWND hwnd, const DXGI_SWAP_CHAIN_DESC1* desc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* fs, IDXGIOutput* output, IDXGISwapChain1** out)
 {
-    if (t_inside || !g_st.initialised || !ensure_device(pDevice)) return o_CreateSwapChainForHwnd(self, pDevice, hwnd, desc, fs, output, out);
+    if (t_inside || !g_st.initialized || !ensure_device(pDevice)) return o_CreateSwapChainForHwnd(self, pDevice, hwnd, desc, fs, output, out);
     IDXGIFactory2* proxy = reinterpret_cast<IDXGIFactory2*>(proxy_factory(self));
     if (!proxy) return o_CreateSwapChainForHwnd(self, pDevice, hwnd, desc, fs, output, out);
     g_renderThread = GetCurrentThreadId();
@@ -360,7 +360,7 @@ void init(ID3D12Device* device, const wchar_t* gameDirW, LogFn log)
     pref.renderAPI = sl::RenderAPI::eD3D12;
     sl::Result r = p_slInit(pref, sl::kSDKVersion);
     if (r != sl::Result::eOk) { LOG("FG: slInit failed %d", (int)r); snprintf(g_st.lastError, sizeof(g_st.lastError), "slInit failed (%d)", (int)r); return; }
-    g_st.initialised = true;
+    g_st.initialized = true;
 
     sl::FeatureVersion ver;
     if (p_slGetFeatureVersion(sl::kFeatureDLSS_G, ver) == sl::Result::eOk) snprintf(g_st.slVersion, sizeof(g_st.slVersion), "SL %u.%u.%u / DLSS-G %u.%u.%u", ver.versionSL.major, ver.versionSL.minor, ver.versionSL.build, ver.versionNGX.major, ver.versionNGX.minor, ver.versionNGX.build);
@@ -368,7 +368,7 @@ void init(ID3D12Device* device, const wchar_t* gameDirW, LogFn log)
     sl::AdapterInfo ai; ai.deviceLUID = reinterpret_cast<uint8_t*>(&luid); ai.deviceLUIDSizeInBytes = sizeof(LUID);
     sl::Result sup = p_slIsFeatureSupported(sl::kFeatureDLSS_G, ai);
     g_st.supported = sup == sl::Result::eOk;
-    LOG("FG: Streamline initialised (%s); DLSS-G supported: %s (%d)", g_st.slVersion, g_st.supported ? "yes" : "no", (int)sup);
+    LOG("FG: Streamline initialized (%s); DLSS-G supported: %s (%d)", g_st.slVersion, g_st.supported ? "yes" : "no", (int)sup);
     sl::FeatureRequirements req;
     if (p_slGetFeatureRequirements(sl::kFeatureDLSS_G, req) == sl::Result::eOk)
         LOG("FG: DLSS-G requirements flags 0x%X (vsync-off required: %s), driver %u.%u detected / %u.%u required", (unsigned)req.flags, ((unsigned)req.flags & (unsigned)sl::FeatureRequirementFlags::eVSyncOffRequired) ? "yes" : "no", req.driverVersionDetected.major, req.driverVersionDetected.minor, req.driverVersionRequired.major, req.driverVersionRequired.minor);
@@ -392,8 +392,8 @@ bool is_app_backbuffer(uint64_t handle)
 
 void shutdown()
 {
-    if (g_st.initialised && p_slShutdown) p_slShutdown();
-    g_st.initialised = false;
+    if (g_st.initialized && p_slShutdown) p_slShutdown();
+    g_st.initialized = false;
 }
 
 void set_settings(const Settings& s) { g_set = s; g_optionsDirty = true; g_reflexDirty = true; }
@@ -433,14 +433,14 @@ static void apply_options(uint32_t renderW, uint32_t renderH, uint32_t bbW, uint
     if ((int)o.mode == g_lastOptMode && frames == g_lastOptFrames && o.dynamicTargetFrameRate == g_lastOptTarget && !g_optionsDirty) return;
     sl::Result r; { SlCall guard; r = p_slDLSSGSetOptions(kViewport, o); }
     if (r != sl::Result::eOk) { LOG("FG: slDLSSGSetOptions failed %d", (int)r); snprintf(g_st.lastError, sizeof(g_st.lastError), "slDLSSGSetOptions failed (%d)", (int)r); }
-    else LOG("FG: options applied: mode %s, frames %u, target fps %.0f (render %ux%u, colour %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
+    else LOG("FG: options applied: mode %s, frames %u, target fps %.0f (render %ux%u, color %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
     g_lastOptMode = (int)o.mode; g_lastOptFrames = frames; g_lastOptTarget = o.dynamicTargetFrameRate; g_optionsDirty = false;
     g_st.active = o.mode != sl::DLSSGMode::eOff;
 }
 
 void poll()
 {
-    if (!g_st.initialised) return;
+    if (!g_st.initialized) return;
     g_gameFramesSincePoll++;
     if (g_optionsDirty && g_set.mode == 0 && g_lastSizes[0]) apply_options(g_lastSizes[0], g_lastSizes[1], g_lastSizes[2], g_lastSizes[3]);   // switching off: inputs are no longer sent
     const ULONGLONG now = GetTickCount64();
@@ -468,7 +468,7 @@ void poll()
 
 void frame_begin(uint32_t frameIndex)
 {
-    if (!g_st.initialised) return;
+    if (!g_st.initialized) return;
     if (g_tokenFrame != frameIndex) {
         sl::FrameToken* t = nullptr;
         if (p_slGetNewFrameToken(t, &frameIndex) == sl::Result::eOk) { g_token = t; g_tokenFrame = frameIndex; }
@@ -529,7 +529,7 @@ static bool camera_from_vp(const float* m, float* pos)   // point where clip x, 
 
 void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput& cam)
 {
-    if (!g_st.initialised || !g_st.supported) return;
+    if (!g_st.initialized || !g_st.supported) return;
     if (g_tokenFrame != frameIndex) frame_begin(frameIndex);
     if (!g_token) return;
     apply_options(in.renderW, in.renderH, in.bbW, in.bbH);
@@ -580,7 +580,7 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
         sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent),
     };
     uint32_t n = 2;
-    // DLSS-G only accepts the UI and HUD-less hints at the colour buffer's size; in a window smaller than the
+    // DLSS-G only accepts the UI and HUD-less hints at the color buffer's size; in a window smaller than the
     // render resolution they are render-sized and every present would reject them - leave them untagged instead.
     const uint32_t hintW = in.hudlessW ? in.hudlessW : in.renderW, hintH = in.hudlessH ? in.hudlessH : in.renderH;
     const bool hintFits = in.bbW == 0 || (hintW == in.bbW && hintH == in.bbH);

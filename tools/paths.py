@@ -56,7 +56,7 @@ def setting(key, detect=None, default=None):
 
 
 def _real(path):
-    """Absolute, with the on-disk capitalisation when the path exists."""
+    """Absolute, with the on-disk capitalization when the path exists."""
     path = os.path.normpath(os.path.expandvars(os.path.expanduser(path)))
     try:
         return str(pathlib.Path(path).resolve())

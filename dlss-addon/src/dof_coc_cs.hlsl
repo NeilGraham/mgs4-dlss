@@ -1,6 +1,6 @@
 // Pass 1a, at the game's CoC draw: the signed circle of confusion of every pixel of the full half-resolution grid from
 // the game's linear depth copy - the same texture, constants and moment as the game's own pass, so whatever the depth
-// copy holds later in the frame cannot matter. Output in spiral units (dof_gather_cs), the colour comes later.
+// copy holds later in the frame cannot matter. Output in spiral units (dof_gather_cs), the color comes later.
 #include "dof_common.hlsli"
 Texture2D<float>   depthTex : register(t0);   // the game's linear depth copy (R32_FLOAT, view-space depth)
 Texture2D<float>   unused   : register(t1);

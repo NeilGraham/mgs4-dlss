@@ -39,7 +39,7 @@ The port has its own renderer setting: **Options -> Graphics -> API = DirectX 12
 ## Camera jitter and camera-only motion vectors
 
 Scene draws carry a row-major clip matrix (rows = clip x, y, z, w) in their vertex constants — `c[0..3]` for the main
-geometry shaders, `c[1..4]` for others. It is recognisable without knowing the shader: the w-row's xyz is a unit vector
+geometry shaders, `c[1..4]` for others. It is recognizable without knowing the shader: the w-row's xyz is a unit vector
 (view-space depth direction) and the z-row has no x/y (reversed-Z, `z_clip = near`). Per frame the add-on:
 
 1. Patches every scene draw's matrix in bgfx's upload heap once per constant region: `row_x += ox·row_w`,
@@ -50,7 +50,7 @@ geometry shaders, `c[1..4]` for others. It is recognisable without knowing the s
    `prevVP · inv(VP)` into camera-only motion vectors (pixels, pointing to the previous position).
 3. Detects camera cuts (view direction or offset jumps) and raises `InReset`.
 
-State of tuning: ~60–75% of scene draws expose a recognisable matrix; the rest (HUD/orthographic draws, one shader family
+State of tuning: ~60–75% of scene draws expose a recognizable matrix; the rest (HUD/orthographic draws, one shader family
 with a different constant layout) render unjittered, so overlay elements can look slightly softer with jitter on.
 Character animation gets its own motion vectors from Phase 2 below. Use the overlay toggles to compare.
 
@@ -59,9 +59,9 @@ Character animation gets its own motion vectors from Phase 2 below. Use the over
 Characters and props get real motion vectors without touching a single shader. For every dynamic draw (skinned
 meshes — PSOs whose input layout has `BLENDWEIGHT`/`BLENDINDICES`; props with their own model matrix when
 `DynamicMaskProps=1`) the add-on issues **one** extra draw with a stream-out variant of the game's pipeline (same vertex
-shader and input layout, no rasterisation) that writes the clip-space position of every emitted vertex into this frame's
+shader and input layout, no rasterization) that writes the clip-space position of every emitted vertex into this frame's
 buffer. The buffers ping-pong: the capture becomes next frame's "previous positions" for the same draw (same geometry,
-same n-th occurrence in the frame). At the injection point one draw per object rasterises the current positions and
+same n-th occurrence in the frame). At the injection point one draw per object rasterizes the current positions and
 writes `previous - current` in pixels into the motion-vector texture, depth-tested (greater-equal, reversed-Z, cull mode
 and winding copied from the game pipeline) against the scene depth, so only visible object surfaces replace the
 camera-only vectors. The captured positions carry the add-on's sub-pixel jitter; the velocity shader removes it.
@@ -72,7 +72,7 @@ What made the first version slow, and what this one does instead:
   switch invalidates every root argument, so each draw also paid a full state restore, and the CPU copied 8 KB of
   constants per draw. 60 fps -> 33 fps.
 - v2 adds `ALLOW_STREAM_OUTPUT` to the game's own root signatures when they are created (`CreateRootSignature` is hooked
-  and the blob re-serialised), so the stream-out pipeline binds under the game's root signature with the game's root
+  and the blob re-serialized), so the stream-out pipeline binds under the game's root signature with the game's root
   arguments, IA buffers and topology untouched: per draw it is a PSO swap, `SOSetTargets`, the draw, and the swap back.
   Per-draw ranges and buffer-filled-size counters (16 B apart) make the captures independent; the velocity pass is
   plain draws with root constants and a vertex shader that collapses the vertices past the counter.
@@ -87,8 +87,8 @@ Notes:
 - The velocity pass uses the viewport the scene was rendered with (see dynamic resolution below).
 - GPU timing: the add-on records timestamps around the scene (first scene draw -> after DLSS), the stream-out draws and
   the velocity pass; the 10-second stats line and the overlay show `GPU ms: scene / stream-out / velocity; CPU ms`.
-- Overlay: "Object motion: N captured (N with history, ...)". The MV visualiser (`DebugMode=5`, live) shows object
-  motion as colour differing from the camera field — it can be flipped on for a few seconds during a recording.
+- Overlay: "Object motion: N captured (N with history, ...)". The MV visualizer (`DebugMode=5`, live) shows object
+  motion as color differing from the camera field — it can be flipped on for a few seconds during a recording.
 - With real object vectors the character mask (`DynamicMask`) is no longer needed and is off by default.
 
 v1.2.0 changed how the captures are paired and validated. Instances sharing one mesh (every PMC soldier) are paired across frames by the head of their vertex constants (the per-instance transform / first bones) instead of by draw order, so a change in sort order no longer hands a soldier another soldier's previous positions. And the velocity pixel shader discards a fragment whose vector exceeds `ObjectMVMaxPixels` (200) or whose vector field changes by more than `ObjectMVMaxGradient` (4 px per screen pixel across the surface): a wrong pairing - another instance metres away, or the same mesh captured in another projection by one of the game's multi-pass character draws - fails one of the two and the pixel keeps its camera vector. Both showed as a one-frame flash of saturated vectors on a character body that frame generation turned into a visible pulsing. `ObjectMVProps=1` extends the capture to rigid props with their own model matrix.
@@ -96,13 +96,13 @@ v1.2.0 changed how the captures are paired and validated. Instances sharing one 
 ## Character mask (`DynamicMask`, superseded)
 
 Skinned meshes (PSOs whose input layout has `BLENDWEIGHT`/`BLENDINDICES`, reported by ReShade at pipeline creation)
-are replayed once into a private depth buffer (same PSO, same jittered constants, no colour target). The motion-vector
-pass turns that depth into DLSS's **bias-current-colour mask**, so DLSS leans on the current frame for character
+are replayed once into a private depth buffer (same PSO, same jittered constants, no color target). The motion-vector
+pass turns that depth into DLSS's **bias-current-color mask**, so DLSS leans on the current frame for character
 pixels instead of reprojected history that camera-only vectors cannot describe. Result: no halo/ghosting around
 characters, at the cost of a little temporal accumulation on them. Options (panel / ini): `DynamicMask` (default off),
 `DynamicMaskProps` (also mask props with their own model matrix — off; static props are correct with camera vectors),
 `DynamicZeroMV` (zero motion on masked pixels — off; useful for third-person camera turns where the player stays
-centred). The MV visualiser (`DebugMode=5`) shows the mask in blue. Superseded by the per-object motion vectors above; kept as an option (`DynamicMask=1`).
+centered). The MV visualizer (`DebugMode=5`) shows the mask in blue. Superseded by the per-object motion vectors above; kept as an option (`DynamicMask=1`).
 
 ## Dynamic resolution in the port (`DRS`, on by default)
 
@@ -110,19 +110,19 @@ On the native D3D12 path the port renders the 3D scene into a **variable sub-vie
 (observed anywhere from 100 % down to 50 %: 3840x2160 -> 3712x2088 -> ... -> 1920x1080, changing every second or so
 when the GPU is loaded — e.g. with frame generation at 4K120). **Its post chain upscales that sub-rect to the full-size
 final image before the composite; the composite samples the whole texture.** So at the add-on's insertion point the
-colour is always full-size, while the scene depth (and anything derived from it) is on the sub-rect grid. Verified
+color is always full-size, while the scene depth (and anything derived from it) is on the sub-rect grid. Verified
 with the vector overlay (`DebugMode=9`): with the earlier assumption that the composite stretches the sub-rect, the
 overlay covered only the top-left (k x k) part of the screen.
 
 `DRS=1` therefore puts depth and vectors on the full grid: the scene depth is stretched (nearest) into a full-size R32
 copy for DLSS and frame generation, the camera vectors are computed per full-grid pixel from the sub-res depth, the
-object vectors are rasterised with the full viewport (their clip positions are viewport-independent) and depth-tested
+object vectors are rasterized with the full viewport (their clip positions are viewport-independent) and depth-tested
 manually against the stretched depth, the jitter is expressed in full-grid pixels, and DLSS / NR / DLSS-G all see a
 full-size contract. Getting this wrong showed up as: a DLSS-G ghost of moving characters displaced ~(1-k) toward the
 top-left, asymmetric ghosting in DLSS itself, and (in the old sub-rect mode) DLSS 5 NR covering only the top-left
 rectangle while the game was scaled.
 
-`DRS=2` keeps the legacy behaviour (DLSS evaluated on the sub-rect, output resampled back into it) for reference; it is
+`DRS=2` keeps the legacy behavior (DLSS evaluated on the sub-rect, output resampled back into it) for reference; it is
 wrong for this port's composite and breaks NR's coverage.
 
 The sub-rect is detected per frame from the viewport most depth-tested draws into the frame's geometry target use
@@ -139,7 +139,7 @@ the composite insertion (they need the SRV redirect).
 ## DLSS 5 NR vs. pre-HUD insertion (auto)
 
 `renodx-dlss5` runs its NR pass on whatever DLSS evaluates. With the pre-HUD insertion that is the raw scene, and the
-game's DOF, colour grading and vignette are applied afterwards, which flattens the NR effect (faces in particular).
+game's DOF, color grading and vignette are applied afterwards, which flattens the NR effect (faces in particular).
 So the insertion point is **automatic** (`PrePost=auto`): if `renodx-dlss5.addon64` is loaded in the process, DLAA runs
 at the composite so NR gets the final image; without it, DLAA runs pre-post for the cleanest AA (vignette/HUD outside
 DLSS). Override with the "Insertion point" combo in the panel or `PrePost=1` / `PrePost=0`.
@@ -148,12 +148,12 @@ DLSS). Override with the "Insertion point" combo in the panel or `PrePost=1` / `
 
 The port draws its HUD into the final texture **before** the composite. In the DLSS 5 NR configuration (DLAA on the
 final image) that used to put the HUD inside the image DLSS reprojected - HUD ghosting opposite to camera turns - and
-the HUD-less colour for frame generation had to be patched together from a pre-HUD capture (raw, no DLAA/NR under
+the HUD-less color for frame generation had to be patched together from a pre-HUD capture (raw, no DLAA/NR under
 the HUD elements: visible rectangles and blur/flicker around the HUD in generated frames).
 
 Since v1.0.1 the add-on runs DLSS at the **first HUD draw of the frame, on the final texture**: the scene has been
 upscaled/tonemapped into it, the HUD has not been drawn yet. DLSS and the inline NR add-on never see the HUD, the
-game then draws the HUD on top of the DLSS output, and that output *is* the HUD-less colour for DLSS-G (no patching);
+game then draws the HUD on top of the DLSS output, and that output *is* the HUD-less color for DLSS-G (no patching);
 the replayed UI layer is tagged valid-until-present. Frames without a HUD (cutscenes, menus) fall back to the
 composite insertion as before. `DebugMode=7` drops the HUD draws in this mode (true HUD-less view); `DebugMode=6`
 shows the UI layer of the previous frame (it is replayed after the insertion); the magenta test (`DebugMode=1`) is
@@ -171,7 +171,7 @@ and, once, that feedback quad: DLSS then ran on the wrong texture for the frame,
 and the quad's scene copy faded into the UI layer whenever the camera moved.)
 
 `UIMask=1` (live) is the fallback for the composite insertion: where the replayed UI layer holds bright HUD detail,
-DLSS's bias-current-colour mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
+DLSS's bias-current-color mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
 is active (the HUD is not in DLSS's input there).
 
 ## 3D windows: the Codec caller (`WindowScene`, on by default)
@@ -208,7 +208,7 @@ frame of the pause menu and of the Codec begins with a full-screen blit of that 
 the panels (and the 3D window with the model / the caller, which `WindowScene` handles). Nothing ever rewrites the
 seed, so whatever it captured is the background for the whole time the screen stays frozen.
 
-With `FrozenBackground=1` the add-on recognises that capture (a few-vertex draw into a smaller, non-final target
+With `FrozenBackground=1` the add-on recognizes that capture (a few-vertex draw into a smaller, non-final target
 that samples this frame's final scene texture, after the scene write and before any HUD draw) and runs the normal
 pre-HUD insertion on the final texture right before it. The seed is then the DLSS (+NR) image and the frozen
 background matches the live picture. No game texture is written out of band - the game's own capture does the copy
@@ -243,7 +243,7 @@ and, when the first evaluation after a frozen screen sees the same camera (the c
 the history: no reset, motion computed relative to that last live frame rather than to the pause menu's model camera,
 and only the rectangle the 3D window (the Snake model) occupied meanwhile is excluded for that one frame (its history
 belongs to the model, not the world). Log: `RESUME f…: same camera as before the freeze -> DLSS history kept`. A
-different camera still resets as before. Two details that mattered: the frozen state is only cleared by a colour scene
+different camera still resets as before. Two details that mattered: the frozen state is only cleared by a color scene
 write from a geometry target (the pause menu's closing frame samples the *depth* texture full-screen into the final
 texture, which looked like fresh content and reset the history one frame early), and the pause menu's own hundreds of
 depth-tested panel quads never count as a live scene.
@@ -253,7 +253,7 @@ depth-tested panel quads never count as a live scene.
 The add-on drives **NVIDIA Streamline** (`sl.interposer.dll`, `sl.dlss_g.dll`, `sl.reflex.dll`, `sl.pcl.dll`, `sl.common.dll` + `nvngx_dlssg.dll`, which must sit next to `mgs4.exe`) in *manual hooking* mode from inside the ReShade add-on:
 
 1. `slInit` runs in the `init_device` event, i.e. after the D3D12 device exists but before bgfx creates its swapchain. The add-on then hooks `IDXGIFactory::CreateSwapChain`/`CreateSwapChainForHwnd` in front of ReShade and creates the game's swapchain through Streamline's proxy factory. The result is `game -> Streamline proxy swapchain -> ReShade -> DXGI`: Streamline intercepts `Present` and inserts the generated frames, ReShade (and this add-on's `present` event) run for every presented frame, so the add-on counts a game frame only when scene draws happened.
-2. Every game frame it feeds Streamline what DLSS-G needs: a frame token, Reflex sleep + PCL markers (simulation, render-submit, present), the camera constants derived from the same clip matrix the DLAA path uses (projection, clip<->prev clip, camera position/axes, reversed-Z near, jitter, cut/reset flag), and tags for **depth**, the add-on's **motion vectors** (camera-only, pixels) and — in pre-post insertion — the anti-aliased **HUD-less colour**. When the game image is letter/pillar-boxed, the backbuffer tag carries the game-image rectangle so only that region is interpolated.
+2. Every game frame it feeds Streamline what DLSS-G needs: a frame token, Reflex sleep + PCL markers (simulation, render-submit, present), the camera constants derived from the same clip matrix the DLAA path uses (projection, clip<->prev clip, camera position/axes, reversed-Z near, jitter, cut/reset flag), and tags for **depth**, the add-on's **motion vectors** (camera-only, pixels) and — in pre-post insertion — the anti-aliased **HUD-less color**. When the game image is letter/pillar-boxed, the backbuffer tag carries the game-image rectangle so only that region is interpolated.
 3. `slDLSSGSetOptions` is applied live from the overlay / ini: **Off, 2x, 3x, 4x** or **Dynamic** with a **target frame rate** (`DLSSGMode::eDynamic` + `dynamicTargetFrameRate`, 0 = monitor refresh). If the driver does not report dynamic multi-frame generation, the add-on falls back to its own controller: it measures the game frame rate every second and picks the 2x/3x/4x multiplier that lands closest to the target. Reflex (Off / On / On + Boost) is set through `slReflexSetOptions`.
 
 Ini keys: `FrameGen` (0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic), `FGTargetFps`, `Reflex` (0/1/2). Status (Streamline/DLSS-G version, DLSS-G status flags, max multiplier, dynamic-MFG and vsync support, VRAM, presented/generated frames) is shown in the overlay. Streamline's own log goes to `logs\sl.log`.
@@ -262,7 +262,7 @@ Notes:
 - Streamline is only loaded when `FrameGen` is non-zero **at startup** (it has to wrap the swapchain when the game creates it), so the first switch from Off needs a restart; after that Off/2x/3x/4x/Dynamic and the target frame rate change live. With `FrameGen=0` the add-on behaves exactly as without frame generation.
 - Verified 2026-08-28 (RTX 5090, driver 616.56, Streamline 2.12.129 runtime via the NVIDIA app override, DLSS-G 310.8): ReShade keeps its overlay and add-ons (the DLSS-G present queue is created through ReShade's device proxy on purpose), DLAA + DLSS 5 NR keep working, `DLSS-G interpolation state changed ... enabled`, dynamic mode reported as supported and accepted (`eDynamic` disables vsync/RSync by itself).
 - The game runs with vsync on (sync interval 1); DLSS-G works with it (driver reports vsync support) but latency is lower with the game's vsync off. The game's own limiter (`fpsLimiter=60`) caps the *game* frame rate — generated frames come on top of that, which is the whole point: the simulation stays at the 60 fps its physics are tied to.
-- **HUD on generated frames.** In pre-post insertion DLSS-G gets the anti-aliased image before the HUD as HUD-less colour. In composite insertion (DLSS 5 NR loaded) the HUD is inside the image, so the add-on (1) replays the game's HUD draws (depth-off draws into the final texture that sample no scene-sized input) into its own RGBA layer, tagged as `UIColorAndAlpha`, and (2) captures the final texture right before its first HUD draw and builds a true HUD-less colour: the DLAA output with the pre-HUD capture under the UI layer's pixels. DLSS-G uses the UI layer when its UI recomposition is available; when it is not (the NVIDIA app's frame-generation preset override disables it — `Disabling bUIRecompositionSupported due to preset override` in `logs\sl.log`) it derives the HUD from backbuffer minus HUD-less colour, which is why the HUD-less image must really lack the HUD. Debug modes "Visualise UI layer" and "Visualise HUD-less colour" show both inputs; verified in Act 1: the HUD-less view has no HUD elements while the frame does. Full-screen menus (Mk.II menu, credits) are rendered through scene-sized layers and are not treated as HUD (they are static anyway).
+- **HUD on generated frames.** In pre-post insertion DLSS-G gets the anti-aliased image before the HUD as HUD-less color. In composite insertion (DLSS 5 NR loaded) the HUD is inside the image, so the add-on (1) replays the game's HUD draws (depth-off draws into the final texture that sample no scene-sized input) into its own RGBA layer, tagged as `UIColorAndAlpha`, and (2) captures the final texture right before its first HUD draw and builds a true HUD-less color: the DLAA output with the pre-HUD capture under the UI layer's pixels. DLSS-G uses the UI layer when its UI recomposition is available; when it is not (the NVIDIA app's frame-generation preset override disables it — `Disabling bUIRecompositionSupported due to preset override` in `logs\sl.log`) it derives the HUD from backbuffer minus HUD-less color, which is why the HUD-less image must really lack the HUD. Debug modes "Visualize UI layer" and "Visualize HUD-less color" show both inputs; verified in Act 1: the HUD-less view has no HUD elements while the frame does. Full-screen menus (Mk.II menu, credits) are rendered through scene-sized layers and are not treated as HUD (they are static anyway).
 - Known: on the two frames where the DLSS SR feature is (re)created (`RecreateAfter`), no inputs are tagged, so Streamline logs "Unable to find common constants" once and DLSS-G skips interpolation for that frame.
 - Alternative without this add-on: NVIDIA Smooth Motion (driver-level 2x, NVIDIA App -> Graphics -> `mgs4.exe` -> Smooth Motion).
 
@@ -270,7 +270,7 @@ Notes:
 
 DLSS-G interpolates between consecutive game frames; on a frozen screen that gains nothing, and across the Codec's
 transitions (the panel collapse when a call starts, the caller window appearing) it produced single torn frames -
-displaced copies of the panel lines and of the caller window flashing across the centre. Note that an NVIDIA-app
+displaced copies of the panel lines and of the caller window flashing across the center. Note that an NVIDIA-app
 frame-generation preset override disables DLSS-G's UI recomposition ("Preset A selected, disabling UIR" in sl.log),
 so the UI-layer / HUD-less tags cannot protect moving UI in that configuration. The add-on therefore reports a cut
 (`reset`) to DLSS-G on every frozen pass-through frame and for the first 8 evaluations after a transition (a
@@ -289,7 +289,7 @@ With `PostDof=1` (live key, panel checkbox) the three draws are skipped - identi
 shader bytecode (`733f4efc`, `92bbc108`, `bca9c941`) - and an exact HLSL transcription of the three passes runs on the
 DLSS output instead, so the blur is applied to the NR-processed image. The circle of confusion (`dof_coc_cs`) is
 evaluated **at the game's CoC draw**, from the depth copy that draw was about to sample and with that draw's constants
-(`cb0[8..17]`), into a half-resolution R16F texture on the full grid; at the DLSS insertion the half-res colour of the
+(`cb0[8..17]`), into a half-resolution R16F texture on the full grid; at the DLSS insertion the half-res color of the
 DLSS output is packed with it (`dof_pack_cs`), the spiral gather (`dof_gather_cs`) and the blend (`dof_composite_cs`)
 run, and the result is copied back before the HUD. Evaluating the CoC at the draw means the depth copy is exactly what
 the game's pass would have read - whatever the game does to that texture later in the frame cannot reach the blur -
@@ -331,7 +331,7 @@ the depth copy's identity and addressing whenever they change (`PostDof: fN dept
 ## Pre-warm (`PreWarm=1`)
 
 The DLSS feature is normally created at the first 3D frame, and the DLSS 5 NR add-on creates its own feature inside
-that call and initialises its model on the first evaluations - about half a second of stalls and dropped resolution
+that call and initializes its model on the first evaluations - about half a second of stalls and dropped resolution
 right at the start of the first cutscene. With `PreWarm=1` the add-on creates the feature at the swapchain size (DLAA)
 and runs 12 evaluations on its own scratch textures during frames without a 3D scene (the title / loading screens,
 after 30 such frames), restoring the game's state after each; the NGX-hooking add-on's one re-create happens there too.

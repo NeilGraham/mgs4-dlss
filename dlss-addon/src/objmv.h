@@ -2,10 +2,10 @@
 //
 // The game's vertex shaders (converted RSX programs: skinning, per-object transforms) are reused unchanged. For every
 // dynamic draw the add-on issues ONE extra draw with a stream-out variant of the pipeline (same vertex shader, no
-// rasterisation) that captures the clip-space position of every emitted vertex into this frame's buffer. The buffers
+// rasterization) that captures the clip-space position of every emitted vertex into this frame's buffer. The buffers
 // ping-pong: this frame's capture is next frame's "previous positions" for the same draw (same geometry, same n-th
 // occurrence in the frame), so no constants are recorded or replayed. At the injection point one draw per object
-// rasterises the current positions and writes (previous - current) in pixels into the motion-vector texture, depth-tested
+// rasterizes the current positions and writes (previous - current) in pixels into the motion-vector texture, depth-tested
 // against the scene depth so only visible object surfaces replace the camera-only vectors.
 //
 // Cost model (what made v1 slow and what v2 does instead): v1 streamed out twice per draw (current + recorded previous
@@ -47,12 +47,12 @@ namespace objmv {
     // for it). `topology` = the D3D primitive topology set by the game, `jittered` = its clip matrix carries this
     // frame's sub-pixel jitter. Leaves the game's PSO bound again. Returns true if the draw was captured.
     // ownVp: the draw's own viewport when it is not the frame's scene viewport (a 3D window such as the pause-menu
-    // model); the velocity pass then rasterises this object into that rectangle instead of the pass viewport.
+    // model); the velocity pass then rasterizes this object into that rectangle instead of the pass viewport.
     // key identifies the geometry only (several instances of one mesh share it); anchor[anchorN] = the head of the
     // draw's vertex constants, the per-instance signature used to pair this occurrence with last frame's same instance.
     bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN);
 
-    // At the injection point after the camera motion vectors were written: rasterise every captured object that was
+    // At the injection point after the camera motion vectors were written: rasterize every captured object that was
     // also captured last frame into mvRtv (R16G16_FLOAT, pixels, prev - cur), depth-tested (reversed-Z, greater-equal)
     // against sceneDsv. The caller puts the MV texture in RENDER_TARGET and the depth in DEPTH_WRITE state first and
     // restores all state after. vp = the viewport the game rendered the scene with. jitterCur/jitterPrev = the NDC

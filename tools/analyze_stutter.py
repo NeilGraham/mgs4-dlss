@@ -24,7 +24,7 @@ DUP_LIMIT = 0.005
 
 
 def frame_diffs(path):
-    """[(t, diff)] for every frame, using a small greyscale difference so it is quick on 4K."""
+    """[(t, diff)] for every frame, using a small grayscale difference so it is quick on 4K."""
     cmd = [paths.FFMPEG, "-v", "error", "-i", path, "-vf",
            "scale=480:270,format=gray,tblend=all_mode=difference,signalstats,"
            "metadata=print:key=lavfi.signalstats.YAVG:file=-", "-f", "null", "-"]
