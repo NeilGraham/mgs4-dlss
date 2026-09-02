@@ -102,7 +102,7 @@ namespace Mgs4Launcher
             switch (opt.Action)
             {
                 case "list":
-                    foreach (string line in Catalogue.Listing(opt.Filter)) Say(line);
+                    foreach (string line in Catalog.Listing(opt.Filter)) Say(line);
                     return 0;
                 case "report":
                     Say(Checks.TextReport(gameDir, Checks.Run(gameDir)));
@@ -155,7 +155,7 @@ namespace Mgs4Launcher
                 }
             }
 
-            if (Catalogue.Find(opt.Stage) == null)
+            if (Catalog.Find(opt.Stage) == null)
                 Say("unknown scene '" + opt.Stage + "' - it is not in tools\\scenes.csv. Launching it anyway; --list shows the known ones.");
             return Runner.Run(opt, Say);
         }

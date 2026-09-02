@@ -11,7 +11,7 @@ namespace Mgs4Launcher
     {
         public string Action = "";          // "" = launch, or ui / install / install-addon / report / list /
                                             //      settings / set / shortcut / stop / help
-        public string Stage = "";           // a stage id, or one of the @-entries in the catalogue
+        public string Stage = "";           // a stage id, or one of the @-entries in the catalog
         public string GameDir = "";
         public bool GameDirGiven;           // true only when --game-dir was passed, so previews do not echo a detected path
         public string GameDirBad = "";      // a folder that was named but holds no mgs4.exe, kept for the Setup tab

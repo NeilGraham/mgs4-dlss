@@ -56,7 +56,7 @@ namespace Mgs4Launcher
             return !(p != null && p.TryGetValue("Seen", out seen) && Convert.ToBoolean(seen));
         }
 
-        // A name and a description someone has typed over the catalogue's own. Either half can be unset, which is
+        // A name and a description someone has typed over the catalog's own. Either half can be unset, which is
         // why this is not just two strings in a dictionary: an edited description with the file's name left alone
         // has to survive a rebuild of labels.json.
         public class SceneEdit { public string Name, Description; }
@@ -118,7 +118,7 @@ namespace Mgs4Launcher
 
             var cli = new List<string>();
             foreach (string a in opt.ToCli()) cli.Add(a.Contains(" ") ? "\"" + a + "\"" : a);
-            Scene scene = Catalogue.Find(opt.Stage);
+            Scene scene = Catalog.Find(opt.Stage);
 
             // Late-bound WScript.Shell: no interop assembly to reference, which keeps the build to csc.exe alone.
             Type shellType = Type.GetTypeFromProgID("WScript.Shell");

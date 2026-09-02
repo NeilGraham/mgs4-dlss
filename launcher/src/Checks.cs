@@ -86,7 +86,7 @@ namespace Mgs4Launcher
             catch { return null; }
         }
 
-        // "310,8,0,0" and "310.8.0" both normalise to 310.8.0, so the manifest can be written the readable way.
+        // "310,8,0,0" and "310.8.0" both normalize to 310.8.0, so the manifest can be written the readable way.
         public static string NormalVersion(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
@@ -310,7 +310,7 @@ namespace Mgs4Launcher
                 if ((m = Regex.Match(line, "frame generation: (.+?), target fps (\\d+), Reflex (\\d)")).Success)
                 { r.Fg = m.Groups[1].Value; r.FgTarget = m.Groups[2].Value; r.Reflex = m.Groups[3].Value; }
                 if (line.Contains("frame generation off at startup: Streamline not loaded")) r.FgNoStreamline = true;
-                if ((m = Regex.Match(line, "Streamline initialised \\(SL ([\\d.]+) / DLSS-G ([\\d.]+)\\); DLSS-G supported: (\\w+)")).Success)
+                if ((m = Regex.Match(line, "Streamline initialized \\(SL ([\\d.]+) / DLSS-G ([\\d.]+)\\); DLSS-G supported: (\\w+)")).Success)
                 { r.Sl = m.Groups[1].Value; r.DlssG = m.Groups[2].Value; r.FgSupported = m.Groups[3].Value; }
                 if ((m = Regex.Match(line, "driver ([\\d.]+) detected / ([\\d.]+) required")).Success)
                 { r.Driver = m.Groups[1].Value; r.DriverMin = m.Groups[2].Value; }
@@ -578,9 +578,9 @@ namespace Mgs4Launcher
             if (!string.IsNullOrEmpty(run.Ngx))
             {
                 if (run.Ngx == "0x00000001")
-                    sec.Rows.Add(new Row("ok", "NGX init", "NVIDIA NGX initialised for D3D12", "success", null));
+                    sec.Rows.Add(new Row("ok", "NGX init", "NVIDIA NGX initialized for D3D12", "success", null));
                 else
-                    sec.Rows.Add(new Row("bad", "NGX init", "NGX did not initialise - DLSS cannot be created", run.Ngx, null));
+                    sec.Rows.Add(new Row("bad", "NGX init", "NGX did not initialize - DLSS cannot be created", run.Ngx, null));
             }
             if (!string.IsNullOrEmpty(run.DlssDll))
             {

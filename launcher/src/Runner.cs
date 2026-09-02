@@ -302,7 +302,7 @@ namespace Mgs4Launcher
 
             // A menu is not a scene: no boot prompts to press through, no first 3D frame, and tapping Cross on the
             // main menu just starts a new game. Only an explicit key sequence makes sense here.
-            if (Catalogue.IsStartEntry(opt.Stage) && string.IsNullOrEmpty(opt.Keys))
+            if (Catalog.IsStartEntry(opt.Stage) && string.IsNullOrEmpty(opt.Keys))
             {
                 if (opt.Advance || opt.MashX || opt.EndOnGameplay)
                     say("menu entry: leaving the game alone (the run options are for scenes)");

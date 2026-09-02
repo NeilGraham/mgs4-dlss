@@ -22,7 +22,7 @@ namespace Mgs4Launcher
         const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
         const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
 
-        // AppsUseLightTheme is the per-user setting behind Settings > Personalisation > Colours > "Choose your
+        // AppsUseLightTheme is the per-user setting behind Settings > Personalization > Colors > "Choose your
         // default app mode". 0 means dark. Absent (older builds, or a policy that removed it) means light.
         public static bool SystemUsesDarkMode()
         {
@@ -51,7 +51,7 @@ namespace Mgs4Launcher
             };
 
             // The handle only exists from SourceInitialized on, which is before the first frame is drawn - so the
-            // bar is never seen in the wrong colour.
+            // bar is never seen in the wrong color.
             if (new WindowInteropHelper(win).Handle != IntPtr.Zero) apply();
             else win.SourceInitialized += (s, e) => apply();
 
@@ -64,9 +64,9 @@ namespace Mgs4Launcher
             win.Closed += (s, e) => SystemEvents.UserPreferenceChanged -= onPref;
         }
 
-        // Segoe MDL2 Assets, the font Windows draws its own caption buttons from: a chevron-free minimise, the
-        // empty square for maximise and the two overlapping ones for restore, and the close cross.
-        const string Minimise = "", Maximise = "", Restore = "";
+        // Segoe MDL2 Assets, the font Windows draws its own caption buttons from: a chevron-free minimize, the
+        // empty square for maximize and the two overlapping ones for restore, and the close cross.
+        const string Minimize = "", Maximize = "", Restore = "";
 
         // The buttons, and the drag region. The chrome's caption is only 32 tall in the markup; it is raised here
         // to the whole header, so the bar drags and double-clicks like the title bar it replaced - anything in it
@@ -80,9 +80,9 @@ namespace Mgs4Launcher
             Action state = () =>
             {
                 bool up = win.WindowState == WindowState.Maximized;
-                max.Content = up ? Restore : Maximise;
-                max.ToolTip = up ? "Restore" : "Maximise";
-                // A maximised window is sized to the monitor plus its resize border, so without this the edges of
+                max.Content = up ? Restore : Maximize;
+                max.ToolTip = up ? "Restore" : "Maximize";
+                // A maximized window is sized to the monitor plus its resize border, so without this the edges of
                 // the content - and the close button - sit off the screen.
                 Thickness pad = SystemParameters.WindowResizeBorderThickness;
                 win.BorderThickness = up ? new Thickness(pad.Left, pad.Top, pad.Right, pad.Bottom) : new Thickness(0);

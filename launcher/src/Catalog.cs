@@ -23,7 +23,7 @@ namespace Mgs4Launcher
         public int SortCat, SortNum;
     }
 
-    static class Catalogue
+    static class Catalog
     {
         // Read through Paths.DataText: the tools folder when it is there, the copy inside the exe when it is not.
         // Without the fallback a launcher moved out of its checkout came up knowing two entries instead of 414,
@@ -188,7 +188,7 @@ namespace Mgs4Launcher
 
             foreach (Scene e in list)
             {
-                e.ActTitle = ActTitles.ContainsKey(e.ActKey) ? ActTitles[e.ActKey] : "Uncategorised";
+                e.ActTitle = ActTitles.ContainsKey(e.ActKey) ? ActTitles[e.ActKey] : "Uncategorized";
                 switch (e.Kind)
                 {
                     case "broken": e.Note = "known broken - it crashes or comes up black"; break;
