@@ -9,7 +9,7 @@
     "  url / urlLabel  where this group's files come from, as a button above them",
     "  guide           what to do with them, in the order it is done",
     "  accepts         file names this group takes by drag-and-drop; a .zip is unpacked into the game folder",
-    "  bundled         this group's files ship with the app, so Setup can install them itself (Get-BundledAddon)",
+    "  bundled         this group's files ship with the app - built into the release exe - so Setup can install them itself (Install.BundledAddon)",
     "  drop            the headline file to drag in, named in the drop area; accepts is the full match list",
     "  files[].path    relative to the game folder - the row's label"
   ],
@@ -142,7 +142,7 @@
       "blurb": "Last, so it loads with everything else already in place.",
       "url": "https://github.com/NeilGraham/mgs4-dlss/releases",
       "urlLabel": "Releases",
-      "guide": "Install it from here - the add-on ships with this app, so there is nothing to download. Dropping mgs4_dlss.addon64 in by hand still works, as does dlss-addon\\build.bat then sh dlss-addon/install.sh. The ini beside it is the configuration this was verified with; without it the add-on falls back to its built-in defaults.",
+      "guide": "Install it from here - the add-on is built into this app, so there is nothing to download. Dropping mgs4_dlss.addon64 in by hand still works, as does dlss-addon\\build.bat then sh dlss-addon/install.sh. The ini beside it is the configuration this was verified with; without it the add-on falls back to its built-in defaults.",
       "accepts": [
         "mgs4_dlss.addon64",
         "mgs4_dlss.ini"

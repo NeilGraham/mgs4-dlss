@@ -56,6 +56,32 @@ namespace Mgs4Launcher
             return !(p != null && p.TryGetValue("Seen", out seen) && Convert.ToBoolean(seen));
         }
 
+        // A name and a description someone has typed over the catalogue's own. Either half can be unset, which is
+        // why this is not just two strings in a dictionary: an edited description with the file's name left alone
+        // has to survive a rebuild of labels.json.
+        public class SceneEdit { public string Name, Description; }
+
+        public static Dictionary<string, SceneEdit> SceneEdits()
+        {
+            var outp = new Dictionary<string, SceneEdit>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, object> p = Read();
+            object raw;
+            if (p == null || !p.TryGetValue("SceneEdits", out raw)) return outp;
+            var d = raw as Dictionary<string, object>;
+            if (d == null) return outp;
+            foreach (var kv in d)
+            {
+                var e = kv.Value as Dictionary<string, object>;
+                if (e == null) continue;
+                var edit = new SceneEdit();
+                object v;
+                if (e.TryGetValue("name", out v) && v != null) edit.Name = v.ToString();
+                if (e.TryGetValue("description", out v) && v != null) edit.Description = v.ToString();
+                if (edit.Name != null || edit.Description != null) outp[kv.Key] = edit;
+            }
+            return outp;
+        }
+
         public static void Save(Dictionary<string, object> values)
         {
             try

@@ -279,10 +279,7 @@ namespace Mgs4Launcher
             foreach (var kv in byFile)
             {
                 string file = PathFor(kv.Key, gameDir);
-                if (kv.Key == IniSource.Launcher && !Paths.Exists(file))
-                    System.IO.File.WriteAllText(file,
-                        "; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key." +
-                        Environment.NewLine);
+                if (kv.Key == IniSource.Launcher) file = Paths.EnsureConfig();
                 if (string.IsNullOrEmpty(file) || !Paths.Exists(file))
                 {
                     say("no " + SourceLabel(kv.Key) + " to write to" +

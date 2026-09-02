@@ -6,10 +6,10 @@
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
-      <TextBlock Grid.Column="0" Text="{Binding Chevron}" FontSize="11" Foreground="#858D9E" VerticalAlignment="Center"/>
-      <TextBlock Grid.Column="1" Text="{Binding HeadText}" FontSize="13" FontWeight="SemiBold" Foreground="#E7EAF0"
+      <TextBlock Grid.Column="0" Text="{Binding Chevron}" FontSize="11" Foreground="#97979F" VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="1" Text="{Binding HeadText}" FontSize="13" FontWeight="SemiBold" Foreground="#ECECEE"
                  VerticalAlignment="Center"/>
-      <TextBlock Grid.Column="2" Text="{Binding HeadCount}" FontSize="11" Foreground="#5C6478" VerticalAlignment="Center"/>
+      <TextBlock Grid.Column="2" Text="{Binding HeadCount}" FontSize="11" Foreground="#6E6E77" VerticalAlignment="Center"/>
     </Grid>
     <Grid Visibility="{Binding SceneVis}" Margin="18,0,0,0">
       <Grid.ColumnDefinitions>
@@ -27,8 +27,8 @@
                    HorizontalAlignment="Center"/>
       </Border>
       <StackPanel Grid.Column="2">
-        <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#E7EAF0" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="#858D9E" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#ECECEE" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Sub}" FontSize="11" Foreground="#97979F" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
       </StackPanel>
       <!-- Tag="star" is what the click handler looks for, so a click here toggles the favourite instead of
            picking the scene. -->

@@ -1,8 +1,32 @@
 # Releases
 
-Every release carries three assets: `mgs4_dlss.addon64`, `mgs4_dlss.ini` and `mgs4_dlss_launcher.zip`. The zip is the
-launcher with the same add-on and ini inside it, so it is the only download most people need; the loose pair is for a
-manual install or for updating an add-on that is already in place. Install steps are in [install.md](install.md).
+Every release carries three assets: `mgs4-dlss-launcher.exe`, `mgs4_dlss.addon64` and `mgs4_dlss.ini`. The exe is
+the launcher with the same add-on and ini built into it, so it is the only download most people need; the loose pair
+is for a manual install or for updating an add-on that is already in place. Install steps are in
+[install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
+launcher that built itself on first run.
+
+## v1.3.0 (2026-09-01)
+
+The launcher is one file, and it is the release.
+
+### One exe
+
+- **`mgs4-dlss-launcher.exe` replaces `mgs4_dlss_launcher.zip`.** `mgs4_dlss.addon64` and `mgs4_dlss.ini` are built
+  into the exe as resources, next to the XAML, the scene table and the install file list that already were, so
+  **Install the add-on** on the Setup tab (and `--install-addon`) writes them from inside the launcher. Nothing to
+  unzip, no first-run build, no `.bat`. The add-on is written to a temporary name and moved into place, so a copy
+  that fails part way never leaves a truncated `.addon64` for ReShade to load.
+- **The launcher's own icon.** The exe a release carries cannot wear the icon a local build takes from `mgs4.exe`,
+  so `launcher\build.ps1 -Release` embeds one drawn by `tools\launcher_icon.ps1` instead: a coarse block of pixels
+  and a chevron out of it. A local build still takes the game's, and falls back to this one when there is no
+  `mgs4.exe` to read.
+- **A lone exe writes nothing beside itself.** Outside a checkout, `config.ini` and the `work\` folder go under
+  `%LOCALAPPDATA%\mgs4-dlss-launcher`, where the window's own preferences already were. In a checkout they stay in
+  the repo root where every script reads them, and a `config.ini` already next to the exe is used wherever it is.
+- **Releases from a tag.** `tools\package_release.py` now builds the release exe, and `.github\workflows\release.yml`
+  does the same on a push of `v<version>`: the add-on, the exe, and a release with that version's section of this
+  file as its body.
 
 ## v1.2.0 (2026-09-01)
 

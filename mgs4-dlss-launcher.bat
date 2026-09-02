@@ -14,7 +14,8 @@
 :: The app itself is mgs4-dlss-launcher.exe, built from launcher\ by the C# compiler that ships with Windows. It is
 :: not in the repo, because the icon inside it is read from the mgs4.exe on this machine and that artwork is
 :: Konami's - so a fresh clone has no exe and this builds one, once, before running it. Nothing has to be
-:: installed for that.
+:: installed for that. A release is the exe alone, built with launcher\build.ps1 -Release (its own icon, the
+:: add-on inside it); it does not need this file.
 setlocal
 set "EXE=%~dp0mgs4-dlss-launcher.exe"
 set "BUILD=%~dp0launcher\build.ps1"
@@ -22,7 +23,7 @@ set "BUILD=%~dp0launcher\build.ps1"
 if not exist "%EXE%" (
     if not exist "%BUILD%" (
         echo Could not find launcher\build.ps1 next to this file.
-        echo Run mgs4-dlss-launcher.bat from the folder it was unzipped into.
+        echo Run mgs4-dlss-launcher.bat from the root of the checkout, or use the release exe instead.
         pause
         exit /b 1
     )

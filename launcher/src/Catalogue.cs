@@ -13,6 +13,9 @@ namespace Mgs4Launcher
     public class Scene
     {
         public string Id, Kind, ActKey, Name, Description, SortAs, ActTitle, Note;
+        // What the data files call it, before anything typed in the window is laid over the top. Kept so Reset
+        // in the Play tab has something to go back to.
+        public string BaseName, BaseDescription;
         public int Rank;
         public bool Hidden;
         public List<string> Alts = new List<string>();
@@ -121,9 +124,11 @@ namespace Mgs4Launcher
                 Hidden = false, SortAs = ""
             });
 
-            // Ids that crash or come up black: every one whose id ends in a single digit. The two-digit sections
-            // ("_00", "_11") work, and "_D2" is a cutscene, not a section.
-            const string brokenRe = "_\\d$";
+            // Ids that crash or come up black: every one whose id ends in an underscore and digits, which is
+            // every numbered section in the stage table. None of them can be brought up far enough to say what
+            // they are, so the table's "gameplay" is not a claim worth repeating - they are their own kind,
+            // "broken". "_D2" is a cutscene, not a section, and is not caught by this.
+            const string brokenRe = "_\\d+$";
             var aliasOf = new Dictionary<string, string>();
 
             string csv = Paths.DataText(ScenesCsv);
@@ -142,15 +147,16 @@ namespace Mgs4Launcher
                     info.TryGetValue(id, out o);
                     if (o != null && o.ContainsKey("sameAs")) { aliasOf[id] = o["sameAs"].ToString(); continue; }
 
+                    bool broken = Regex.IsMatch(id, brokenRe);
                     var s = new Scene
                     {
                         Id = id,
-                        Kind = iKind >= 0 && cells.Length > iKind ? cells[iKind] : "",
+                        Kind = broken ? "broken" : (iKind >= 0 && cells.Length > iKind ? cells[iKind] : ""),
                         Name = FormatSceneName(labels.ContainsKey(id) ? labels[id] : null),
                         ActKey = ActKeyFor(id),
                         Rank = 0,
                         Description = "",
-                        Hidden = Regex.IsMatch(id, brokenRe),
+                        Hidden = broken,
                         SortAs = ""
                     };
                     if (o != null)
@@ -185,6 +191,7 @@ namespace Mgs4Launcher
                 e.ActTitle = ActTitles.ContainsKey(e.ActKey) ? ActTitles[e.ActKey] : "Uncategorised";
                 switch (e.Kind)
                 {
+                    case "broken": e.Note = "known broken - it crashes or comes up black"; break;
                     case "cutscene": e.Note = "in-engine cutscene"; break;
                     case "briefing": e.Note = "mission briefing"; break;
                     case "gameplay": e.Note = "playable section"; break;
@@ -204,6 +211,20 @@ namespace Mgs4Launcher
                     else e.SortCat = 2;
                 }
                 if (!string.IsNullOrEmpty(e.SortAs)) { e.SortPrefix = e.SortAs; e.SortCat = 0; e.SortNum = 0; }
+            }
+
+            // Anything renamed in the Play tab, laid over the labels: the file says what a scene is called until
+            // someone here says otherwise, and what the file said is kept so Reset can put it back.
+            Dictionary<string, Prefs.SceneEdit> edits;
+            try { edits = Prefs.SceneEdits(); } catch { edits = new Dictionary<string, Prefs.SceneEdit>(); }
+            foreach (Scene e in list)
+            {
+                e.BaseName = e.Name;
+                e.BaseDescription = e.Description;
+                Prefs.SceneEdit edit;
+                if (!edits.TryGetValue(e.Id, out edit)) continue;
+                if (edit.Name != null) e.Name = edit.Name;
+                if (edit.Description != null) e.Description = edit.Description;
             }
 
             var order = new Dictionary<string, int>();

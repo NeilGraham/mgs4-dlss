@@ -13,7 +13,7 @@ sh dlss-addon/install.sh                    # -> <game>\MGS4\ (keeps an existing
 
 ## Building the launcher
 
-`mgs4-dlss-launcher.bat` builds `mgs4-dlss-launcher.exe` on its first run with the C# compiler that ships with Windows (`launcher\build.ps1`); nothing has to be installed. The exe is not in the repo and not in a release, because the icon inside it is read from the `mgs4.exe` on the building machine and that artwork is Konami's. How the app is put together is in [launcher.md](launcher.md).
+`mgs4-dlss-launcher.bat` builds `mgs4-dlss-launcher.exe` on its first run with the C# compiler that ships with Windows (`launcher\build.ps1`); nothing has to be installed. That exe is not in the repo, because the icon inside it is read from the `mgs4.exe` on the building machine and that artwork is Konami's. `launcher\build.ps1 -Release` builds the one a release carries: the launcher's own icon (`tools\launcher_icon.ps1`), and `build\mgs4_dlss.addon64` + `dlss-addon\mgs4_dlss.ini` embedded as resources, so the single file installs the add-on by itself. How the app is put together is in [launcher.md](launcher.md).
 
 ## Layout
 
@@ -58,10 +58,13 @@ The PowerShell scripts also still take `-GameDir` for a one-off run.
 
 ```bat
 dlss-addon\build.bat
-python tools\package_release.py --version 1.2.0
+python tools\package_release.py --version 1.3.0
+gh release create v1.3.0 --title v1.3.0 --notes-file release\notes-1.3.0.md release\mgs4-dlss-launcher.exe release\mgs4_dlss.addon64 release\mgs4_dlss.ini
 ```
 
-`tools\package_release.py` assembles `release\` (git-ignored) with the three assets a release carries: `mgs4_dlss.addon64`, `mgs4_dlss.ini` and `mgs4_dlss_launcher.zip` - the launcher (`mgs4-dlss-launcher.bat`, `launcher\`, the `tools\` data files it reads), the docs, and the same add-on and ini at the zip's root, where the launcher's **Install the add-on** looks for them. It also writes `release\notes-<version>.md`, the matching section of [releases.md](releases.md), for `gh release create --notes-file`.
+`tools\package_release.py` assembles `release\` (git-ignored) with the three assets a release carries: `mgs4-dlss-launcher.exe` - the launcher built with `-Release`, one file with the add-on and ini inside it - and the loose `mgs4_dlss.addon64` and `mgs4_dlss.ini` for a manual install or an add-on-only update. It also writes `release\notes-<version>.md`, the matching section of [releases.md](releases.md), for `gh release create --notes-file`.
+
+Pushing a tag `v<version>` does the same on GitHub: `.github\workflows\release.yml` builds the add-on and the exe on a Windows runner and publishes the release with that version's notes. The `## v<version>` section in [releases.md](releases.md) has to exist before the tag is pushed.
 
 ## Recording the in-game cutscenes (4K60 AV1)
 

@@ -39,8 +39,8 @@ namespace Mgs4Launcher
             _installView.DragLeave += (s, e) =>
             {
                 if (_dropZone == null) return;
-                _dropZone.Stroke = Widgets.Brush("#3E4A66");
-                _dropZone.Fill = Widgets.Brush("#111520");
+                _dropZone.Stroke = Widgets.Brush("#43434C");
+                _dropZone.Fill = Widgets.Brush("#0E0E10");
             };
             _installView.Drop += (s, e) =>
             {
@@ -76,8 +76,9 @@ namespace Mgs4Launcher
             if (string.IsNullOrEmpty(_gameDir))
             {
                 StackPanel none;
-                _installHost.Children.Add(StatusCard(new Verdict
-                { Text = "No game folder", Kind = "bad", Note = "nothing to check against yet" }));
+                var nothing = new Verdict { Text = "No game folder", Kind = "bad", Note = "nothing to check against yet" };
+                _installHost.Children.Add(StatusCard(nothing));
+                SetSetupIcon(nothing);
                 // Which libraries were searched is the whole answer on a machine with more than one drive: Steam's
                 // own install on C: is what names a library on D:.
                 string why = "The Steam libraries were searched for app 2492670 and no mgs4.exe turned up.";
@@ -86,14 +87,16 @@ namespace Mgs4Launcher
                 else why += " No Steam library was found at all - Steam's own install could not be located.";
                 if (!string.IsNullOrEmpty(_opt.GameDirBad)) why = "There is no mgs4.exe in " + _opt.GameDirBad + ".";
                 _installHost.Children.Add(Widgets.Card("Nothing to check yet",
-                    why + " Point the app at the folder holding mgs4.exe with Browse above, and everything below fills in.",
+                    why + " Point the app at the folder holding mgs4.exe with Change above, and everything below fills in.",
                     "bad", "no game folder", out none));
                 Say("no game folder set");
                 return;
             }
 
             _sections = Checks.Run(_gameDir);
-            _installHost.Children.Add(StatusCard(Checks.GetVerdict(_sections)));
+            Verdict verdict = Checks.GetVerdict(_sections);
+            _installHost.Children.Add(StatusCard(verdict));
+            SetSetupIcon(verdict);
 
             if (!string.IsNullOrEmpty(Checks.ManifestError))
             {
@@ -142,31 +145,47 @@ namespace Mgs4Launcher
             bool ok = !string.IsNullOrEmpty(_gameDir);
             var row = new Border { Padding = new Thickness(18, 13, 18, 13) };
             Grid g = Widgets.Columns("Auto", "*", "Auto");
-            TextBlock label = Widgets.Text("Game folder", 12, "#858D9E");
+            TextBlock label = Widgets.Text("Game folder", 12, "#97979F");
             label.VerticalAlignment = VerticalAlignment.Center;
             label.Margin = new Thickness(0, 0, 14, 0);
             g.Children.Add(label);
 
             TextBlock path = Widgets.Text(ok ? _gameDir : "no mgs4.exe found - pick the folder that holds it",
-                                          12, ok ? "#7C9CFF" : "#FF7B72", false, true);
+                                          12, ok ? "#7C9CFF" : "#FF6B66", false, true);
             path.VerticalAlignment = VerticalAlignment.Center;
-            path.ToolTip = ok ? Paths.GameDirSource() : null;
+            path.ToolTip = ok ? Paths.GameDirSource() + " - click to open it in Explorer" : null;
+            if (ok)
+            {
+                path.Cursor = System.Windows.Input.Cursors.Hand;
+                path.MouseLeftButtonUp += (s, e) => Widgets.OpenFolder(_gameDir);
+            }
             Grid.SetColumn(path, 1);
             g.Children.Add(path);
 
+            // Two jobs, two labels that cannot be read as each other: open the folder that is set, or pick a
+            // different one. Browse read as both at once. There is no button back to the lookup because the
+            // lookup is what runs whenever MGS4_DIR is not set - clearing it is a config.ini edit, not a step
+            // anyone takes from here.
             var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-            var browse = new Button { Content = "Browse...", Style = Widgets.FlatStyle, Margin = new Thickness(0, 0, 8, 0) };
-            browse.Click += (s, e) => BrowseForGame();
-            var detect = new Button { Content = "Detect", Style = Widgets.FlatStyle };
-            detect.Click += (s, e) =>
+            var open = new Button
             {
-                Paths.SetConfiguredGameDir(null);
-                _gameDir = Paths.GameDir();
-                Say(_gameDir == null ? "no mgs4.exe found in the Steam libraries" : "detected " + _gameDir);
-                ShowSetup();
+                Content = "Open folder",
+                Style = Widgets.FlatStyle,
+                Margin = new Thickness(0, 0, 8, 0),
+                IsEnabled = ok,
+                ToolTip = ok ? "Opens " + _gameDir + " in Explorer" : "Set the game folder first",
             };
+            open.Click += (s, e) => Widgets.OpenFolder(_gameDir);
+            var browse = new Button
+            {
+                Content = "Change...",
+                Style = Widgets.FlatStyle,
+                ToolTip = "Pick mgs4.exe yourself and write its folder to config.ini",
+            };
+            browse.Click += (s, e) => BrowseForGame();
+            buttons.Children.Add(open);
             buttons.Children.Add(browse);
-            buttons.Children.Add(detect);
+
             Grid.SetColumn(buttons, 2);
             g.Children.Add(buttons);
             row.Child = g;
@@ -183,8 +202,8 @@ namespace Mgs4Launcher
             _dropZone = new System.Windows.Shapes.Rectangle
             {
                 RadiusX = 10, RadiusY = 10,
-                Stroke = Widgets.Brush("#3E4A66"),
-                Fill = Widgets.Brush("#111520"),
+                Stroke = Widgets.Brush("#43434C"),
+                Fill = Widgets.Brush("#0E0E10"),
                 StrokeThickness = 1,
                 StrokeDashArray = new DoubleCollection(new[] { 4.0, 3.0 }),
                 MinHeight = 92,
@@ -197,7 +216,7 @@ namespace Mgs4Launcher
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(18, 14, 18, 14),
             };
-            TextBlock title = Widgets.Text("Drop files here", 12, "#E7EAF0", true);
+            TextBlock title = Widgets.Text("Drop files here", 12, "#ECECEE", true);
             title.HorizontalAlignment = HorizontalAlignment.Center;
             stack.Children.Add(title);
 
@@ -208,11 +227,11 @@ namespace Mgs4Launcher
                 TextBlock t = Widgets.Text(drops[i], 11, "#9FB6FF", false, true);
                 t.Margin = new Thickness(0, 0, 10, 0);
                 names.Children.Add(t);
-                if (i == drops.Count - 2) names.Children.Add(Widgets.Text("or ", 11, "#5C6478"));
+                if (i == drops.Count - 2) names.Children.Add(Widgets.Text("or ", 11, "#6E6E77"));
             }
             stack.Children.Add(names);
             TextBlock note = Widgets.Text("Zips are unpacked, everything else is copied into place. Anything else is left alone.",
-                                          11, "#5C6478");
+                                          11, "#6E6E77");
             note.HorizontalAlignment = HorizontalAlignment.Center;
             note.Margin = new Thickness(0, 6, 0, 0);
             stack.Children.Add(note);
@@ -274,8 +293,9 @@ namespace Mgs4Launcher
                 (s, e) => { Say(Install.SteamAppId(_gameDir).ToString()); ShowSetup(); });
         }
 
-        // The add-on installs itself: the app ships with mgs4_dlss.addon64 and mgs4_dlss.ini, so the one group of
-        // files this whole thing exists for is a button rather than a download.
+        // The add-on installs itself: the app ships with mgs4_dlss.addon64 and mgs4_dlss.ini - built into the
+        // release exe, or in build\ and dlss-addon\ of a checkout - so the one group of files this whole thing
+        // exists for is a button rather than a download.
         Border AddonRow()
         {
             string addon, ini;
@@ -289,7 +309,8 @@ namespace Mgs4Launcher
                 : "The add-on ships with this app - nothing to download. This copies mgs4_dlss.addon64, and an mgs4_dlss.ini if the game folder has none, next to mgs4.exe.";
             if (running) text += " The game is running - close it first, ReShade holds the add-on open.";
             return Widgets.ActionRow(text, have ? "Reinstall the add-on" : "Install the add-on",
-                "Copies " + addon + " into " + _gameDir, !running, !have,
+                (addon == Install.BuiltIn ? "Copies the add-on built into this launcher" : "Copies " + addon) + " into " + _gameDir,
+                !running, !have,
                 (s, e) => { Say(Install.BundledAddon(_gameDir).ToString()); ShowSetup(); });
         }
     }

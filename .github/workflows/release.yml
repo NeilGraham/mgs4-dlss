@@ -1,0 +1,43 @@
+# A tag v<version> becomes a GitHub release carrying the three assets tools\package_release.py assembles:
+# mgs4-dlss-launcher.exe (the launcher with the add-on built in), and the loose mgs4_dlss.addon64 + mgs4_dlss.ini.
+# The version must have a "## v<version>" section in docs\releases.md - that section is the release body.
+#
+# Everything the build needs is on a stock Windows runner: MSVC and the Windows 10 SDK for dlss-addon\build.bat
+# (found through vswhere, as on a developer machine), and the .NET Framework's csc.exe for launcher\build.ps1.
+# There is no mgs4.exe on the runner, so the exe wears the launcher's own icon - which is what -Release asks for
+# anyway.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the add-on
+        shell: cmd
+        run: dlss-addon\build.bat
+
+      - name: Assemble the release assets
+        shell: cmd
+        run: |
+          set TAG=${{ github.ref_name }}
+          set VERSION=%TAG:~1%
+          python tools\package_release.py --version %VERSION%
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+            --notes-file "release/notes-$version.md" \
+            release/mgs4-dlss-launcher.exe release/mgs4_dlss.addon64 release/mgs4_dlss.ini

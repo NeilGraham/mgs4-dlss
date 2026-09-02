@@ -22,19 +22,59 @@ namespace Mgs4Launcher
     {
         // ------------------------------------------------------------------------------------- the bundled add-on
 
-        // The add-on's own two files, as they ship with this app: a release carries them next to it, a source
-        // checkout has the built addon64 in build\ and the sample ini in dlss-addon\. Either way they are already
-        // on the machine, so the one group of files this app exists for is the one nobody should have to fetch.
+        // The add-on's own two files, as they ship with this app. A release is one exe with both built into it as
+        // resources (launcher\build.ps1); a source checkout has the built addon64 in build\ and the sample ini in
+        // dlss-addon\, and a pair dropped next to the exe wins over everything. Either way they are already on the
+        // machine, so the one group of files this app exists for is the one nobody should have to fetch.
+        //
+        // The file on disk is preferred over the built-in copy for the same reason Paths.DataText prefers it:
+        // rebuilding the add-on in a checkout should change what "Install the add-on" installs without rebuilding
+        // the launcher too.
+        public const string BuiltIn = "the copy built into the launcher";
+
+        static readonly string[] AddonPlaces = { "mgs4_dlss.addon64", "build\\mgs4_dlss.addon64" };
+        static readonly string[] IniPlaces = { "mgs4_dlss.ini", "dlss-addon\\mgs4_dlss.ini" };
+
+        // Where a bundled file would be read from - a path, BuiltIn, or null when this copy of the app has none.
+        static string Locate(string name, string[] places)
+        {
+            foreach (string rel in places)
+            {
+                string p = Paths.Join(Paths.Root, rel);
+                if (Paths.Exists(p)) return p;
+            }
+            return Paths.HasResource(name) ? BuiltIn : null;
+        }
+
+        static Stream Open(string name, string where)
+        {
+            if (where == null) return null;
+            if (where == BuiltIn) return Paths.DataStream(name);
+            return new FileStream(where, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        // What the Setup tab and the report say about each: a path, or that it is built in. Null for missing.
         public static void FindBundled(out string addon, out string ini)
         {
-            addon = null;
-            foreach (string p in new[] { Paths.Join(Paths.Root, "mgs4_dlss.addon64"),
-                                         Paths.Join(Paths.Root, "build\\mgs4_dlss.addon64") })
-                if (Paths.Exists(p)) { addon = p; break; }
-            ini = null;
-            foreach (string p in new[] { Paths.Join(Paths.Root, "mgs4_dlss.ini"),
-                                         Paths.Join(Paths.Root, "dlss-addon\\mgs4_dlss.ini") })
-                if (Paths.Exists(p)) { ini = p; break; }
+            addon = Locate("mgs4_dlss.addon64", AddonPlaces);
+            ini = Locate("mgs4_dlss.ini", IniPlaces);
+        }
+
+        // One file, from wherever FindBundled said, into the game folder. Overwrites: the caller decides whether
+        // the destination is one to keep.
+        static void Put(string name, string from, string dest)
+        {
+            using (Stream src = Open(name, from))
+            {
+                if (src == null) throw new FileNotFoundException("no " + name + " to copy");
+                string tmp = dest + ".tmp";
+                using (FileStream dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                    src.CopyTo(dst);
+                // Into place in one move, so a copy that fails half way never leaves a truncated add-on for
+                // ReShade to load.
+                if (File.Exists(dest)) File.Delete(dest);
+                File.Move(tmp, dest);
+            }
         }
 
         // Copies those two next to mgs4.exe: the addon64 every time, the ini only when the game folder has none -
@@ -59,8 +99,8 @@ namespace Mgs4Launcher
             var outcome = new Outcome(true);
             try
             {
-                File.Copy(addon, Paths.Join(gameDir, "mgs4_dlss.addon64"), true);
-                outcome.Say("mgs4_dlss.addon64 -> the game folder");
+                Put("mgs4_dlss.addon64", addon, Paths.Join(gameDir, "mgs4_dlss.addon64"));
+                outcome.Say("mgs4_dlss.addon64 -> the game folder" + (addon == BuiltIn ? " (from inside the launcher)" : ""));
             }
             catch (Exception e)
             {
@@ -71,7 +111,7 @@ namespace Mgs4Launcher
             if (Paths.Exists(destIni)) outcome.Say("kept the mgs4_dlss.ini already there");
             else if (ini != null)
             {
-                try { File.Copy(ini, destIni, true); outcome.Say("mgs4_dlss.ini -> the game folder"); }
+                try { Put("mgs4_dlss.ini", ini, destIni); outcome.Say("mgs4_dlss.ini -> the game folder"); }
                 catch (Exception e) { outcome.Say("could not copy mgs4_dlss.ini: " + e.Message); }
             }
             else outcome.Say("no mgs4_dlss.ini to copy - the add-on will use its built-in defaults");

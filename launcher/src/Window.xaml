@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="MGS4 DLSS Launcher" Height="880" Width="1180" MinHeight="560" MinWidth="920"
-        Background="#0F1116" WindowStartupLocation="CenterScreen" TextOptions.TextFormattingMode="Ideal">
+        Background="#0B0B0C" WindowStartupLocation="CenterScreen" TextOptions.TextFormattingMode="Ideal">
   <!-- No system title bar: the client area starts at the very top of the window so the key art can fill the strip
        the caption used to have, and the three buttons at its right are drawn here instead. CaptionHeight is what
        is left draggable - it is raised in code to the whole header's height, so the bar drags like a title bar.
@@ -12,10 +12,10 @@
                         GlassFrameThickness="0,32,0,0" UseAeroCaptionButtons="False"/>
   </shell:WindowChrome.WindowChrome>
   <Window.Resources>
-    <SolidColorBrush x:Key="Card" Color="#171A21"/>
-    <SolidColorBrush x:Key="Line" Color="#242935"/>
-    <SolidColorBrush x:Key="Text" Color="#E7EAF0"/>
-    <SolidColorBrush x:Key="Muted" Color="#858D9E"/>
+    <SolidColorBrush x:Key="Card" Color="#151517"/>
+    <SolidColorBrush x:Key="Line" Color="#26262A"/>
+    <SolidColorBrush x:Key="Text" Color="#ECECEE"/>
+    <SolidColorBrush x:Key="Muted" Color="#97979F"/>
     <SolidColorBrush x:Key="Accent" Color="#7C9CFF"/>
     <Style TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
@@ -29,10 +29,10 @@
                   <Thumb>
                     <Thumb.Template>
                       <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="t" CornerRadius="4" Background="#333B4C" Margin="3,2"/>
+                        <Border x:Name="t" CornerRadius="4" Background="#35353C" Margin="3,2"/>
                         <ControlTemplate.Triggers>
                           <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="t" Property="Background" Value="#465066"/>
+                            <Setter TargetName="t" Property="Background" Value="#4A4A54"/>
                           </Trigger>
                         </ControlTemplate.Triggers>
                       </ControlTemplate>
@@ -52,9 +52,9 @@
       </Setter>
     </Style>
     <Style x:Key="Flat" TargetType="Button">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
-      <Setter Property="Background" Value="#222736"/>
-      <Setter Property="BorderBrush" Value="#333A4D"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
+      <Setter Property="Background" Value="#212125"/>
+      <Setter Property="BorderBrush" Value="#35353C"/>
       <Setter Property="Padding" Value="16,8"/>
       <Setter Property="FontSize" Value="13"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -67,7 +67,7 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#2C3346"/>
+                <Setter TargetName="b" Property="Background" Value="#313137"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.45"/>
@@ -84,57 +84,60 @@
       <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
     <Style x:Key="Link" TargetType="Button" BasedOn="{StaticResource Flat}">
-      <Setter Property="Background" Value="#1D2432"/>
+      <Setter Property="Background" Value="#1E1E21"/>
       <Setter Property="BorderBrush" Value="#31405E"/>
       <Setter Property="Foreground" Value="#9FB6FF"/>
       <Setter Property="Padding" Value="10,3"/>
       <Setter Property="FontSize" Value="11"/>
     </Style>
+    <!-- A filter chip is its category's badge: the badge's own colour as an outline while the filter is off, and
+         filled with it while the filter is on. The colours are per chip and set in code (MainWindow.Play), so the
+         template only says where they go - a trigger here could not know which category it was drawing. -->
     <Style x:Key="Chip" TargetType="ToggleButton">
-      <Setter Property="Foreground" Value="#858D9E"/>
       <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="0,0,6,6"/>
+      <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ToggleButton">
-            <Border x:Name="b" CornerRadius="4" Background="#12151D" BorderBrush="#2A3040" BorderThickness="1"
-                    Padding="10,4">
+            <Border x:Name="b" CornerRadius="4" Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" Padding="10,4">
               <ContentPresenter VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="b" Property="BorderBrush" Value="#3E4A66"/>
-              </Trigger>
-              <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#25335C"/>
-                <Setter TargetName="b" Property="BorderBrush" Value="#4E6DE8"/>
-                <Setter Property="Foreground" Value="#CBD8FF"/>
+                <Setter TargetName="b" Property="Opacity" Value="0.78"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- The tabs are icons out of Segoe MDL2 Assets, the same font the caption buttons use, so they scale with the
+         window's own text and need no artwork. Bold does nothing to an icon font, so the checked tab is said with
+         the accent and a filled box rather than weight; the name lives in each one's tooltip. -->
     <Style x:Key="Nav" TargetType="RadioButton">
-      <Setter Property="Foreground" Value="#858D9E"/>
+      <Setter Property="Foreground" Value="#97979F"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="16"/>
       <Setter Property="Margin" Value="0,0,6,0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border x:Name="b" CornerRadius="6" Background="Transparent" Padding="18,7">
-              <ContentPresenter VerticalAlignment="Center"/>
+            <Border x:Name="b" CornerRadius="6" Background="Transparent" Padding="13,9" Width="46" Height="38">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#1B2030"/>
+                <Setter TargetName="b" Property="Background" Value="#1C1C1F"/>
+                <Setter Property="Foreground" Value="#ECECEE"/>
               </Trigger>
               <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="b" Property="Background" Value="#222B45"/>
-                <Setter Property="Foreground" Value="#E7EAF0"/>
-                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="#7C9CFF"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -144,10 +147,10 @@
     <!-- No padding on the border: it ate the height the text needed, so a box with a set height clipped whatever was
          typed into it. The content host is inset horizontally and centred vertically instead, which cannot clip. -->
     <Style TargetType="TextBox">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
-      <Setter Property="CaretBrush" Value="#E7EAF0"/>
-      <Setter Property="Background" Value="#12151D"/>
-      <Setter Property="BorderBrush" Value="#333A4D"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
+      <Setter Property="CaretBrush" Value="#ECECEE"/>
+      <Setter Property="Background" Value="#101012"/>
+      <Setter Property="BorderBrush" Value="#35353C"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="MinHeight" Value="30"/>
       <Setter Property="Template">
@@ -161,12 +164,28 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- The same box with the text held at the top, for the few boxes that take more than a line. -->
+    <Style x:Key="MultiBox" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+      <Setter Property="AcceptsReturn" Value="True"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border CornerRadius="6" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="1">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="9,6"/>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <!-- Minimise, maximise and close, in Windows' own metrics (46x32) and its own glyph font, because they are
          no longer Windows' to draw. -->
     <Style x:Key="Caption" TargetType="Button">
       <Setter Property="Width" Value="46"/>
       <Setter Property="Height" Value="32"/>
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
       <Setter Property="FontSize" Value="10"/>
       <Setter Property="Template">
@@ -211,11 +230,11 @@
     <!-- The right-click menu on any text box. WPF builds that menu itself, and its own theme is the light one,
          which came up white over this window. -->
     <Style TargetType="ContextMenu">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ContextMenu">
-            <Border Background="#171A21" BorderBrush="#333A4D" BorderThickness="1" CornerRadius="6" Padding="4"
+            <Border Background="#151517" BorderBrush="#35353C" BorderThickness="1" CornerRadius="6" Padding="4"
                     SnapsToDevicePixels="True">
               <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
             </Border>
@@ -224,7 +243,7 @@
       </Setter>
     </Style>
     <Style TargetType="MenuItem">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
@@ -237,7 +256,7 @@
                   <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" VerticalAlignment="Center"/>
-                <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}" Foreground="#858D9E"
+                <TextBlock Grid.Column="1" Text="{TemplateBinding InputGestureText}" Foreground="#97979F"
                            Margin="22,0,0,0" VerticalAlignment="Center"/>
               </Grid>
             </Border>
@@ -246,7 +265,7 @@
                 <Setter TargetName="b" Property="Background" Value="#25335C"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
-                <Setter Property="Foreground" Value="#5A6172"/>
+                <Setter Property="Foreground" Value="#5A5A62"/>
                 <Setter Property="Cursor" Value="Arrow"/>
               </Trigger>
             </ControlTemplate.Triggers>
@@ -258,7 +277,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Separator">
-            <Border Height="1" Background="#242935" Margin="7,4"/>
+            <Border Height="1" Background="#26262A" Margin="7,4"/>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
@@ -288,7 +307,7 @@
       </Setter>
     </Style>
     <Style TargetType="CheckBox">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
@@ -299,9 +318,9 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
               </Grid.ColumnDefinitions>
-              <Border x:Name="box" Width="16" Height="16" CornerRadius="4" Background="#12151D" BorderBrush="#3A445C"
+              <Border x:Name="box" Width="16" Height="16" CornerRadius="4" Background="#101012" BorderBrush="#3D3D45"
                       BorderThickness="1" VerticalAlignment="Center">
-                <TextBlock x:Name="tick" Text="&#x2714;" FontSize="10" Foreground="#0F1116" FontWeight="Bold"
+                <TextBlock x:Name="tick" Text="&#x2714;" FontSize="10" Foreground="#0B0B0C" FontWeight="Bold"
                            HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
               </Border>
               <ContentPresenter Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Center"/>
@@ -313,7 +332,7 @@
                 <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
               </Trigger>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="box" Property="BorderBrush" Value="#5A6480"/>
+                <Setter TargetName="box" Property="BorderBrush" Value="#62626C"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.45"/>
@@ -324,7 +343,7 @@
       </Setter>
     </Style>
     <Style TargetType="ComboBoxItem">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Padding" Value="10,6"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -336,7 +355,7 @@
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsHighlighted" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#2C3346"/>
+                <Setter TargetName="b" Property="Background" Value="#313137"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -344,24 +363,24 @@
       </Setter>
     </Style>
     <Style TargetType="ComboBox">
-      <Setter Property="Foreground" Value="#E7EAF0"/>
+      <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBox">
-            <Grid TextBlock.Foreground="#E7EAF0">
+            <Grid TextBlock.Foreground="#ECECEE">
               <ToggleButton Focusable="False" ClickMode="Press"
                             IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
                 <ToggleButton.Template>
                   <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="tb" CornerRadius="6" Background="#12151D" BorderBrush="#333A4D" BorderThickness="1">
-                      <Path Data="M0,0 L7,0 L3.5,4.5 Z" Fill="#858D9E" HorizontalAlignment="Right"
+                    <Border x:Name="tb" CornerRadius="6" Background="#101012" BorderBrush="#35353C" BorderThickness="1">
+                      <Path Data="M0,0 L7,0 L3.5,4.5 Z" Fill="#97979F" HorizontalAlignment="Right"
                             VerticalAlignment="Center" Margin="0,0,10,0"/>
                     </Border>
                     <ControlTemplate.Triggers>
                       <Trigger Property="IsMouseOver" Value="True">
-                        <Setter TargetName="tb" Property="BorderBrush" Value="#4A5573"/>
+                        <Setter TargetName="tb" Property="BorderBrush" Value="#52525C"/>
                       </Trigger>
                     </ControlTemplate.Triggers>
                   </ControlTemplate>
@@ -371,7 +390,7 @@
                                 ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                 Margin="10,5,26,5" VerticalAlignment="Center"/>
               <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
-                <Border Background="#1B1F29" BorderBrush="#333A4D" BorderThickness="1" CornerRadius="6"
+                <Border Background="#17171A" BorderBrush="#35353C" BorderThickness="1" CornerRadius="6"
                         MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Margin="0,2,0,0">
                   <ScrollViewer MaxHeight="280"><ItemsPresenter/></ScrollViewer>
                 </Border>
@@ -397,12 +416,12 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
-            <Border x:Name="b" Background="Transparent" BorderBrush="#1C202B" BorderThickness="0,0,0,1" Padding="14,8">
+            <Border x:Name="b" Background="Transparent" BorderBrush="#1B1B1E" BorderThickness="0,0,0,1" Padding="14,8">
               <ContentPresenter/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#1A1E28"/>
+                <Setter TargetName="b" Property="Background" Value="#19191C"/>
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
                 <Setter TargetName="b" Property="Background" Value="#232C48"/>
@@ -432,20 +451,20 @@
       <!-- The game's own key art, from Steam's cache, put there at runtime; nothing ships with it. It sits on the
            left, the full height of the band; the logo is offset past Snake's face rather than over it. -->
       <Rectangle x:Name="HeroArt" HorizontalAlignment="Stretch" Visibility="Collapsed"/>
-      <!-- One translucent blue-grey over the lot, art and bare black alike, so they stay the same colour while the
+      <!-- One translucent grey over the lot, art and bare black alike, so they stay the same colour while the
            black is lifted towards the rest of the window. -->
-      <Rectangle Fill="#188FA8D8"/>
+      <Rectangle Fill="#18B4B4BE"/>
     </Grid>
 
     <Border x:Name="HeaderBar" Grid.Row="0" Background="Transparent">
       <Grid>
         <!-- 48 at the top: 32 of caption strip that is now ours to draw on, then the 16 the bar always had, which
-             leaves the logo, the tabs and the pill exactly where they were on screen. -->
+             leaves the logo and the tabs exactly where they were on screen. The tabs sit hard right, in the corner
+             the running/idle badge used to hold. -->
         <Grid Margin="22,48,22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" VerticalAlignment="Center">
           <Image x:Name="LogoArt" Height="34" HorizontalAlignment="Left" Visibility="Collapsed"/>
@@ -453,21 +472,15 @@
         </StackPanel>
         <!-- The whole header is the draggable caption, so the tabs have to be excused from it or they stop
              taking clicks. Everything else up here is a label and drags the window, which is what a bar does. -->
-        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"
-                    shell:WindowChrome.IsHitTestVisibleInChrome="True">
-          <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="Play" IsChecked="True" GroupName="nav"/>
-          <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="Settings" GroupName="nav"/>
-          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="Setup" GroupName="nav"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
+                    VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="&#xE768;" ToolTip="Play"
+                       IsChecked="True" GroupName="nav"/>
+          <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="&#xE713;" ToolTip="Settings"
+                       GroupName="nav"/>
+          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="&#xE9D5;" ToolTip="Setup"
+                       Margin="0" GroupName="nav"/>
         </StackPanel>
-        <Border x:Name="Pill" Grid.Column="2" CornerRadius="8" Padding="16,9" Background="#161B2A" BorderBrush="#33436E"
-                BorderThickness="1" VerticalAlignment="Center" MinWidth="150">
-          <StackPanel>
-            <TextBlock x:Name="PillText" Text="idle" FontSize="15" FontWeight="SemiBold" Foreground="#7C9CFF"
-                       HorizontalAlignment="Center"/>
-            <TextBlock x:Name="PillNote" Text="" FontSize="11" Foreground="{StaticResource Muted}"
-                       HorizontalAlignment="Center" Margin="0,2,0,0"/>
-          </StackPanel>
-        </Border>
         </Grid>
       </Grid>
     </Border>
@@ -496,13 +509,13 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
           </Grid.RowDefinitions>
-          <Border Grid.Row="0" Background="#1B1F29" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
+          <Border Grid.Row="0" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
                   CornerRadius="10,10,0,0" Padding="14,12">
             <StackPanel>
               <Grid>
                 <TextBox x:Name="Search" ToolTip="Ctrl+F from anywhere; Escape clears it"/>
                 <TextBlock x:Name="SearchHint" Text="Search by scene name, stage id or act" FontSize="12"
-                           Foreground="#5C6478" IsHitTestVisible="False" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                           Foreground="#6E6E77" IsHitTestVisible="False" VerticalAlignment="Center" Margin="10,0,0,0"/>
               </Grid>
               <WrapPanel x:Name="Filters" Margin="0,10,0,-6"/>
             </StackPanel>
@@ -519,7 +532,7 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
-          <Border Grid.Row="0" Background="#1B1F29" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
+          <Border Grid.Row="0" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
                   CornerRadius="10,10,0,0" Padding="18,13">
             <StackPanel>
               <TextBlock x:Name="PickTitle" Text="Nothing picked" FontSize="14" FontWeight="SemiBold"
@@ -532,6 +545,23 @@
                 <TextBlock Text="Same scene, two ids:" FontSize="11" Foreground="{StaticResource Muted}"
                            VerticalAlignment="Center"/>
                 <ComboBox x:Name="AltPick" Width="140" Height="26" Margin="8,0,0,0"/>
+              </StackPanel>
+              <!-- The catalogue's names are read off the stage table and the labels file, and most scenes have
+                   none at all. Anything can be given a name and a note of its own here; they are kept in the
+                   preferences file, so rebuilding labels.json cannot lose them. -->
+              <Button x:Name="EditBtn" Content="Rename" Style="{StaticResource Link}" HorizontalAlignment="Left"
+                      Margin="0,9,0,0" ToolTip="Give this scene a name and a description of your own"/>
+              <StackPanel x:Name="EditPanel" Margin="0,9,0,0" Visibility="Collapsed">
+                <TextBlock Text="Name" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,3"/>
+                <TextBox x:Name="EditName"/>
+                <TextBlock Text="Description" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,8,0,3"/>
+                <TextBox x:Name="EditDesc" Style="{StaticResource MultiBox}" Height="62"/>
+                <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                  <Button x:Name="EditSaveBtn" Content="Save" Style="{StaticResource Primary}"/>
+                  <Button x:Name="EditCancelBtn" Content="Cancel" Style="{StaticResource Flat}" Margin="8,0,0,0"/>
+                  <Button x:Name="EditResetBtn" Content="Reset" Style="{StaticResource Flat}" Margin="8,0,0,0"
+                          ToolTip="Drop what you have typed and go back to the catalogue's own name"/>
+                </StackPanel>
               </StackPanel>
             </StackPanel>
           </Border>
@@ -551,7 +581,7 @@
                 <TextBlock Text="seconds into the scene" FontSize="11" Foreground="{StaticResource Muted}"
                            VerticalAlignment="Center" Margin="8,0,0,0"/>
               </StackPanel>
-              <Border Height="1" Background="#20242E" Margin="0,2,0,13"/>
+              <Border Height="1" Background="#202023" Margin="0,2,0,13"/>
               <CheckBox x:Name="OptRes" Content="Set the render resolution"/>
               <ComboBox x:Name="ResPick" Width="190" HorizontalAlignment="Left" Margin="25,5,0,13" SelectedIndex="3">
                 <ComboBoxItem Content="1280x720 (720p)" Tag="1280x720"/>
@@ -560,7 +590,7 @@
                 <ComboBoxItem Content="3840x2160 (2160p)" Tag="3840x2160"/>
               </ComboBox>
               <TextBlock Text="The same thing from a terminal" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,4,0,5"/>
-              <Border Background="#12151D" BorderBrush="#242935" BorderThickness="1" CornerRadius="6" Padding="9,7">
+              <Border Background="#101012" BorderBrush="#26262A" BorderThickness="1" CornerRadius="6" Padding="9,7">
                 <Grid>
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -574,7 +604,7 @@
               </Border>
             </StackPanel>
           </ScrollViewer>
-          <Border Grid.Row="2" Background="#1B1F29" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0"
+          <Border Grid.Row="2" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0"
                   CornerRadius="0,0,10,10" Padding="18,14">
             <StackPanel>
               <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="16,11"
@@ -606,7 +636,7 @@
       </ScrollViewer>
     </Grid>
 
-    <Border Grid.Row="2" Background="#141821" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="22,13">
+    <Border Grid.Row="2" Background="#121214" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="22,13">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*"/>

@@ -112,15 +112,15 @@ namespace Mgs4Launcher
             var b = new Border
             {
                 Padding = new Thickness(18, 11, 18, 11),
-                BorderBrush = Widgets.Brush("#20242E"),
+                BorderBrush = Widgets.Brush("#202023"),
                 BorderThickness = new Thickness(0, 1, 0, 0),
             };
             Grid g = Widgets.Columns("*", "Auto");
             var left = new StackPanel();
-            left.Children.Add(Widgets.Text(spec.Label, 12, "#E7EAF0"));
+            left.Children.Add(Widgets.Text(spec.Label, 12, "#ECECEE"));
             var sub = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 12, 0) };
             sub.Children.Add(Widgets.Text(spec.Key, 11, "#7C9CFF", false, true));
-            TextBlock help = Widgets.Text("  " + spec.Help, 11, "#858D9E");
+            TextBlock help = Widgets.Text("  " + spec.Help, 11, "#97979F");
             sub.Children.Add(help);
             left.Children.Add(sub);
             g.Children.Add(left);
@@ -156,7 +156,7 @@ namespace Mgs4Launcher
                 }
                 case "readonly":
                 {
-                    TextBlock t = Widgets.Text(string.IsNullOrEmpty(value) ? "(not written yet)" : value, 12, "#858D9E", false, true);
+                    TextBlock t = Widgets.Text(string.IsNullOrEmpty(value) ? "(not written yet)" : value, 12, "#97979F", false, true);
                     t.VerticalAlignment = VerticalAlignment.Center;
                     editor = t;
                     break;
@@ -204,10 +204,7 @@ namespace Mgs4Launcher
                 if (values.Count == 0) continue;
                 string file = IniForm.PathFor(source, _gameDir);
                 if (string.IsNullOrEmpty(file)) continue;
-                if (source == IniSource.Launcher && !Paths.Exists(file))
-                    System.IO.File.WriteAllText(file,
-                        "; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key." +
-                        Environment.NewLine);
+                if (source == IniSource.Launcher) file = Paths.EnsureConfig();
                 if (!Paths.Exists(file)) continue;
                 try
                 {

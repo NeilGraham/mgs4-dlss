@@ -36,9 +36,9 @@ Each stage is taken apart, feature by feature, in **[docs/dlss-pipeline.md](docs
 
 ## Get started
 
-1. Download `mgs4_dlss_launcher.zip` from the [latest release](https://github.com/NeilGraham/mgs4-dlss/releases) and
-   unzip it anywhere.
-2. Run `mgs4-dlss-launcher.bat`. It builds itself on the first run (nothing to install) and opens on **Setup**.
+1. Download `mgs4-dlss-launcher.exe` from the [latest release](https://github.com/NeilGraham/mgs4-dlss/releases) and
+   put it anywhere. It is the whole mod in one file: the launcher, with the add-on and its settings built in.
+2. Run it (nothing to install - it runs on the .NET Framework that is part of Windows). It opens on **Setup**.
 3. Follow the cards in order: put the game on DirectX 12 with one button, drop the ReShade setup, `streamline.zip` and
    `renodx-dlss5.addon64` on the tab, press **Install the add-on**, re-check, play.
 

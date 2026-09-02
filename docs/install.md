@@ -7,11 +7,13 @@ add-on. None of those can be redistributed here.
 
 ## With the launcher (recommended)
 
-1. Download **`mgs4_dlss_launcher.zip`** from the [latest release](https://github.com/NeilGraham/mgs4-dlss/releases)
-   and unzip it anywhere (not inside the game folder).
-2. Run **`mgs4-dlss-launcher.bat`**. The first run builds the app with the C# compiler that ships with Windows - a few
-   seconds, nothing to install - and opens on the **Setup** tab.
-3. Setup finds the game folder in your Steam libraries (Browse if it cannot) and lists the install in order, one card per
+1. Download **`mgs4-dlss-launcher.exe`** from the [latest release](https://github.com/NeilGraham/mgs4-dlss/releases)
+   and put it anywhere (not inside the game folder). It is one file with the add-on and its ini built in; nothing to
+   unzip and nothing to install - it runs on the .NET Framework that is part of Windows. Windows SmartScreen may warn
+   about an unsigned download the first time: *More info*, then *Run anyway*.
+2. Run it. It opens on the **Setup** tab.
+3. Setup finds the game folder in your Steam libraries (**Change...** if it cannot, **Open folder** to show it in
+   Explorer) and lists the install in order, one card per
    download, each with a source button and a drop area:
    - **The game**: press **Set them for me** to put the game on DirectX 12 with FXAA off, vsync off and the frame
      limiter at 60 (it writes `mgs4.savedsettings`; the game must be closed).
@@ -22,8 +24,8 @@ add-on. None of those can be redistributed here.
      carries `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set, matched to each other.
    - **`renodx-dlss5.addon64`** from the same Pinned Messages: drop it on the tab. Optional, and the reason to bother -
      with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength.
-   - **This add-on**: press **Install the add-on**. It copies the `mgs4_dlss.addon64` and `mgs4_dlss.ini` that ship in
-     the zip next to `mgs4.exe` (an ini already there is kept).
+   - **This add-on**: press **Install the add-on**. It writes the `mgs4_dlss.addon64` and `mgs4_dlss.ini` built into
+     the launcher next to `mgs4.exe` (an ini already there is kept).
 4. Press **Re-check** (F5): every row should be green. Then start the game from the **Play** tab.
 
 Setup's **Last run** card reads the logs of the previous game run and says whether NGX initialised, whether Neural

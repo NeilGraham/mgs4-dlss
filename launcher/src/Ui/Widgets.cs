@@ -14,10 +14,10 @@ namespace Mgs4Launcher
     {
         public static readonly Dictionary<string, StatusStyle> Status = new Dictionary<string, StatusStyle>
         {
-            { "ok",   new StatusStyle { Bg = "#12261A", Br = "#1F6F43", Fg = "#5BD98A" } },
+            { "ok",   new StatusStyle { Bg = "#142117", Br = "#2E6B45", Fg = "#62C98A" } },
             { "warn", new StatusStyle { Bg = "#2A2312", Br = "#7A6220", Fg = "#F2C14E" } },
-            { "bad",  new StatusStyle { Bg = "#2B1618", Br = "#7A2B30", Fg = "#FF7B72" } },
-            { "info", new StatusStyle { Bg = "#161B2A", Br = "#33436E", Fg = "#9FB6FF" } },
+            { "bad",  new StatusStyle { Bg = "#2A1315", Br = "#7A2A2F", Fg = "#FF6B66" } },
+            { "info", new StatusStyle { Bg = "#1C1C20", Br = "#3A3A44", Fg = "#B8B8C2" } },
         };
 
         public static Style LinkStyle, FlatStyle, PrimaryStyle, ChipStyle;
@@ -59,10 +59,10 @@ namespace Mgs4Launcher
         // diagnostic. Their own small palette, in the families the rest of the window uses.
         static readonly Dictionary<string, StatusStyle> BadgeStyles = new Dictionary<string, StatusStyle>
         {
-            { "Game",      new StatusStyle { Bg = "#10222B", Br = "#2A5A73", Fg = "#7DD3FC" } },
+            { "Game",      new StatusStyle { Bg = "#1D1D21", Br = "#4A4A55", Fg = "#D2D2DA" } },
             { "MGS4 DLSS", new StatusStyle { Bg = "#161B2A", Br = "#33436E", Fg = "#9FB6FF" } },
             { "Debug",     new StatusStyle { Bg = "#2A2312", Br = "#7A6220", Fg = "#F2C14E" } },
-            { "RenoDX",    new StatusStyle { Bg = "#211A33", Br = "#4B3E7A", Fg = "#B79CFF" } },
+            { "RenoDX",    new StatusStyle { Bg = "#1E1E23", Br = "#45454F", Fg = "#B3B3BE" } },
         };
 
         public static Border Badge(string text)
@@ -92,8 +92,8 @@ namespace Mgs4Launcher
         {
             var card = new Border
             {
-                Background = Brush("#171A21"),
-                BorderBrush = Brush("#242935"),
+                Background = Brush("#151517"),
+                BorderBrush = Brush("#26262A"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
                 Margin = new Thickness(0, 0, 0, 14),
@@ -102,8 +102,8 @@ namespace Mgs4Launcher
 
             var hdr = new Border
             {
-                Background = Brush("#1B1F29"),
-                BorderBrush = Brush("#242935"),
+                Background = Brush("#17171A"),
+                BorderBrush = Brush("#26262A"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 CornerRadius = new CornerRadius(10, 10, 0, 0),
                 Padding = new Thickness(18, 13, 18, 13),
@@ -113,13 +113,13 @@ namespace Mgs4Launcher
             var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
             if (badges != null)
                 foreach (string b in badges) titleRow.Children.Add(Badge(b));
-            TextBlock titleText = Text(title, 14, "#E7EAF0", true);
+            TextBlock titleText = Text(title, 14, "#ECECEE", true);
             titleText.VerticalAlignment = VerticalAlignment.Center;
             titleRow.Children.Add(titleText);
             hs.Children.Add(titleRow);
             if (!string.IsNullOrEmpty(blurb))
             {
-                TextBlock b = Text(blurb, 11, "#858D9E");
+                TextBlock b = Text(blurb, 11, "#97979F");
                 b.Margin = new Thickness(0, 2, 12, 0);
                 hs.Children.Add(b);
             }
@@ -153,13 +153,13 @@ namespace Mgs4Launcher
         {
             var b = new Border
             {
-                Background = Brush("#12151D"),
-                BorderBrush = Brush("#20242E"),
+                Background = Brush("#101012"),
+                BorderBrush = Brush("#202023"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(18, 12, 18, 12),
             };
             Grid g = Columns("*", "Auto");
-            TextBlock t = Text(text, 11, "#9AA3B4");
+            TextBlock t = Text(text, 11, "#A9A9B1");
             t.VerticalAlignment = VerticalAlignment.Center;
             t.Margin = new Thickness(0, 0, 16, 0);
             g.Children.Add(t);
@@ -183,13 +183,13 @@ namespace Mgs4Launcher
         {
             var b = new Border
             {
-                Background = Brush("#12151D"),
-                BorderBrush = Brush("#20242E"),
+                Background = Brush("#101012"),
+                BorderBrush = Brush("#202023"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 Padding = new Thickness(18, 12, 18, 12),
             };
             Grid g = Columns("*", "Auto");
-            TextBlock t = Text(sec.Guide, 11, "#9AA3B4");
+            TextBlock t = Text(sec.Guide, 11, "#A9A9B1");
             t.VerticalAlignment = VerticalAlignment.Center;
             t.Margin = new Thickness(0, 0, 16, 0);
             g.Children.Add(t);
@@ -219,7 +219,7 @@ namespace Mgs4Launcher
             var rb = new Border { Padding = new Thickness(18, 11, 18, 11) };
             if (!first)
             {
-                rb.BorderBrush = Brush("#20242E");
+                rb.BorderBrush = Brush("#202023");
                 rb.BorderThickness = new Thickness(0, 1, 0, 0);
             }
             Grid g = Columns("28", "*", "Auto");
@@ -229,11 +229,11 @@ namespace Mgs4Launcher
             g.Children.Add(mark);
 
             var mid = new StackPanel();
-            TextBlock name = Text(row.Name, 12, "#E7EAF0", false, true);
+            TextBlock name = Text(row.Name, 12, "#ECECEE", false, true);
             mid.Children.Add(name);
             if (!string.IsNullOrEmpty(row.Detail))
             {
-                TextBlock d = Text(row.Detail, 11, "#858D9E");
+                TextBlock d = Text(row.Detail, 11, "#97979F");
                 d.Margin = new Thickness(0, 2, 12, 0);
                 mid.Children.Add(d);
             }
@@ -255,6 +255,14 @@ namespace Mgs4Launcher
 
             rb.Child = g;
             return rb;
+        }
+
+        // A folder in Explorer. Separate from Open so the caller cannot hand the shell a path that is gone.
+        public static void OpenFolder(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !System.IO.Directory.Exists(dir)) return;
+            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(dir) { UseShellExecute = true }); }
+            catch { }
         }
 
         public static void Open(string url)

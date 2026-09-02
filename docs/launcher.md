@@ -1,8 +1,8 @@
 # The launcher (`mgs4-dlss-launcher`)
 
 One window for the whole add-on, and the same things as a command line. It is a C# WPF program built from
-`launcher\src` by the compiler that ships with Windows, so it still needs nothing installed and still runs straight
-out of an unzipped release.
+`launcher\src` by the compiler that ships with Windows, so it needs nothing installed, and a release is the one exe
+on its own: `mgs4_dlss.addon64` and `mgs4_dlss.ini` are built into it, along with everything else it reads.
 
 | tab | what it is for |
 | --- | --- |
@@ -24,13 +24,23 @@ mgs4-dlss-launcher --help                  :: every option
 ```
 
 **Two files, one program.** `mgs4-dlss-launcher.bat` is what a fresh clone has and always works: on its first run
-it builds `mgs4-dlss-launcher.exe`, once, and every run after that just starts it. The exe is not in the repo,
-because the icon inside it is read from the `mgs4.exe` on this machine and that artwork is Konami's. To rebuild by
-hand:
+it builds `mgs4-dlss-launcher.exe`, once, and every run after that just starts it. That exe is not in the repo,
+because the icon inside it is read from the `mgs4.exe` on this machine and that artwork is Konami's. The exe a
+release carries is built with `-Release` instead: it wears the launcher's own icon (drawn by
+`tools\launcher_icon.ps1`) and needs no `.bat`. To rebuild by hand:
 
 ```bat
-powershell -ExecutionPolicy Bypass -File launcher\build.ps1
+powershell -ExecutionPolicy Bypass -File launcher\build.ps1              :: a local build, the game's icon
+powershell -ExecutionPolicy Bypass -File launcher\build.ps1 -Release     :: the release exe
 ```
+
+**One file, everything in it.** The exe carries its XAML, the scene table, the labels and the install file list as
+resources, and - once `dlss-addon\build.bat` has run - `mgs4_dlss.addon64` and `mgs4_dlss.ini` too, so a copy
+carried off on its own can do the whole install. A file on disk wins over the built-in copy whenever it is there
+(`tools\scenes.csv`, `build\mgs4_dlss.addon64`, ...), so editing or rebuilding in a checkout changes what the app
+uses without rebuilding the app. A lone exe also keeps its `config.ini` and its `work\` folder under
+`%LOCALAPPDATA%\mgs4-dlss-launcher` rather than beside itself; in a checkout they stay in the repo root, where every
+script reads them, and a `config.ini` already next to the exe is used wherever it is.
 
 **One exe, both jobs.** It is a Windows-subsystem program, so a double-click never flashes a console the way a
 `.bat` must - and it still behaves like a command: cmd waits for it, passes its handles through, and
@@ -87,9 +97,15 @@ whole row, so the scene list moved three scenes at a time. Three things fix that
 
 `ScrollStep` and `ScrollTau` at the top of that block are the two numbers worth touching.
 
-Play, Settings and Setup are tabs of the one window. The **first** run
+Play, Settings and Setup are tabs of the one window, in the top right as three icons — a play triangle, a gear and
+the install check — with their names on hover. The **first** run
 opens on Setup, because the first thing anyone needs to know is whether the pieces are in place; after that it
 opens on Play. `--setup` and `--settings` override that at any time.
+
+**The Setup tab's icon is its verdict**, so the window says whether the install is sound without being asked: a
+green tick when everything checked out, an amber warning when something is worth a look, a red cross when a
+required file is missing or no game folder was found. It is a grey checklist only until the checks have run, which
+happens a moment after the window opens as well as every time Setup is refreshed.
 
 The window opens even when no MGS4 install can be found — it starts on Setup and says which folder it looked in,
 which is the one case where a tool that needs the game folder still has to be useful.
@@ -118,9 +134,19 @@ it, what kind it is, a name and a one-line description of what you actually see.
 exists; only booting it says what it is, so everything in that file was checked by launching it.
 
 **Each row says what kind of scene it is.** A coloured badge sits between the stage id and the name, in the same
-colour families the rest of the window uses: green **Gameplay** for what you play, violet **Cutscene** for what you
-watch, amber **Briefing** for the Nomad briefings, blue **Stage** for a plain stage boot, sky **Start** for the two
-entries that start the game. The badge column is a fixed width, so the names line up down the list.
+colour families the rest of the window uses: violet **Cutscene** for what you watch, amber **Briefing** for the
+Nomad briefings, dim grey **Stage** for a plain stage boot, bright grey **Start** for the two entries that start
+the game, and red **Broken** for the numbered sections that crash. The badge column is a fixed width, so the names
+line up down the list. Green **Gameplay** still exists and nothing wears it: every numbered section in the stage
+table is broken, so none of them can be booted far enough to confirm the table's word for it - the badge is there
+for a section that turns out to work, set by hand in `scene_info.json`.
+
+**Any scene can be renamed.** The panel on the right has a **Rename** link under the scene's name: it opens a name
+and a description, **Save** keeps them, **Reset** drops them and lets the data files speak again. They are stored
+per stage id in `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`, not in `tools\labels.json`, so rebuilding the
+data files cannot lose them - and because the catalogue reads them wherever it is used, a renamed scene keeps its
+name in `--list` and in the shortcuts you make from it. Either half stands alone: a description typed over a scene
+whose name you left alone keeps the catalogue's name.
 
 **Double-click a scene to start it** - the same thing the Launch button does with the options as they are
 ticked. Act headers and the star are not double-clickable: their clicks are handled before the list sees
@@ -139,16 +165,17 @@ search box: a query is a thing you are doing, not a thing you have set. A first 
 the act the picked scene is in so it can be seen - after that the acts are yours, and a filter is never cleared to
 bring a row into view.
 
-**Favourites** is also the first filter chip, and works like the others: nothing ticked shows everything, ticking
-chips shows the union of what they cover. **Start the game** is no longer a chip - the two entries it covered are
-an act of their own at the top of the list, so filtering for them only ever hid everything else.
+**The filter chips are the badges.** One chip per kind - **Start**, **Stage**, **Cutscene**, **Briefing**,
+**Broken** - each wearing that kind's own colour: an outline while the filter is off, the colour filled in while it
+is on, so the row of chips reads as the same legend as the list under it. **Favourites** leads them, in the star's
+amber, because it is the one category that is a list you curate rather than something a scene is.
 
 The filter row under the search box is a checklist rather than a dropdown: nothing ticked shows everything (bar the
-known-broken ids), and ticking chips shows the union of what they cover - "Mission briefings" and "Gameplay"
-together lists both, not their overlap.
+known-broken ids), and ticking chips shows the union of what they cover - **Cutscene** and **Briefing** together
+lists both, not their overlap.
 
 - **Mission briefings** are their own kind, sorted to the top of the act they lead into — the Nomad briefing before
-  Act 2 sits above Act 2's own scenes. The Cutscenes filter includes them; "Mission briefings" shows only those.
+  Act 2 sits above Act 2's own scenes, and the **Briefing** chip shows only those.
 - **The same scene under two ids** is one row. `s10a20l` and `s10a20l_D1` start the same thing, as do `s10a40l` and
   `s10a40l_D2`, `s20a00l` and `s20a00l_D1`, `s20a00l_D3` and `s20a10l`, `s30a00l` and `s30a00l_D`, `s30a10l` and
   `s30a00l_D2`. The panel offers both ids so you can boot either, in case they differ in something not visible at
@@ -162,11 +189,12 @@ together lists both, not their overlap.
   `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
   backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
   than after `_D1`.
-- **Ids that crash or come up black** are out of the list: every one ending in a
-  single digit — `_0`, `_1`, ... `_9`, 102 of them. The two-digit sections (`_00`, `_11`) are the ones that work,
-  and `_D2` is a cutscene rather than a section: the digit has to be the whole suffix after the underscore for the
-  test to fire. The "Known broken" filter shows them if you want them anyway, and searching for one by id still
-  finds it.
+- **Ids that crash or come up black** are out of the list: every numbered section, `_0` and `_00` alike — 250 of
+  the 420 entries, which is every id whose suffix after the underscore is nothing but digits. They are their own
+  kind rather than the "gameplay" the stage table calls them, because none of them can be brought up far enough to
+  say what they are. `_D2` is a cutscene rather than a section and is not caught: the digits have to be the whole
+  suffix. The **Broken** chip shows them if you want them anyway, and searching for one by id still finds it. That
+  leaves 163 rows to browse: the stage entries, the cutscenes and the briefings.
 - `s00a00l` and `s00a00l_D` are the cemetery scene, which plays inside Act 1 rather than with the rest of `s00`, so
   they sit in Act 1 after the `s01a00l` entries (`sortAs` in the data file puts them there).
 
@@ -261,13 +289,15 @@ overlay, Add-ons tab, and the game's are live in its own options menu.
 Most of the files this add-on needs cannot be shipped here: NVIDIA's DLSS runtimes, the Streamline runtime and
 ReShade all have to be fetched from their own projects, so an install is assembled by hand and it is easy to end up
 one file short. The Setup tab opens with the verdict, then the game folder everything is checked against — the path, where it came
-from, a Browse button that records your choice as `MGS4_DIR` in `config.ini`, and Detect to stop pinning one and
-search the Steam libraries again. **A game on another drive needs nothing special**: Steam's own install - found
+from, **Open folder** to show it in Explorer, and **Change...** to record a folder of your own as `MGS4_DIR` in
+`config.ini`. The Steam-library lookup is what runs whenever `MGS4_DIR` is not set, so going back to it is a matter
+of clearing that key - remove or comment out the `MGS4_DIR` line in `config.ini`, and unset the environment
+variable of the same name if one is set, since the environment wins over the file. **A game on another drive needs nothing special**: Steam's own install - found
 from the registry, normally on C: - carries `steamapps\libraryfolders.vdf`, and that file names every library on
 every drive, so a D: install is read out of the C: client. The PowerShell and Python resolvers additionally try
 each drive in letter order for the handful of places a library sits, which catches one Steam has forgotten.
 When no `mgs4.exe` turns up, the card **names the libraries it looked in** - if the drive holding the install is
-not among them, that library is not registered with Steam and Browse is the way in. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
+not among them, that library is not registered with Steam and Change... is the way in. **Re-check** (or F5) re-runs everything with the window open, so it can be left up on a
 second monitor while files are dropped into the game folder, and **Copy report** puts the text form on the clipboard.
 
 What it reports, beyond whether a file exists:
@@ -307,8 +337,9 @@ What it reports, beyond whether a file exists:
 
   **The add-on installs itself.** Every other group is somebody else's download, but `mgs4_dlss.addon64` and
   `mgs4_dlss.ini` are what this app is *for*, so requiring them to be fetched separately made no sense. Group 5 has
-  an **Install the add-on** button that copies the pair the app ships with into the game folder: a release carries
-  them next to the app, a source checkout has the built add-on in `build\` and the sample ini in `dlss-addon\`.
+  an **Install the add-on** button that copies the pair the app ships with into the game folder: a release has them
+  built into the exe, a source checkout has the built add-on in `build\` and the sample ini in `dlss-addon\`, and a
+  pair dropped next to the exe wins over both.
   `mgs4-dlss-launcher --install-addon` does the same from a terminal. Two rules it keeps: an `mgs4_dlss.ini`
   already in the game folder is never overwritten (it holds your settings, and the `InternalRes` the first run
   wrote), and the game has to be closed, because ReShade holds the loaded `.addon64` open. The button says

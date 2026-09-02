@@ -1,20 +1,31 @@
-# Builds mgs4-dlss-launcher.exe from launcher\src, wearing the game's own icon.
+# Builds mgs4-dlss-launcher.exe from launcher\src: one file, with the add-on inside it.
 #
-#   powershell -ExecutionPolicy Bypass -File launcher\build.ps1
+#   powershell -ExecutionPolicy Bypass -File launcher\build.ps1              a local build, wearing the game's icon
+#   powershell -ExecutionPolicy Bypass -File launcher\build.ps1 -Release     the release exe, wearing its own
 #
 # Nothing has to be installed: the C# compiler used here ships with Windows as part of the .NET Framework, and the
 # WPF assemblies sit beside it. There is deliberately no MSBuild and no compiled XAML - Window.xaml is embedded as
 # a resource and loaded with XamlReader at startup, which csc alone can do and which keeps the markup the same file
-# the PowerShell app used. The icon is read out of the mgs4.exe already on this machine, which is why the built exe
-# is not in the repo: that artwork is Konami's.
+# the PowerShell app used.
+#
+# Everything the exe needs rides inside it as resources: the XAML, the tools\ data it reads (the scene table, the
+# labels, the install file list), and - when they have been built - mgs4_dlss.addon64 and mgs4_dlss.ini, so the
+# one file a release carries can put the add-on next to mgs4.exe by itself. A checkout's copies on disk still win
+# over the built-in ones when they are there (Paths.DataText, Install.FindBundled).
+#
+# The icon: a local build reads it out of the mgs4.exe already on this machine, which looks right beside the game
+# but is Konami's artwork - so that exe stays out of the repo and out of the releases. -Release (or no mgs4.exe to
+# read from) embeds the launcher's own icon, drawn by tools\launcher_icon.ps1, and that exe is what a release ships.
 param(
     [string]$GameDir = "",      # default: MGS4_DIR / config.ini / the Steam libraries (tools\paths.ps1)
     [string]$Out = "",          # default: mgs4-dlss-launcher.exe in the repo root
-    [switch]$NoIcon
+    [switch]$NoIcon,            # do not look for mgs4.exe; use the launcher's own icon
+    [switch]$Release            # own icon, and the add-on + ini must be there to embed
 )
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\..\tools\paths.ps1"
 . "$PSScriptRoot\..\tools\game_icon.ps1"
+. "$PSScriptRoot\..\tools\launcher_icon.ps1"
 
 $repo = Split-Path -Parent $PSScriptRoot
 $src = Join-Path $PSScriptRoot "src"
@@ -32,14 +43,39 @@ $wpf = Join-Path $net "WPF"
 
 $icoArg = @()
 $ico = Join-Path ([IO.Path]::GetTempPath()) "mgs4_dlss_launcher.ico"
-if (-not $NoIcon) {
+$haveIcon = $false
+if (-not $NoIcon -and -not $Release) {
     if (-not $GameDir) { try { $GameDir = Get-Mgs4GameDir } catch { $GameDir = $null } }
     $gameExe = $(if ($GameDir) { Join-Mgs4Path $GameDir "mgs4.exe" } else { $null })
     if ($gameExe -and (Test-Mgs4Path $gameExe) -and (Write-Mgs4IconFile $gameExe $ico)) {
-        $icoArg = @("/win32icon:$ico")
+        $haveIcon = $true
         Write-Host "icon taken from $gameExe"
     } else {
-        Write-Host "no mgs4.exe found - building without an icon (pass -GameDir, or -NoIcon to stop asking)" -ForegroundColor Yellow
+        Write-Host "no mgs4.exe found - using the launcher's own icon (pass -GameDir for the game's)" -ForegroundColor Yellow
+    }
+}
+if (-not $haveIcon -and (Write-LauncherIconFile $ico)) {
+    $haveIcon = $true
+    Write-Host "icon: the launcher's own (tools\launcher_icon.ps1)"
+}
+if ($haveIcon) { $icoArg = @("/win32icon:$ico") }
+
+# ---------------------------------------------------------------------------------------------- the add-on
+
+# The two files the Setup tab's "Install the add-on" copies next to mgs4.exe. A checkout that has not run
+# dlss-addon\build.bat has no addon64 yet; that build still works, and its Setup tab says the add-on is not here.
+# A release build refuses instead: an exe that cannot install the add-on is not a release.
+$bundled = @()
+$addon = Join-Path $repo "build\mgs4_dlss.addon64"
+$ini = Join-Path $repo "dlss-addon\mgs4_dlss.ini"
+foreach ($f in @($addon, $ini)) {
+    if (Test-Path -LiteralPath $f) {
+        $bundled += "/resource:$f"
+        Write-Host ("embedding " + (Split-Path -Leaf $f) + " (" + [math]::Round((Get-Item -LiteralPath $f).Length / 1KB) + " KB)")
+    } elseif ($Release) {
+        throw "a release build needs $f" + $(if ($f -eq $addon) { " - run dlss-addon\build.bat first" } else { "" })
+    } else {
+        Write-Host ("no " + (Split-Path -Leaf $f) + " to embed - this exe will not be able to install the add-on") -ForegroundColor Yellow
     }
 }
 
@@ -70,7 +106,7 @@ $resources += @("install_manifest.json", "scenes.csv", "labels.json", "scene_inf
 # does not let AttachConsole throw the caller's redirect away - see the comment there. A console twin was built
 # here for one commit before that was understood; it is not needed.
 $cscArgs = @("/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/warn:3", "/out:$Out") +
-           $refs + $resources + $icoArg + $sources
+           $refs + $resources + $bundled + $icoArg + $sources
 & $csc @cscArgs
 if ($LASTEXITCODE -ne 0) { throw "csc failed ($LASTEXITCODE)" }
 $size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1KB)

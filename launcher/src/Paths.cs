@@ -15,13 +15,52 @@ namespace Mgs4Launcher
         public const string AppId = "2492670";      // METAL GEAR SOLID 4: Guns of the Patriots - Master Collection
         public const string InstallDirName = "METAL GEAR SOLID 4";
 
-        // The folder holding the app: next to the exe in a release, the repo root in a checkout.
+        // The folder holding the app: the repo root in a checkout, wherever the exe was put in a release.
         public static string Root
         {
             get { return Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location); }
         }
 
-        public static string ConfigPath { get { return Path.Combine(Root, "config.ini"); } }
+        // A checkout has the sources beside the exe; a release is the one exe on its own, in Downloads or on a
+        // desktop, and must not scatter files around itself.
+        public static bool IsCheckout
+        {
+            get { return Exists(Join(Root, "launcher\\src")) || Exists(Join(Root, "tools")); }
+        }
+
+        // Where the app keeps what it writes for itself when it is not in a checkout - the same folder Prefs uses.
+        public static string AppDataDir
+        {
+            get
+            {
+                return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                                    "mgs4-dlss-launcher");
+            }
+        }
+
+        // config.ini: in the repo root of a checkout, where every script in the repo reads it; next to the exe
+        // when someone has put one there; otherwise under %LOCALAPPDATA%, so a lone exe writes nothing beside itself.
+        public static string ConfigPath
+        {
+            get
+            {
+                string beside = Path.Combine(Root, "config.ini");
+                if (IsCheckout || Exists(beside)) return beside;
+                return Path.Combine(AppDataDir, "config.ini");
+            }
+        }
+
+        // A resource built into the exe, or null. The names are the file names launcher\build.ps1 embeds.
+        public static Stream DataStream(string name)
+        {
+            try { return Assembly.GetExecutingAssembly().GetManifestResourceStream(name); }
+            catch { return null; }
+        }
+
+        public static bool HasResource(string name)
+        {
+            using (Stream s = DataStream(name)) return s != null;
+        }
 
         // The app's own data - the scene table, the labels, the install file list - lives in tools\ in a checkout
         // and is built into the exe as well, so a copy of the exe carried off on its own still knows what it knows.
@@ -220,18 +259,44 @@ namespace Mgs4Launcher
 
         public static string OutDir()
         {
-            return Format(Setting("MGS4_OUT", Path.Combine(Root, "work")));
+            return Format(Setting("MGS4_OUT", Path.Combine(IsCheckout ? Root : AppDataDir, "work")));
         }
 
         public static string GameDirSource()
         {
-            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MGS4_DIR")))
-                return "from the MGS4_DIR environment variable";
+            if (GameDirFromEnv) return "from the MGS4_DIR environment variable";
             if (Config.ContainsKey("MGS4_DIR")) return "from config.ini";
             return "found in the Steam libraries";
         }
 
-        // The one place the app writes it. config.ini is git-ignored and is what every script in the repo asks.
+        // The environment wins over config.ini in Setting(), so where the path came from is worth naming.
+        public static bool GameDirFromEnv
+        {
+            get { return !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MGS4_DIR")); }
+        }
+
+        public static string ConfigHeader
+        {
+            get
+            {
+                return IsCheckout
+                    ? "; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key."
+                    : "; MGS4 DLSS Launcher settings. Every key is optional; MGS4_DIR is the game folder when it is not found on its own.";
+            }
+        }
+
+        // An empty config.ini with its header, where ConfigPath says, when there is none yet - for the settings
+        // writers, which append keys to a file that has to exist first.
+        public static string EnsureConfig()
+        {
+            if (Exists(ConfigPath)) return ConfigPath;
+            string folder = Path.GetDirectoryName(ConfigPath);
+            if (!Exists(folder)) Directory.CreateDirectory(folder);
+            File.WriteAllText(ConfigPath, ConfigHeader + Environment.NewLine);
+            return ConfigPath;
+        }
+
+        // config.ini is git-ignored and is what every script in the repo asks.
         public static string SetConfiguredGameDir(string dir)
         {
             var lines = new List<string>();
@@ -246,10 +311,11 @@ namespace Mgs4Launcher
             }
             if (!done && !string.IsNullOrEmpty(dir))
             {
-                if (lines.Count == 0)
-                    lines.Add("; Machine-local paths for this checkout (git-ignored). See config.example.ini for every key.");
+                if (lines.Count == 0) lines.Add(ConfigHeader);
                 lines.Add("MGS4_DIR=" + dir);
             }
+            string folder = Path.GetDirectoryName(ConfigPath);
+            if (!Exists(folder)) Directory.CreateDirectory(folder);
             File.WriteAllLines(ConfigPath, lines.ToArray());
             _config = null;
             return ConfigPath;

@@ -30,12 +30,15 @@ namespace Mgs4Launcher
         // remembers, and written the moment a star is clicked rather than only when the window closes.
         readonly HashSet<string> _favourites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, bool> _collapsed = new Dictionary<string, bool>();
+        // Names and descriptions typed over the catalogue's own. The catalogue reads the same file for itself when
+        // it builds the list; this copy is what the window edits and writes back.
+        readonly Dictionary<string, Prefs.SceneEdit> _sceneEdits = Prefs.SceneEdits();
         bool _hadSavedActs;     // false on a first run, when nothing has been left in any particular state yet
         System.Diagnostics.Process _runProc;
 
         // Named controls from the XAML, by the names the PowerShell app used.
-        Border _headerBar, _pill, _lockBanner;
-        TextBlock _titleText, _pillText, _pillNote, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
+        Border _headerBar, _lockBanner;
+        TextBlock _titleText, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
                   _mashNote, _searchHint;
         Image _logoArt;
         System.Windows.Shapes.Rectangle _heroArt;
@@ -53,6 +56,9 @@ namespace Mgs4Launcher
         Button _minBtn, _maxBtn, _closeBtn;
         ComboBox _altPick;
         FrameworkElement _altRow;
+        TextBox _editName, _editDesc;
+        Button _editBtn, _editSaveBtn, _editCancelBtn, _editResetBtn;
+        StackPanel _editPanel;
         System.Windows.Shapes.Rectangle _dropZone;
 
         static string Resource(string name)
@@ -98,6 +104,7 @@ namespace Mgs4Launcher
             RestoreSelection();
             ShowTab(startTab);
             StartStatePolling();
+            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(PrimeSetupIcon));
             Win.Closing += (s, e) => SavePrefs();
         }
 
@@ -129,9 +136,6 @@ namespace Mgs4Launcher
             _navPlay = (RadioButton)f("NavPlay");
             _navSettings = (RadioButton)f("NavSettings");
             _navInstall = (RadioButton)f("NavInstall");
-            _pill = (Border)f("Pill");
-            _pillText = (TextBlock)f("PillText");
-            _pillNote = (TextBlock)f("PillNote");
             _playView = (Grid)f("PlayView");
             _settingsView = (Grid)f("SettingsView");
             _installView = (ScrollViewer)f("InstallView");
@@ -150,6 +154,13 @@ namespace Mgs4Launcher
             _pickWarn = (TextBlock)f("PickWarn");
             _altRow = (FrameworkElement)f("AltRow");
             _altPick = (ComboBox)f("AltPick");
+            _editBtn = (Button)f("EditBtn");
+            _editPanel = (StackPanel)f("EditPanel");
+            _editName = (TextBox)f("EditName");
+            _editDesc = (TextBox)f("EditDesc");
+            _editSaveBtn = (Button)f("EditSaveBtn");
+            _editCancelBtn = (Button)f("EditCancelBtn");
+            _editResetBtn = (Button)f("EditResetBtn");
             _optAdvance = (CheckBox)f("OptAdvance");
             _optMashX = (CheckBox)f("OptMashX");
             _mashNote = (TextBlock)f("MashNote");
@@ -179,7 +190,7 @@ namespace Mgs4Launcher
 
         // The keys the window says it takes, in one place because they cross the tabs: F5 is printed on the
         // Setup button, Ctrl+F reaches the search from anywhere, Escape empties it, and Enter launches what is
-        // picked - except where a button has the focus, which Enter belongs to.
+        // picked - except where a button has the focus, or the rename boxes are open, which both keys belong to.
         void WireKeys()
         {
             Win.PreviewKeyDown += (s, e) =>
@@ -198,12 +209,19 @@ namespace Mgs4Launcher
                     _search.SelectAll();
                     e.Handled = true;
                 }
+                else if (e.Key == Key.Escape && _editPanel.Visibility == Visibility.Visible &&
+                         _playView.Visibility == Visibility.Visible)
+                {
+                    EndEdit();
+                    e.Handled = true;
+                }
                 else if (e.Key == Key.Escape && _search.Text.Length > 0 && _playView.Visibility == Visibility.Visible)
                 {
                     _search.Clear();
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Enter && _playView.Visibility == Visibility.Visible &&
+                         _editPanel.Visibility != Visibility.Visible &&
                          !(Keyboard.FocusedElement is ButtonBase))
                 {
                     Launch();
@@ -231,23 +249,14 @@ namespace Mgs4Launcher
             RefreshState();
         }
 
-        // The pill in the header, and everything else that depends on whether the game is up: what the window
-        // cannot infer, it polls for. Driven by a timer rather than by tab switches alone - the game can start or
-        // stop while the window sits there, and it did, which left the pill reading "idle" over a running game and
-        // Close the game pressable with nothing to close.
+        // Everything that depends on whether the game is up: what the window cannot infer, it polls for. Driven by
+        // a timer rather than by tab switches alone - the game can start or stop while the window sits there, and
+        // it did, which left Close the game pressable with nothing to close. The header used to carry a
+        // idle/running/driving badge as well; it said what Close the game and the Settings banner already say.
         void RefreshState()
         {
             bool running = Checks.GameRunning();
             bool busy = _runProc != null && !_runProc.HasExited;
-            string text, note, bg, br, fg;
-            if (busy) { text = "driving"; note = "the launcher is attached"; bg = "#251E10"; br = "#7A6027"; fg = "#F2C14E"; }
-            else if (running) { text = "running"; note = "mgs4.exe is up"; bg = "#152318"; br = "#2C6B45"; fg = "#5FD38D"; }
-            else { text = "idle"; note = "nothing is running"; bg = "#161B2A"; br = "#33436E"; fg = "#7C9CFF"; }
-            _pillText.Text = text;
-            _pillNote.Text = note;
-            _pill.Background = Widgets.Brush(bg);
-            _pill.BorderBrush = Widgets.Brush(br);
-            _pillText.Foreground = Widgets.Brush(fg);
 
             _stopBtn.IsEnabled = running || busy;
             UpdateSaveButton();     // enabled only while there is an edit to write, and the game is not running
@@ -323,7 +332,7 @@ namespace Mgs4Launcher
             if (p.TryGetValue("Filters", out filters) && filters is object[])
             {
                 var want = new HashSet<string>();
-                foreach (object o in (object[])filters) want.Add(o.ToString());
+                foreach (object o in (object[])filters) want.Add(MigrateFilter(o.ToString()));
                 foreach (object child in _filters.Children)
                 {
                     var chip = child as System.Windows.Controls.Primitives.ToggleButton;
@@ -343,6 +352,21 @@ namespace Mgs4Launcher
             }
         }
 
+        // The chips used to be named for the lists they showed rather than for the badge a scene wears. A saved
+        // file still names those, so it is read as the chips that replaced them; "Named scenes" has no successor -
+        // every scene can be named now - and simply goes unticked.
+        static string MigrateFilter(string name)
+        {
+            switch (name)
+            {
+                case "Cutscenes": return "Cutscene";
+                case "Mission briefings": return "Briefing";
+                case "Stage entries": return "Stage";
+                case "Known broken": return "Broken";
+                default: return name;
+            }
+        }
+
         void SavePrefs()
         {
             var filters = new List<string>();
@@ -356,6 +380,7 @@ namespace Mgs4Launcher
                 { "Stage", _pickedId },
                 { "Filters", filters },
                 { "Favourites", new List<string>(_favourites) },
+                { "SceneEdits", SceneEditsForSaving() },
                 { "Collapsed", _collapsed.Where(kv => kv.Value).Select(kv => kv.Key).ToList() },
                 { "Advance", _optAdvance.IsChecked == true },
                 { "MashX", _optMashX.IsChecked == true },
@@ -368,6 +393,53 @@ namespace Mgs4Launcher
             });
         }
     
+        // Only the halves actually typed are written, so a scene given a description but not a name comes back
+        // wearing the catalogue's name and the typed description.
+        Dictionary<string, object> SceneEditsForSaving()
+        {
+            var outp = new Dictionary<string, object>();
+            foreach (var kv in _sceneEdits)
+            {
+                var d = new Dictionary<string, object>();
+                if (kv.Value.Name != null) d["name"] = kv.Value.Name;
+                if (kv.Value.Description != null) d["description"] = kv.Value.Description;
+                if (d.Count > 0) outp[kv.Key] = d;
+            }
+            return outp;
+        }
+
+        // The Setup tab's icon is its verdict: a checklist until the checks have run, then the tick, the warning
+        // or the cross the Setup card itself shows, in the same colour. Set as a local value, so it wins over the
+        // style's checked-tab accent - what the install is doing matters more than which tab is open.
+        void SetSetupIcon(Verdict v)
+        {
+            string glyph = "", colour = "#97979F", tip = "Setup";
+            if (v != null)
+            {
+                tip = "Setup - " + v.Text.ToLowerInvariant() + (string.IsNullOrEmpty(v.Note) ? "" : ", " + v.Note);
+                if (v.Kind == "ok") { glyph = ""; colour = "#62C98A"; }
+                else if (v.Kind == "warn") { glyph = ""; colour = "#F2C14E"; }
+                else if (v.Kind == "bad") { glyph = ""; colour = "#FF6B66"; }
+            }
+            _navInstall.Content = glyph;
+            _navInstall.Foreground = Widgets.Brush(colour);
+            _navInstall.ToolTip = tip;
+        }
+
+        // The verdict is worth having before the Setup tab is ever opened, because it is what the tab's own icon
+        // says. Same trick as ShowSetup: let the window paint first, then spend the third of a second on files.
+        void PrimeSetupIcon()
+        {
+            if (_installView.Visibility == Visibility.Visible) return;   // ShowSetup is about to do it properly
+            if (string.IsNullOrEmpty(_gameDir))
+            {
+                SetSetupIcon(new Verdict { Text = "No game folder", Kind = "bad", Note = "nothing to check against yet" });
+                return;
+            }
+            try { SetSetupIcon(Checks.GetVerdict(Checks.Run(_gameDir))); }
+            catch { SetSetupIcon(null); }
+        }
+
         // The Play tab's resolution list: the game's 16:9 sizes as "WxH" tags. The port takes --res_width / --res_height
         // only from this set, so a free width and height box was never a real choice.
         string PickedRes()
