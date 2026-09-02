@@ -108,7 +108,7 @@ namespace Mgs4Launcher
         const double Bleed = 64;        // how far past the header the art carries on, before it has faded away
         const double Caption = 32;      // the strip at the top that used to be the system title bar
 
-        public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText,
+        public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText, Panel navTabs,
                                        System.Windows.Shapes.Rectangle heroArt, Border headerBar, Grid artBand)
         {
             Dictionary<string, string> art;
@@ -157,6 +157,9 @@ namespace Mgs4Launcher
                 double lift = (h - Caption) * 0.12;          // a little above the centre line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);
+                // The tabs are centred down the same row, so they need the same lift or they sit low against
+                // the logo across from them. Only the bottom is ours; the rest is the XAML's and stays as set.
+                navTabs.Margin = new Thickness(navTabs.Margin.Left, 0, navTabs.Margin.Right, lift);
             };
             headerBar.SizeChanged += layout;
             layout(null, null);

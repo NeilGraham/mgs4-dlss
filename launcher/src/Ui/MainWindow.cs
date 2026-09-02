@@ -41,6 +41,7 @@ namespace Mgs4Launcher
         TextBlock _titleText, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
                   _mashNote, _searchHint;
         Image _logoArt;
+        Panel _navTabs;
         System.Windows.Shapes.Rectangle _heroArt;
         RadioButton _navPlay, _navSettings, _navInstall;
         Grid _playView, _artBand;
@@ -87,7 +88,7 @@ namespace Mgs4Launcher
             Bind();
             TitleBar.Follow(Win);
             Art.SetWindowIcon(Win, _gameDir);
-            Art.ApplyHeader(Win, _logoArt, _titleText, _heroArt, _headerBar, _artBand);
+            Art.ApplyHeader(Win, _logoArt, _titleText, _navTabs, _heroArt, _headerBar, _artBand);
             TitleBar.Buttons(Win, _minBtn, _maxBtn, _closeBtn, _headerBar);
             SmoothScroll.Attach(Win);
 
@@ -132,6 +133,7 @@ namespace Mgs4Launcher
             _closeBtn = (Button)f("CloseBtn");
             _titleText = (TextBlock)f("TitleText");
             _logoArt = (Image)f("LogoArt");
+            _navTabs = (Panel)f("NavTabs");
             _heroArt = (System.Windows.Shapes.Rectangle)f("HeroArt");
             _navPlay = (RadioButton)f("NavPlay");
             _navSettings = (RadioButton)f("NavSettings");

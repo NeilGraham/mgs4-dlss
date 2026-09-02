@@ -122,12 +122,12 @@
       <Setter Property="Foreground" Value="#97979F"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-      <Setter Property="FontSize" Value="16"/>
-      <Setter Property="Margin" Value="0,0,6,0"/>
+      <Setter Property="FontSize" Value="17"/>
+      <Setter Property="Margin" Value="5,0,5,0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border x:Name="b" CornerRadius="6" Background="Transparent" Padding="13,9" Width="46" Height="38">
+            <Border x:Name="b" CornerRadius="8" Background="Transparent" Padding="13,9" Width="64" Height="44">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -459,8 +459,8 @@
     <Border x:Name="HeaderBar" Grid.Row="0" Background="Transparent">
       <Grid>
         <!-- 48 at the top: 32 of caption strip that is now ours to draw on, then the 16 the bar always had, which
-             leaves the logo and the tabs exactly where they were on screen. The tabs sit hard right, in the corner
-             the running/idle badge used to hold. -->
+             leaves the logo and the tabs where they were on screen. The tabs sit hard right, in the corner the
+             running/idle badge used to hold. -->
         <Grid Margin="22,48,22,16">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto"/>
@@ -471,15 +471,18 @@
           <TextBlock x:Name="TitleText" Text="MGS4 DLSS Launcher" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
         </StackPanel>
         <!-- The whole header is the draggable caption, so the tabs have to be excused from it or they stop
-             taking clicks. Everything else up here is a label and drags the window, which is what a bar does. -->
-        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
+             taking clicks. Everything else up here is a label and drags the window, which is what a bar does.
+             Hard right, flush with the content edge the cards below line up on, and so under the caption buttons
+             again: what keeps the two apart is size, the pills being half again as big as those and rounded.
+             The bottom margin is set in code, with the logo's, so the row stays level with it. -->
+        <StackPanel x:Name="NavTabs" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
                     VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
           <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="&#xE768;" ToolTip="Play"
                        IsChecked="True" GroupName="nav"/>
           <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="&#xE713;" ToolTip="Settings"
                        GroupName="nav"/>
           <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="&#xE9D5;" ToolTip="Setup"
-                       Margin="0" GroupName="nav"/>
+                       Margin="5,0,0,0" GroupName="nav"/>
         </StackPanel>
         </Grid>
       </Grid>
