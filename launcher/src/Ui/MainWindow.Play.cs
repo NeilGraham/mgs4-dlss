@@ -193,7 +193,8 @@ namespace Mgs4Launcher
                 c.Checked += (s, e) => UpdatePreview();
                 c.Unchecked += (s, e) => UpdatePreview();
             }
-            foreach (TextBox t in new[] { _holdSecs, _resW, _resH }) t.TextChanged += (s, e) => UpdatePreview();
+            _holdSecs.TextChanged += (s, e) => UpdatePreview();
+            _resPick.SelectionChanged += (s, e) => UpdatePreview();
             _altPick.SelectionChanged += (s, e) =>
             {
                 string id = _altPick.SelectedItem as string;
@@ -359,9 +360,12 @@ namespace Mgs4Launcher
             };
             double hold;
             if (_optHold.IsChecked == true && double.TryParse(_holdSecs.Text, out hold)) o.Hold = hold;
-            int w, h;
-            if (_optRes.IsChecked == true && int.TryParse(_resW.Text, out w) && int.TryParse(_resH.Text, out h))
-            { o.Width = w; o.Height = h; }
+            if (_optRes.IsChecked == true)
+            {
+                string[] wh = PickedRes().Split('x');
+                int w, h;
+                if (wh.Length == 2 && int.TryParse(wh[0], out w) && int.TryParse(wh[1], out h)) { o.Width = w; o.Height = h; }
+            }
             return o;
         }
 

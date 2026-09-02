@@ -154,29 +154,6 @@ namespace Mgs4Launcher
                     editor = combo;
                     break;
                 }
-                case "res":
-                {
-                    string[] parts = (value ?? "").Split('x', 'X');
-                    var row = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-                    var w = new TextBox { Text = parts.Length == 2 ? parts[0].Trim() : "", MinWidth = 62 };
-                    var h = new TextBox { Text = parts.Length == 2 ? parts[1].Trim() : "", MinWidth = 62 };
-                    TextBlock by = Widgets.Text("x", 12, "#858D9E");
-                    by.Margin = new Thickness(7, 0, 7, 0);
-                    by.VerticalAlignment = VerticalAlignment.Center;
-                    row.Children.Add(w);
-                    row.Children.Add(by);
-                    row.Children.Add(h);
-                    // Both boxes or neither: half a resolution is not one, and clearing them is how it is unset.
-                    Remember(spec, () =>
-                    {
-                        string across = w.Text.Trim(), down = h.Text.Trim();
-                        return across.Length > 0 && down.Length > 0 ? across + "x" + down : "";
-                    });
-                    w.TextChanged += (s2, e2) => UpdateSaveButton();
-                    h.TextChanged += (s2, e2) => UpdateSaveButton();
-                    editor = row;
-                    break;
-                }
                 case "readonly":
                 {
                     TextBlock t = Widgets.Text(string.IsNullOrEmpty(value) ? "(not written yet)" : value, 12, "#858D9E", false, true);

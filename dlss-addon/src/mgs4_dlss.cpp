@@ -64,6 +64,7 @@ static int g_cfgLastDebugMode = 0;
 static NVSDK_NGX_PerfQuality_Value g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA;
 static char g_cfgModeName[32] = "DLAA";
 static uint32_t g_internalW = 0, g_internalH = 0;   // from ini InternalRes (size of the game's render targets)
+static uint32_t g_cfgRenderResW = 0, g_cfgRenderResH = 0;   // RenderRes: an explicit source resolution for super-resolution (0 = Mode decides)
 static int g_cfgFgMode = 0;           // FrameGen: 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic (target fps)
 static float g_cfgFgTargetFps = 0.0f; // FGTargetFps (dynamic mode; 0 = monitor refresh rate)
 static int g_cfgReflex = 1;           // Reflex: 0 off, 1 on, 2 on + boost
@@ -1373,7 +1374,39 @@ static bool ngx_init(device* dev)
 static void setup_scaling()
 {
     g_renderW = g_internalW; g_renderH = g_internalH; g_scaling = false;
-    if (g_cfgMode == NVSDK_NGX_PerfQuality_Value_DLAA || !g_internalW || !g_ngxReady) return;
+    if (!g_internalW || !g_ngxReady) return;
+    if (g_cfgRenderResW && g_cfgRenderResH) {
+        // RenderRes: an explicit source resolution instead of the ratio a mode implies. The target's aspect is kept
+        // (the requested height rules, the width follows), a source at or above the target means DLAA, and the NGX
+        // mode - which selects the model preset and the size range the driver enforces - is the one whose optimal
+        // size is closest among those whose range holds the request (1440p -> Quality, 1080p -> Performance at a 4K
+        // target). Ultra Performance is pinned at a third of the target, so a request no range holds (720p) is
+        // clamped into the closest range and the clamp is logged.
+        uint32_t rh = g_cfgRenderResH & ~1u, rw = (uint32_t)((uint64_t)rh * g_internalW / g_internalH) & ~1u;
+        if (rw != g_cfgRenderResW) logmsg("RenderRes %ux%u: the width follows the target's aspect -> %ux%u", g_cfgRenderResW, g_cfgRenderResH, rw, rh);
+        if (rw >= g_internalW || rh >= g_internalH) { logmsg("RenderRes %ux%u is not below the target %ux%u: DLAA", rw, rh, g_internalW, g_internalH); g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA; strcpy_s(g_cfgModeName, "DLAA"); return; }
+        static const NVSDK_NGX_PerfQuality_Value modes[4] = { NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf, NVSDK_NGX_PerfQuality_Value_UltraPerformance };
+        static const char* names[4] = { "Quality", "Balanced", "Performance", "UltraPerformance" };
+        int pickIn = -1, pickOut = -1; unsigned distIn = ~0u, distOut = ~0u, outW = 0, outH = 0;
+        for (int i = 0; i < 4; ++i) {
+            unsigned ow = 0, oh = 0, xw = 0, xh = 0, nw = 0, nh = 0; float sh = 0;
+            if (NVSDK_NGX_FAILED(NGX_DLSS_GET_OPTIMAL_SETTINGS(g_ngxCaps, g_internalW, g_internalH, modes[i], &ow, &oh, &xw, &xh, &nw, &nh, &sh)) || !ow || !oh) continue;
+            const unsigned dOpt = (ow > rw ? ow - rw : rw - ow) + (oh > rh ? oh - rh : rh - oh);
+            if (rw >= nw && rw <= xw && rh >= nh && rh <= xh) { if (dOpt < distIn) { distIn = dOpt; pickIn = i; } continue; }
+            const unsigned cw = rw < nw ? nw : (rw > xw ? xw : rw), ch = rh < nh ? nh : (rh > xh ? xh : rh);
+            const unsigned dClamp = (cw > rw ? cw - rw : rw - cw) + (ch > rh ? ch - rh : rh - ch);
+            if (dClamp < distOut) { distOut = dClamp; pickOut = i; outW = cw; outH = ch; }
+        }
+        if (pickIn < 0 && pickOut < 0) { logmsg("RenderRes %ux%u: NGX reported no mode ranges; staying at DLAA", rw, rh); g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA; strcpy_s(g_cfgModeName, "DLAA"); return; }
+        const int pick = pickIn >= 0 ? pickIn : pickOut;
+        if (pickIn < 0) { logmsg("RenderRes %ux%u is outside every mode's accepted range; the closest, %s, takes %ux%u", rw, rh, names[pick], outW, outH); rw = outW & ~1u; rh = outH & ~1u; }
+        g_cfgMode = modes[pick]; strcpy_s(g_cfgModeName, names[pick]);
+        g_renderW = rw; g_renderH = rh;
+        g_scaling = g_renderW < g_internalW || g_renderH < g_internalH;
+        logmsg("RenderRes: internal %ux%u -> render %ux%u under the %s model", g_internalW, g_internalH, g_renderW, g_renderH, g_cfgModeName);
+        return;
+    }
+    if (g_cfgMode == NVSDK_NGX_PerfQuality_Value_DLAA) return;
     unsigned optW = 0, optH = 0, maxW, maxH, minW, minH; float sharp = 0;
     NVSDK_NGX_Result r = NGX_DLSS_GET_OPTIMAL_SETTINGS(g_ngxCaps, g_internalW, g_internalH, g_cfgMode, &optW, &optH, &maxW, &maxH, &minW, &minH, &sharp);
     if (NVSDK_NGX_FAILED(r) || optW == 0 || optH == 0) {
@@ -3102,8 +3135,8 @@ static void on_init_device(device* dev)
         // install their hooks when _nvngx.dll loads: initialise NGX now so the first create is already hooked.
         if (g_cfgEnabled && ngx_init(dev)) logmsg("NGX initialised at device creation (no Streamline): NGX-hooking add-ons can hook before the first CreateFeature");
     }
-    if (g_cfgEnabled && g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA) {
-        if (!g_internalW) logmsg("Mode=%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgModeName);
+    if (g_cfgEnabled && (g_cfgMode != NVSDK_NGX_PerfQuality_Value_DLAA || g_cfgRenderResW)) {
+        if (!g_internalW) logmsg("%s needs InternalRes; it will be detected and written to the ini this run - restart afterwards", g_cfgRenderResW ? "RenderRes" : g_cfgModeName);
         else if (ngx_init(dev)) setup_scaling();
     }
 }
@@ -3146,9 +3179,11 @@ static void load_config()
     for (auto& m : modes) if (strcmp(mode, m.n) == 0) { g_cfgMode = m.v; strcpy_s(g_cfgModeName, m.pretty); }
     char res[32] = ""; GetPrivateProfileStringA("DLSS", "InternalRes", "", res, sizeof(res), g_iniPath);
     unsigned w = 0, h = 0; if (sscanf_s(res, "%ux%u", &w, &h) == 2 && w >= 640 && h >= 360) { g_internalW = w; g_internalH = h; }
+    char rr[32] = ""; GetPrivateProfileStringA("DLSS", "RenderRes", "", rr, sizeof(rr), g_iniPath);
+    unsigned rw = 0, rh = 0; if (sscanf_s(rr, "%ux%u", &rw, &rh) == 2 && rw >= 320 && rh >= 180) { g_cfgRenderResW = rw; g_cfgRenderResH = rh; }
     g_cfgLastDebugMode = -1;
     reload_config();
-    logmsg("config: Enabled=%d Mode=%s InternalRes=%ux%u Preset=%d Sharpness=%d%% DebugMode=%d", g_cfgEnabled, g_cfgModeName, g_internalW, g_internalH, g_cfgPreset, g_cfgSharpness100, g_cfgDebugMode);
+    logmsg("config: Enabled=%d Mode=%s RenderRes=%ux%u InternalRes=%ux%u Preset=%d Sharpness=%d%% DebugMode=%d", g_cfgEnabled, g_cfgModeName, g_cfgRenderResW, g_cfgRenderResH, g_internalW, g_internalH, g_cfgPreset, g_cfgSharpness100, g_cfgDebugMode);
 }
 
 // ---- overlay (ReShade Add-ons tab) ---------------------------------------------------------------------------------
@@ -3167,8 +3202,9 @@ static void draw_overlay(effect_runtime*)
     if (ImGui::Checkbox("Enable DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
     if (ImGui::Combo("DLSS mode", &g_uiMode, kModeNames, 5)) write_ini("Mode", kModeIni[g_uiMode]);
     const int active = mode_index(g_cfgMode);
-    if (g_uiMode != active)
+    if (g_uiMode != active && !g_cfgRenderResW)
         ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Restart the game to switch to %s (active now: %s)", kModeNames[g_uiMode], kModeNames[active]);
+    if (g_cfgRenderResW) ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "RenderRes=%ux%u overrides the mode: rendering %ux%u under the %s model (restart to change; set from the launcher's Settings tab)", g_cfgRenderResW, g_cfgRenderResH, g_scaling ? g_renderW : g_internalW, g_scaling ? g_renderH : g_internalH, g_cfgModeName);
     int preset = g_cfgPreset == 10 ? 0 : 1; const char* presets[] = { "J", "K (transformer, default)" };
     if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
     if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
@@ -3270,7 +3306,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.1.2 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.2.0 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);

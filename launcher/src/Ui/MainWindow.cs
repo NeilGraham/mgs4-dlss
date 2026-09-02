@@ -46,7 +46,8 @@ namespace Mgs4Launcher
         StackPanel _installHost, _settingsHost;
         WrapPanel _filters;              // the filter chips wrap onto a second line when the window is narrow
         ListBox _sceneList;
-        TextBox _search, _holdSecs, _resW, _resH, _cmdPreview;
+        TextBox _search, _holdSecs, _cmdPreview;
+        ComboBox _resPick;
         CheckBox _optAdvance, _optMashX, _optEnd, _optHold, _optRes;
         Button _launchBtn, _stopBtn, _shortcutBtn, _copyBtn, _cmdCopyBtn, _recheckBtn, _reloadBtn, _saveBtn;
         Button _minBtn, _maxBtn, _closeBtn;
@@ -156,8 +157,7 @@ namespace Mgs4Launcher
             _optHold = (CheckBox)f("OptHold");
             _holdSecs = (TextBox)f("HoldSecs");
             _optRes = (CheckBox)f("OptRes");
-            _resW = (TextBox)f("ResW");
-            _resH = (TextBox)f("ResH");
+            _resPick = (ComboBox)f("ResPick");
             _cmdPreview = (TextBox)f("CmdPreview");
             _cmdCopyBtn = (Button)f("CmdCopyBtn");
             _launchBtn = (Button)f("LaunchBtn");
@@ -313,8 +313,9 @@ namespace Mgs4Launcher
             _optHold.IsChecked = flag("Hold");
             _optRes.IsChecked = flag("Res");
             if (str("HoldSecs") != null) _holdSecs.Text = str("HoldSecs");
-            if (str("ResW") != null) _resW.Text = str("ResW");
-            if (str("ResH") != null) _resH.Text = str("ResH");
+            // the saved resolution ("ResPick"; older files carried ResW / ResH as two numbers) - a size the list does not have keeps the default
+            string savedRes = str("ResPick") ?? (str("ResW") != null && str("ResH") != null ? str("ResW") + "x" + str("ResH") : null);
+            if (savedRes != null) SelectRes(savedRes);
             string stage = str("Stage");
             if (!string.IsNullOrEmpty(_opt.Stage)) stage = _opt.Stage;
             if (!string.IsNullOrEmpty(stage)) _pickedId = stage;
@@ -362,10 +363,25 @@ namespace Mgs4Launcher
                 { "Hold", _optHold.IsChecked == true },
                 { "HoldSecs", _holdSecs.Text },
                 { "Res", _optRes.IsChecked == true },
-                { "ResW", _resW.Text },
-                { "ResH", _resH.Text },
+                { "ResPick", PickedRes() },
                 { "Seen", true },
             });
         }
-    }
+    
+        // The Play tab's resolution list: the game's 16:9 sizes as "WxH" tags. The port takes --res_width / --res_height
+        // only from this set, so a free width and height box was never a real choice.
+        string PickedRes()
+        {
+            ComboBoxItem it = _resPick.SelectedItem as ComboBoxItem;
+            return it != null && it.Tag != null ? it.Tag.ToString() : "3840x2160";
+        }
+        void SelectRes(string wxh)
+        {
+            for (int i = 0; i < _resPick.Items.Count; i++)
+            {
+                ComboBoxItem it = _resPick.Items[i] as ComboBoxItem;
+                if (it != null && it.Tag != null && it.Tag.ToString() == wxh) { _resPick.SelectedIndex = i; return; }
+            }
+        }
+}
 }

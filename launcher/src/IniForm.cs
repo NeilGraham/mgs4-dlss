@@ -58,9 +58,10 @@ namespace Mgs4Launcher
             // --res_width / --res_height / --windowing on the command line. They sit here because this is where a
             // person looks for them, and in config.ini because that is where the launcher's machine-local values
             // live.
-            new IniKey("Display", "MGS4_RES", "res", "Resolution",
-                "what a scene boot asks the game for; empty lets the game choose. The Play tab's own box overrides it for that run",
-                null, null, IniSource.Launcher, "true", "false"),
+            new IniKey("Display", "MGS4_RES", "choice", "Resolution",
+                "what a scene boot asks the game for (--res_width / --res_height); the port takes its 16:9 sizes and has been seen ignoring the request on a --stage boot. Empty lets the game choose; the Play tab's own list overrides it for that run",
+                new[] { "", "1280x720", "1920x1080", "2560x1440", "3840x2160" }, new[] { "let the game choose", "1280x720 (720p)", "1920x1080 (1080p)", "2560x1440 (1440p)", "3840x2160 (2160p)" },
+                IniSource.Launcher, "true", "false"),
             new IniKey("Display", "MGS4_WINDOWING", "choice", "Mode",
                 "how the window comes up. The port has been seen ignoring this on a --stage boot; the Master Collection launcher's own display settings are the reliable place for it",
                 new[] { "full_exclusive", "full_borderless", "windowed" },
@@ -88,6 +89,9 @@ namespace Mgs4Launcher
             new IniKey("DLSS", "Mode", "choice", "Mode",
                 "DLAA renders at your resolution; the others render smaller and upscale. Restart the game to change.",
                 new[] { "DLAA", "Quality", "Balanced", "Performance", "UltraPerformance" }),
+            new IniKey("DLSS", "RenderRes", "choice", "Render resolution",
+                "the resolution DLSS upscales from, instead of the ratio the mode implies: 1440p, 1080p or 720p whenever the target is above it (DLAA when it is not). The width follows the target's aspect. Restart the game to change.",
+                new[] { "", "3840x2160", "2560x1440", "1920x1080", "1280x720" }, new[] { "the mode decides", "3840x2160 (2160p)", "2560x1440 (1440p)", "1920x1080 (1080p)", "1280x720 (720p)" }),
             new IniKey("DLSS", "InternalRes", "readonly", "Internal resolution",
                 "what the game renders at - detected and written by the add-on itself"),
             new IniKey("DLSS", "Preset", "choice", "Preset", "the DLSS model preset",
