@@ -25,9 +25,8 @@ namespace Mgs4Launcher
     // or a cutscene like anything else. Boss is orange: it has to sit beside Gameplay green without reading as
     // Broken red. Gray is left to the fallback below, which is what an unrecognized kind should look like.
     //
-    // Boss is the one kind here that is not measured from the frame. A boss fight differs from ordinary gameplay
-    // only by the name on the second health bar, and telling "LAUGHING OCTOPUS" from "STRESS 0.7%" means reading
-    // text - the row profiles are identical. It is written by hand in scene_names.json instead.
+    // Boss is measured too, since 2026-09-03: the name on the second health bar is read by OCR
+    // (tools\hud_read.py).
     class Badge
     {
         public string Text, Back, Edge, Ink;
@@ -143,6 +142,19 @@ namespace Mgs4Launcher
             return c;
         }
 
+        // The line under a title: where the stage is, from the game's own banner, then what the scene is.
+        static string SubOf(Scene e)
+        {
+            string what = string.IsNullOrEmpty(e.Description) ? e.Note : e.Description;
+            return string.IsNullOrEmpty(e.Location) ? what : e.Location + "  \u00b7  " + what;
+        }
+
+        static string HayOf(Scene e)
+        {
+            return (e.Id + " " + string.Join(" ", e.Alts) + " " + e.Name + " " + e.ActTitle + " " + e.Kind + " " +
+                    e.Location + " " + e.Description).ToLowerInvariant();
+        }
+
         void WirePlay()
         {
             _allRows = Catalog.All().Select(e =>
@@ -156,9 +168,9 @@ namespace Mgs4Launcher
                     ActKey = e.ActKey,
                     Hidden = e.Hidden,
                     Title = string.IsNullOrEmpty(e.Name) ? e.Id : e.Name,
-                    Sub = string.IsNullOrEmpty(e.Description) ? e.Note : e.Description,
+                    Sub = SubOf(e),
                     Cats = CatsOf(e),
-                    Hay = (e.Id + " " + string.Join(" ", e.Alts) + " " + e.Name + " " + e.ActTitle + " " + e.Kind + " " + e.Description).ToLowerInvariant(),
+                    Hay = HayOf(e),
                     BadgeText = badge.Text,
                     BadgeBack = Widgets.Brush(badge.Back),
                     BadgeEdge = Widgets.Brush(badge.Edge),
@@ -385,7 +397,7 @@ namespace Mgs4Launcher
             if (scene == null) return;
             EndEdit();          // the boxes held the last scene's name; a new pick is not an edit of it
             _pickTitle.Text = string.IsNullOrEmpty(scene.Name) ? scene.Id : scene.Name;
-            _pickSub.Text = string.IsNullOrEmpty(scene.Description) ? scene.Note : scene.Description;
+            _pickSub.Text = SubOf(scene);
 
             // Decoded wider here than for a row: this one is drawn at a few hundred pixels, and asking for the
             // row's width would put a 128px image up at panel size.
@@ -473,9 +485,8 @@ namespace Mgs4Launcher
             {
                 if (r.Entry != scene) continue;
                 r.Title = string.IsNullOrEmpty(scene.Name) ? scene.Id : scene.Name;
-                r.Sub = string.IsNullOrEmpty(scene.Description) ? scene.Note : scene.Description;
-                r.Hay = (scene.Id + " " + string.Join(" ", scene.Alts) + " " + scene.Name + " " +
-                         scene.ActTitle + " " + scene.Kind + " " + scene.Description).ToLowerInvariant();
+                r.Sub = SubOf(scene);
+                r.Hay = HayOf(scene);
             }
             SavePrefs();
             EndEdit();

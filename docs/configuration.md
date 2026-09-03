@@ -55,13 +55,16 @@ TraceFrames=0            ; diagnostics: N = trace every full-frame draw for the 
 Probe=0                  ; diagnostics: sample the pipeline before / after the insertion and after the post chain
 DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
 FileTrace=0              ; diagnostics: log every file the game opens, and every one it fails to open
+AssetTrace=0             ; diagnostics: one SCENE-ASSET line per named file opened under the game folder (the scene's demo / environment / video)
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
 
-The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`, `FileTrace`) and the debug views cost frames; leave them off for normal play.
+The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`, `FileTrace`, `AssetTrace`) and the debug views cost frames; leave them off for normal play.
 
 `FileTrace=1` hooks `CreateFileW`/`CreateFileA` and writes a `FILE open` / `FILE MISS` line per call. It is for asking what the game was loading when it died: a stage id that crashes can be diffed against one that works. Misses are normal - the game looks for a loose file before falling back to the pak.
+
+`AssetTrace=1` uses the same hooks but keeps only what identifies the scene: files under the game folder whose name is not a content hash, each logged once as `SCENE-ASSET open f<frame> <path>`. Some fifty lines per boot instead of thousands, and among them `e_d###.bank` (the cutscene's demo number), `env_<stage>_NN.bank` (a gameplay entry's environment) and any `.bk2` video - which is how `tools\sweep_record.py` and `tools\scene_identity.py` tell two stage ids that start the same scene apart from two that do not. See [scene-identity.md](scene-identity.md).
 
 ## Overlay controls
 

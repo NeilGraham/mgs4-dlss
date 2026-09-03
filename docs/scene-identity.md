@@ -141,12 +141,39 @@ or `env_*.bank` open, instead of logging every `CreateFile`. That turns the whol
 log to a few KB, and means a dedup pass needs no video path at all. The hook already exists in
 `dlss-addon/src/mgs4_dlss.cpp` (search `FileTrace`); it only needs a filter and a distinct log line.
 
+## What was built on it (2026-09-03)
+
+The change proposed above was made: `AssetTrace=1` in `mgs4_dlss.ini` gives one `SCENE-ASSET open f<frame> <path>`
+line per named file under the game folder, each once, hash-named content filtered out - about fifty lines a boot.
+Two things the study did not know:
+
+* **The banks are opened with the `\\?\` extended-length prefix** (`\\?\D:\...\MGS4\ww\bank\default\E_d307.bank`)
+  while the paks and localization tables are opened by relative path (`common\stage\...`). A filter that took a
+  leading backslash to mean "not under the game folder" saw no bank at all.
+* A streaming bank (`E_s01a00l_1.bank`) is reopened about a hundred times in ten seconds. The line is emitted once
+  per distinct path; its frame number is the first open, which is the one that places it against `FIRST-3D-FRAME`.
+
+`tools/sweep_record.py` reads the lines into `stage_probe.csv` as `demo` (demos opened within 600 frames of the
+first 3D frame), `demo_late` (chained in afterwards), `env`, `movie` and `assets`, and records each id for a length
+that suits what it turns out to be (10 s of gameplay, up to 5 min of cutscene, 20 s of anything else).
+`tools/scene_identity.py` then merges ids that share a demo or a video outright, and hands a group that only
+shares an environment to `find_duplicates.py`, which is the one case the engine cannot settle. Two ids that are
+merged get `{"sameAs": primary}` in `scene_info.json`; every measured id gets a `fingerprint` string so the reason
+can be read off the file.
+
+**Checked against the picture (2026-09-03):** `s01a05l` and `s01a05l_D` both load demo 313 and were both recorded in
+full before the early skip existed; their contact sheets match tile for tile from the first frame, so a shared demo
+number is the same cutscene *from the same start*, not a chapter point inside it. Of the first 42 ids swept, the
+engine key merged nine pairs outright and the video comparison one (`s01a40l` / `s01a40l_1`, score 5.37 in a
+shared environment); the sweep now stops a repeat at 3 s, which is where five minutes of cutscene used to go.
+
 ## Where things are
 
 | path | what it is |
 |---|---|
 | `tools/sweep_record.py` | boots and records every id through OBS; writes `tools/stage_probe.csv` |
-| `tools/find_duplicates.py` | video fingerprint dedup, `--scores` to see the numbers, `--apply` to write `sameAs` |
+| `tools/scene_identity.py` | identity from the engine fingerprint; `--apply` writes `sameAs` and `fingerprint` |
+| `tools/find_duplicates.py` | video fingerprint dedup, now only called for gameplay entries that share an environment |
 | `tools/scene_sheet.py` | a recording to contact sheets legible enough to read subtitles from |
 | `tools/classify_scene.py` | Codec / cutscene / gameplay from one frame |
 | `tools/apply_sweep.py` | folds measurements into `tools/scene_info.json` |

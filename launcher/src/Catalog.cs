@@ -13,6 +13,13 @@ namespace Mgs4Launcher
     public class Scene
     {
         public string Id, Kind, ActKey, Name, Description, SortAs, ActTitle, Note;
+        // The banner the game draws when the stage starts ("Middle East, Ground Zero"), read out of the game's
+        // own data by tools\stage_names.py and carried in scene_info.json as "location".
+        public string Location = "";
+        // Story position inside the stage, measured by toolspply_sweep.py from the engine's own demo numbers
+        // ("order" in scene_info.json): a cutscene sorts by its demo, a gameplay entry right after the cutscene
+        // that hands over to it. NaN when nothing was measured, and the id's shape decides as before.
+        public double Order = double.NaN;
         // What the data files call it, before anything typed in the window is laid over the top. Kept so Reset
         // in the Play tab has something to go back to.
         public string BaseName, BaseDescription;
@@ -170,6 +177,8 @@ namespace Mgs4Launcher
                         if (o.ContainsKey("description")) s.Description = o["description"].ToString();
                         if (o.ContainsKey("hidden")) s.Hidden = Convert.ToBoolean(o["hidden"]);
                         if (o.ContainsKey("sortAs")) s.SortAs = o["sortAs"].ToString();
+                        if (o.ContainsKey("location")) s.Location = o["location"].ToString();
+                        if (o.ContainsKey("order")) s.Order = Convert.ToDouble(o["order"]);
                     }
                     list.Add(s);
                 }
@@ -216,6 +225,9 @@ namespace Mgs4Launcher
                     else e.SortCat = 2;
                 }
                 if (!string.IsNullOrEmpty(e.SortAs)) { e.SortPrefix = e.SortAs; e.SortCat = 0; e.SortNum = 0; }
+                // Unmeasured entries keep the old shape-based order, expressed on the same scale as a measured
+                // one: the stage's own entry first, its cutscenes next, its numbered sections last.
+                if (double.IsNaN(e.Order)) e.Order = e.SortCat == 0 ? 0 : (e.SortCat == 1 ? 500 : 1000000);
             }
 
             // Anything renamed in the Play tab, laid over the labels: the file says what a scene is called until
@@ -238,6 +250,7 @@ namespace Mgs4Launcher
                 .OrderBy(e => order.ContainsKey(e.ActKey) ? order[e.ActKey] : int.MaxValue)
                 .ThenBy(e => e.Rank)
                 .ThenBy(e => e.SortPrefix, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.Order)
                 .ThenBy(e => e.SortCat)
                 .ThenBy(e => e.SortNum)
                 .ThenBy(e => e.Id, StringComparer.OrdinalIgnoreCase)
@@ -287,6 +300,7 @@ namespace Mgs4Launcher
                 string ids = r.Id;
                 if (r.Alts.Count > 0) ids += " (= " + string.Join(", ", r.Alts) + ")";
                 string what = string.IsNullOrEmpty(r.Description) ? r.Note : r.Description;
+                if (!string.IsNullOrEmpty(r.Location)) what = r.Location + ". " + what;
                 string name = string.IsNullOrEmpty(r.Name) ? what : r.Name + " - " + what;
                 outp.Add(string.Format("  {0,-30} {1,-10} {2}", ids, r.Kind, name));
             }

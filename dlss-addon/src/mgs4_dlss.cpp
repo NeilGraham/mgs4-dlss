@@ -87,6 +87,14 @@ static void logmsg(const char* fmt, ...)
 // opens and every one it fails to open, so a crashing stage id can be diffed against a working one. Off by
 // default; it costs a log line per open.
 static int g_cfgFileTrace = 0;
+// AssetTrace=1 is the cheap sibling: one "SCENE-ASSET open|miss f<frame> <path>" line per file opened *under the
+// game folder* whose name is not a content hash (the ~1300 hash-named meshes and textures every stage loads
+// regardless of scene). What is left - e_d###.bank (the demo, MGS4's own cutscene number), env_<stage>_NN.bank
+// (a gameplay entry's environment), the localization tables, the .bk2 videos - identifies the scene from the
+// engine's side, without a recording. See docs/scene-identity.md. The frame number orders an open against
+// FIRST-3D-FRAME, so a demo loaded at boot can be told from one chained in later.
+static int g_cfgAssetTrace = 0;
+static void asset_trace(const char* path, bool ok);
 typedef HANDLE (WINAPI* PFN_CreateFileW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI* PFN_CreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 static PFN_CreateFileW o_CreateFileW = nullptr;
@@ -95,10 +103,11 @@ static thread_local bool t_inFileTrace = false;   // logmsg must not re-enter th
 static HANDLE WINAPI hk_CreateFileW(LPCWSTR n, DWORD a, DWORD sh, LPSECURITY_ATTRIBUTES sa, DWORD d, DWORD f, HANDLE t)
 {
     HANDLE h = o_CreateFileW(n, a, sh, sa, d, f, t);
-    if (g_cfgFileTrace && n && !t_inFileTrace) {
+    if ((g_cfgFileTrace || g_cfgAssetTrace) && n && !t_inFileTrace) {
         const DWORD err = (h == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
         t_inFileTrace = true;
-        if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %ls", err, n); else logmsg("FILE open      %ls", n);
+        if (g_cfgFileTrace) { if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %ls", err, n); else logmsg("FILE open      %ls", n); }
+        if (g_cfgAssetTrace) { char nn[MAX_PATH * 2]; if (WideCharToMultiByte(CP_ACP, 0, n, -1, nn, sizeof(nn), nullptr, nullptr) > 0) asset_trace(nn, h != INVALID_HANDLE_VALUE); }
         t_inFileTrace = false;
         if (h == INVALID_HANDLE_VALUE) SetLastError(err);
     }
@@ -107,10 +116,11 @@ static HANDLE WINAPI hk_CreateFileW(LPCWSTR n, DWORD a, DWORD sh, LPSECURITY_ATT
 static HANDLE WINAPI hk_CreateFileA(LPCSTR n, DWORD a, DWORD sh, LPSECURITY_ATTRIBUTES sa, DWORD d, DWORD f, HANDLE t)
 {
     HANDLE h = o_CreateFileA(n, a, sh, sa, d, f, t);
-    if (g_cfgFileTrace && n && !t_inFileTrace) {
+    if ((g_cfgFileTrace || g_cfgAssetTrace) && n && !t_inFileTrace) {
         const DWORD err = (h == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
         t_inFileTrace = true;
-        if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %s", err, n); else logmsg("FILE open      %s", n);
+        if (g_cfgFileTrace) { if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %s", err, n); else logmsg("FILE open      %s", n); }
+        if (g_cfgAssetTrace) asset_trace(n, h != INVALID_HANDLE_VALUE);
         t_inFileTrace = false;
         if (h == INVALID_HANDLE_VALUE) SetLastError(err);
     }
@@ -118,7 +128,7 @@ static HANDLE WINAPI hk_CreateFileA(LPCSTR n, DWORD a, DWORD sh, LPSECURITY_ATTR
 }
 static void install_file_trace()
 {
-    if (!g_cfgFileTrace) return;
+    if (!g_cfgFileTrace && !g_cfgAssetTrace) return;
     MH_Initialize();   // already initialized when frame generation is on; harmless either way
     HMODULE k32 = GetModuleHandleA("kernel32.dll");
     if (!k32) { logmsg("FileTrace: kernel32 not loaded"); return; }
@@ -126,7 +136,7 @@ static void install_file_trace()
     void* a = (void*)GetProcAddress(k32, "CreateFileA");
     const bool okw = w && MH_CreateHook(w, (void*)hk_CreateFileW, (void**)&o_CreateFileW) == MH_OK && MH_EnableHook(w) == MH_OK;
     const bool oka = a && MH_CreateHook(a, (void*)hk_CreateFileA, (void**)&o_CreateFileA) == MH_OK && MH_EnableHook(a) == MH_OK;
-    logmsg("FileTrace on: CreateFileW %s, CreateFileA %s", okw ? "hooked" : "FAILED", oka ? "hooked" : "FAILED");
+    logmsg("%s on: CreateFileW %s, CreateFileA %s", g_cfgFileTrace ? "FileTrace" : "AssetTrace", okw ? "hooked" : "FAILED", oka ? "hooked" : "FAILED");
 }
 
 // ---- per-command-list state (what bgfx has bound) ----------------------------------------------------------------
@@ -263,6 +273,31 @@ static resource resolve_descriptor(device* dev, descriptor_table table, uint32_t
 
 // ---- per-frame tracking --------------------------------------------------------------------------------------------
 static uint32_t g_frame = 0;
+
+// The filter behind AssetTrace: paths under the game folder (absolute, or relative as the engine mostly asks for
+// them) whose file name is not an 8-hex-digit content hash. The game's own logs and the ini are not assets.
+static void asset_trace(const char* path, bool ok)
+{
+    if (!path || !*path) return;
+    if (path[0] == '\\' && path[1] == '\\' && path[2] == '?' && path[3] == '\\') path += 4;   // \\?\D:\... is how the sound banks are asked for
+    const char* rel = path;
+    const size_t gl = strlen(g_gameDir);
+    if (_strnicmp(path, g_gameDir, gl) == 0 && (path[gl] == '\\' || path[gl] == '/')) rel = path + gl + 1;
+    else if ((path[0] && path[1] == ':') || path[0] == '\\' || path[0] == '/') return;   // elsewhere on the disk
+    if (_strnicmp(rel, "logs\\", 5) == 0 || _strnicmp(rel, "logs/", 5) == 0 || _strnicmp(rel, "crash_dumps", 11) == 0) return;
+    const char* base = rel;
+    for (const char* q = rel; *q; ++q) if (*q == '\\' || *q == '/') base = q + 1;
+    size_t hex = 0; while (isxdigit((unsigned char)base[hex])) ++hex;
+    if (hex == 8 && base[8] == '.') return;             // 0003a157.mdn: a content hash, loaded by every scene
+    const char* ext = strrchr(base, '.');
+    if (ext && (_stricmp(ext, ".ini") == 0 || _stricmp(ext, ".log") == 0 || _stricmp(ext, ".dll") == 0 || _stricmp(ext, ".addon64") == 0)) return;
+    if (!*rel) return;
+    // once per path: a streaming bank is reopened a hundred times in ten seconds, and only the first open says
+    // anything (its frame number is what places it before or after the scene's first frame)
+    static std::mutex seenMutex; static std::unordered_set<std::string> seen;
+    { std::lock_guard<std::mutex> lk(seenMutex); std::string key(rel); for (char& c : key) c = (char)tolower((unsigned char)c); if (!seen.insert(key).second) return; }
+    logmsg("SCENE-ASSET %s f%u %s", ok ? "open" : "miss", g_frame, rel);
+}
 static uint32_t g_bbW = 0, g_bbH = 0;
 static std::unordered_set<uint64_t> g_backbuffers;
 static uint32_t g_sceneDrawsThisFrame = 0;
@@ -2970,6 +3005,7 @@ static void reload_config()
     g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 1, g_iniPath);
     g_cfgTraceFreeze = GetPrivateProfileIntA("DLSS", "TraceFreeze", 0, g_iniPath);
     g_cfgFileTrace = GetPrivateProfileIntA("DLSS", "FileTrace", 0, g_iniPath);
+    g_cfgAssetTrace = GetPrivateProfileIntA("DLSS", "AssetTrace", 0, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);

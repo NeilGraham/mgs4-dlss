@@ -38,7 +38,7 @@ def main():
     ids = []
     if os.path.exists(PROBE):
         with open(PROBE, newline="") as fh:
-            ids = [r["id"] for r in csv.DictReader(fh) if r.get("result") == "boot"]
+            ids = [r["id"] for r in csv.DictReader(fh) if r.get("result") in ("boot", "no-scene")]
     if not ids:
         print("no booting ids in %s - run the sweep first" % PROBE)
         return 1
