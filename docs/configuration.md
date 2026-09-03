@@ -54,11 +54,14 @@ TraceFreeze=0            ; diagnostics: log the full-size draw chain around the 
 TraceFrames=0            ; diagnostics: N = trace every full-frame draw for the next N frames (live)
 Probe=0                  ; diagnostics: sample the pipeline before / after the insertion and after the post chain
 DumpShaders=0            ; 1 = write every pipeline's VS/PS bytecode to logs\shaders\<hash>.{vs,ps}.dxbc (pass identification)
+FileTrace=0              ; diagnostics: log every file the game opens, and every one it fails to open
 ```
 
 Log: `MGS4\logs\mgs4_dlss.log`.
 
-The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) and the debug views cost frames; leave them off for normal play.
+The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`, `FileTrace`) and the debug views cost frames; leave them off for normal play.
+
+`FileTrace=1` hooks `CreateFileW`/`CreateFileA` and writes a `FILE open` / `FILE MISS` line per call. It is for asking what the game was loading when it died: a stage id that crashes can be diffed against one that works. Misses are normal - the game looks for a loose file before falling back to the pak.
 
 ## Overlay controls
 

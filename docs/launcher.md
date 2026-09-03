@@ -183,21 +183,66 @@ lists both, not their overlap.
   `s10a40l_D2`, `s20a00l` and `s20a00l_D1`, `s20a00l_D3` and `s20a10l`, `s30a00l` and `s30a00l_D`, `s30a10l` and
   `s30a00l_D2`. The panel offers both ids so you can boot either, in case they differ in something not visible at
   the first frame.
-- **Starting the game** is `s10a10l` - the normal boot with the Master Collection launcher skipped: pre-menu
-  credits, PRESS START, then the menu. `--main` (`mgs4.exe --skip-to-main-menu`) drops straight onto the menu
-  selection with the credits and PRESS START already gone, which is quick for testing but is not how the game
-  starts, and it loses the device on most launches with frame generation on - so it is hidden with the rest of the
-  known-broken ids, and the panel says so when you pick it.
+- **Starting the game** is `--main` (`mgs4.exe --skip-to-main-menu`): straight onto the menu selection, with the
+  pre-menu credits and PRESS START already gone. It is the first entry in the Start group, what an empty stage means
+  on the command line, and what the window has picked when nothing else has been. It used to lose the device on most
+  launches with frame generation on - the menu renders a 3D scene, so the add-on inserts DLSS and switches DLSS-G on,
+  and the no-3D gaps around it were then presented with no tags of their own. The add-on now switches frame
+  generation off across those gaps (fixed 2026-09-02), so the entry stands on its own.
+- **`s10a10l`** is the same boot the long way round: only the Master Collection launcher skipped, so the pre-menu
+  credits and PRESS START play first. Listed as "Start the game, from the credits".
 - **Inside a stage, the cutscenes come before the gameplay**: `s01a10l`, then `s01a10l_D1` and `_D2`, then
   `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
   backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
   than after `_D1`.
-- **Ids that crash or come up black** are out of the list: every numbered section, `_0` and `_00` alike — 250 of
-  the 420 entries, which is every id whose suffix after the underscore is nothing but digits. They are their own
-  kind rather than the "gameplay" the stage table calls them, because none of them can be brought up far enough to
-  say what they are. `_D2` is a cutscene rather than a section and is not caught: the digits have to be the whole
-  suffix. The **Broken** chip shows them if you want them anyway, and searching for one by id still finds it. That
-  leaves 163 rows to browse: the stage entries, the cutscenes and the briefings.
+- **What is broken is measured, not guessed.** It used to be one regex, `_\d+$` — every numbered section — and
+  that was wrong in both directions: `s02a20l_1`, `s02a20l_9` and `s02a20l_11` all boot while `s01a00l_1` crashes,
+  and nothing readable separates them (both are in `mgs4.exe`, neither is in the stage-select scenario, the suffix
+  shape is the same, and the stage paks are compressed so neither appears in them). Every id is now booted once and
+  the verdict recorded. Also worth knowing: **138 of the 250 numbered ids are not in the executable at all**
+  (`s01a00l_00`..`_08` are invented; the game has only `s01a00l_1` and `_D`), and the stage-select scenario names
+  **29 ids the catalog has never had** — `s04a10l_heliport`, `s04a10l_snowfield`, `s04a40l_smelting_furnace`,
+  `s04a50l_underground_aqueduct`, `s03a70l_tower`, `s04a65l_escape`, `s03a35l/s03a40l/s03a60l_MotorCycle`,
+  `s04a60l_Vs`, `s04a60l_Vs_VAMP`, `s04a70l_Vs`, `s04a05l_mgs1`, `s20a20l`, `s40a10l` and the `_stryker_event` /
+  `_dbg_` ones.
+
+## Measuring the catalog
+
+Four tools, run in order. The whole pass takes a few hours and holds the display and the keyboard, so run it
+unattended; every step is resumable or re-runnable.
+
+| step | what it does |
+|---|---|
+| `tools\sweep_stages.ps1` | boots all 420 ids one at a time, grabs a frame ~10 s and ~20 s after the first 3D frame, and writes `boot` / `crash` / `no-scene` per id into `tools\stage_probe.csv`. Skips ids already recorded, so Ctrl+C and re-run is safe. Frames land in `<MGS4_OUT>\sweep\<id>_a.jpg` / `_b.jpg`. |
+| `tools\classify_scene.py --json tools\scene_kinds.json <MGS4_OUT>\sweep` | reads the 20 s frame and decides **codec / cutscene / gameplay** from the pixels. `--features` dumps the raw numbers as CSV for re-tuning the cut-offs. |
+| `tools\contact_sheet.py` | lays the pairs out as captioned sheets under `<MGS4_OUT>\sweep\sheets\`, so the names and descriptions can be written from a couple of dozen images rather than a few hundred. |
+| `tools\make_thumbs.py` | packs one frame per booting scene into `tools\scene_thumbs.zip` (480x270, ~13 KB each), which the launcher embeds and draws as the banner on each row and beside the description. Sized for the detail pane: the row wants a quarter of it, but the pane is 300 physical px tall on a 4K screen at 200%. |
+| `tools\apply_sweep.py` | folds `stage_probe.csv`, `scene_kinds.json` and a hand-written `tools\scene_names.json` into `tools\scene_info.json`, which is what the launcher reads. |
+
+`tools\grab.ps1` is the screen grab the sweep uses, split out so it can be tested on its own. It captures the game
+window through GDI and writes a downscaled JPEG — no OBS, so an unattended run has no extra moving parts.
+
+**How the classifier decides**, and why it is these three signals:
+
+- **Gameplay** — the psyche gauge in the top-left corner: a long horizontal run of saturated amber (`OLD SNAKE`
+  over a `STRESS` readout). It is a fixed-size UI element, so the measurement lands at ~0.74 on unrelated gameplay
+  frames; warm scenery is saturated too but never forms a bar.
+- **Codec** — the call screen is dark, near-monochrome and left-right symmetric (the two callers' portraits) all at
+  once. No one of those is enough on its own.
+- **Cutscene** — whatever is left. A scene that draws no gauge and is not a call is a cutscene.
+
+Letterboxing is deliberately **not** a signal. The port's cutscenes are not letterboxed at the swapchain: the black
+bands that show up when one of these frames is viewed are the viewer padding the image, and the pixels underneath
+are the scene (row 0 of a title-card frame measures 0.85 luma, not 0.0). That was checked before being relied on.
+- **Ids that crash or come up black** are out of the list, one by one as the sweep found them rather than by id
+  shape. The **Broken** chip shows them if you want them anyway, and searching for one by id still finds it.
+- **The categories are Start, Gameplay, Boss, Cutscene, Codec, Briefing and Broken.** There is no "Stage" chip:
+  what a bare stage id shows is gameplay or a cutscene like anything else, and it is filed under whichever the
+  classifier measured. **`Briefing` and `Boss` are hand-written** in `scene_names.json` rather than measured. A
+  briefing says what a scene is *for*, which a frame cannot show; and a boss fight differs from ordinary gameplay
+  only by the name on the second health bar — the row profiles of `LAUGHING OCTOPUS` and `STRESS 0.7%` are
+  identical, so telling them apart needs OCR, and `DREBIN 893` would false-positive besides. `apply_sweep.py`
+  keeps any hand-written kind rather than letting the classifier overwrite it.
 - `s00a00l` and `s00a00l_D` are the cemetery scene, which plays inside Act 1 rather than with the rest of `s00`, so
   they sit in Act 1 after the `s01a00l` entries (`sortAs` in the data file puts them there).
 

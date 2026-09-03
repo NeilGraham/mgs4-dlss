@@ -15,18 +15,19 @@ namespace Mgs4Launcher
 {
     // What a scene is, as a badge: a short word and a color of its own, so the kind reads before the name does.
     // The families are the ones the rest of the window already uses - violet for what is watched, amber for a
-    // briefing, red for the ids that crash, green for the two entries that start the game and blue for a plain
+    // briefing, red for the ids that crash, green for the entries that start the game and blue for a codec call
     // stage boot. These same words and colors are the filter chips over the list.
     //
-    // Gameplay is still here, and nothing wears it: every numbered section in the stage table crashes, so the
-    // catalog calls them "broken" instead. It stays because the kind can still arrive from scene_info.json,
-    // and a section that turns out to boot should look like what it is.
+    // Gameplay is well populated now: the sweep boots every id and most numbered sections turn out to work, so
+    // the old blanket "broken" is gone and each scene wears what it was measured to be.
     //
-    // Every kind that a scene can actually wear has a hue of its own. Start and Stage used to be the two grays,
-    // which cost them the thing the color is for: a gray chip lit is barely a gray chip unlit. The two are far
-    // enough from the rest, and from each other, to be told apart at a glance - Stage leans cyan rather than
-    // taking a truer blue because the scene id it sits beside is already the #7C9CFF accent. Gray is left to the
-    // fallback below, which is what an unrecognized kind should look like.
+    // Codec took the cyan that Stage used to have - Stage is gone, because what a bare stage id shows is gameplay
+    // or a cutscene like anything else. Boss is orange: it has to sit beside Gameplay green without reading as
+    // Broken red. Gray is left to the fallback below, which is what an unrecognized kind should look like.
+    //
+    // Boss is the one kind here that is not measured from the frame. A boss fight differs from ordinary gameplay
+    // only by the name on the second health bar, and telling "LAUGHING OCTOPUS" from "STRESS 0.7%" means reading
+    // text - the row profiles are identical. It is written by hand in scene_names.json instead.
     class Badge
     {
         public string Text, Back, Edge, Ink;
@@ -41,7 +42,9 @@ namespace Mgs4Launcher
                 case "cutscene":    return new Badge("Cutscene", "#211A33", "#4B3E7A", "#B79CFF");
                 case "briefing":    return new Badge("Briefing", "#2A2312", "#7A6220", "#F2C14E");
                 case "start":       return new Badge("Start", "#1E2410", "#557F26", "#9BE04F");
-                case "stage-entry": return new Badge("Stage", "#0F2328", "#22697A", "#4ED2E8");
+                case "codec":       return new Badge("Codec", "#0F2328", "#22697A", "#4ED2E8");
+                case "boss":        return new Badge("Boss", "#2A1A10", "#8A4A1E", "#FFA24E");
+                case "video":       return new Badge("Video", "#2A1026", "#7A2A6E", "#E88ADA");
                 case "broken":      return new Badge("Broken", "#2A1315", "#7A2A2F", "#FF6B66");
                 default:            return new Badge(string.IsNullOrEmpty(kind) ? "Scene" : kind,
                                                      "#1C1C20", "#3A3A44", "#8A8A94");
@@ -72,6 +75,12 @@ namespace Mgs4Launcher
         public Brush BadgeEdge { get; set; }
         public Brush BadgeInk { get; set; }
 
+        // The frame the sweep grabbed of this scene, at the width the row draws it. Bound straight from the
+        // template, so a scene the sweep never reached (or a build with no thumbnails in it) yields null and the
+        // Image simply draws nothing - the placeholder behind it keeps the column aligned either way.
+        public ImageSource Thumb { get { return IsHeader ? null : Thumbs.Get(Id, 128); } }
+        public string ThumbVis { get { return !IsHeader && Thumbs.Has(Id) ? "Visible" : "Hidden"; } }
+
         // A filled star for a favorite, an outline for the rest. Both are one character wide, so the column does
         // not shift as rows are starred.
         public bool Favorite { get; set; }
@@ -87,14 +96,14 @@ namespace Mgs4Launcher
         // scene can have a name now, so it stopped dividing anything.
         public const string FavoritesCat = "Favorites";
         const string BrokenCat = "Broken";
-        static readonly string[] CatNames = { FavoritesCat, "Start", "Stage", "Cutscene", "Briefing", BrokenCat };
+        static readonly string[] CatNames = { FavoritesCat, "Start", "Gameplay", "Boss", "Cutscene", "Video", "Codec", "Briefing", BrokenCat };
 
         // Every chip is the badge it names. Favorites names a list rather than a kind, so it has no badge of its
         // own and takes the briefing one's, which is already the star's amber.
         static Badge CatBadge(string name)
         {
             if (name == FavoritesCat) return Badge.For("briefing");
-            foreach (string kind in new[] { "gameplay", "cutscene", "briefing", "start", "stage-entry", "broken" })
+            foreach (string kind in new[] { "gameplay", "cutscene", "briefing", "start", "codec", "boss", "video", "broken" })
             {
                 Badge b = Badge.For(kind);
                 if (b.Text == name) return b;
@@ -378,13 +387,20 @@ namespace Mgs4Launcher
             _pickTitle.Text = string.IsNullOrEmpty(scene.Name) ? scene.Id : scene.Name;
             _pickSub.Text = string.IsNullOrEmpty(scene.Description) ? scene.Note : scene.Description;
 
+            // Decoded wider here than for a row: this one is drawn at a few hundred pixels, and asking for the
+            // row's width would put a 128px image up at panel size.
+            System.Windows.Media.ImageSource shot = Thumbs.Get(scene.Id, 480);
+            _pickShot.Fill = shot == null ? null : new System.Windows.Media.ImageBrush(shot)
+            {
+                Stretch = System.Windows.Media.Stretch.UniformToFill,   // centred, unlike an Image's own crop
+            };
+            _pickShotBox.Visibility = shot != null ? Visibility.Visible : Visibility.Collapsed;
+
             // The game-start entries take none of the run options: a menu has no boot prompts to press through.
             bool isStart = Catalog.IsStartEntry(scene.Id);
             foreach (Control c in new Control[] { _optAdvance, _optMashX, _optEnd, _optHold, _holdSecs })
                 c.IsEnabled = !isStart;
-            _pickWarn.Text = scene.Hidden && scene.Id == "@main"
-                ? "Known to crash on most launches with frame generation on - 'Start the game' is the honest way in."
-                : scene.Hidden ? "This id is in the known-broken list: it crashes or comes up black." : "";
+            _pickWarn.Text = scene.Hidden ? "This id is in the known-broken list: it crashes or comes up black." : "";
             _pickWarn.Visibility = string.IsNullOrEmpty(_pickWarn.Text) ? Visibility.Collapsed : Visibility.Visible;
 
             _altPick.Items.Clear();

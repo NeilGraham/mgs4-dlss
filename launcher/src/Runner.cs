@@ -167,7 +167,9 @@ namespace Mgs4Launcher
 
         public static void StopGame()
         {
-            foreach (string name in new[] { "mgs4", "launcher" })
+            // "mgs1" is not a typo: s04a05l starts the bundled MGS1 (a separate mgs1.exe titled "METAL GEAR
+            // SOLID"), and nothing here was closing it - it outlived the run and sat on the desktop.
+            foreach (string name in new[] { "mgs4", "mgs1", "launcher" })
                 foreach (Process p in Process.GetProcessesByName(name))
                     try { p.Kill(); } catch { }
             Thread.Sleep(3000);
@@ -255,6 +257,10 @@ namespace Mgs4Launcher
                 if (m.Success) { state = m.Groups[1].Value; hudDraws = int.Parse(m.Groups[2].Value); continue; }
                 m = Regex.Match(line, "SCENE-STATE (cutscene|gameplay|no-3d) ");
                 if (m.Success) { state = m.Groups[1].Value; continue; }
+                // Do NOT break the press loop on the add-on's FIRST-3D-FRAME line. The act title card is itself a
+                // rendered 3D frame, so that fires while the game is still waiting to be pressed past the card:
+                // pressing stops early and the boot stalls for seconds. SCENE-STATE's 30-frame confirmation is
+                // what distinguishes a title card from a scene, and it is worth the half second it costs.
                 // a build with SceneLog off still says this, and it only happens on a 3D frame
                 if (line.Contains("NGX EvaluateFeature ok") && state == "unknown") state = "cutscene";
             }

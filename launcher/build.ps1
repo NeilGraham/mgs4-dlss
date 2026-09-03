@@ -101,6 +101,14 @@ $resources = @(
 $resources += @("install_manifest.json", "scenes.csv", "labels.json", "scene_info.json") |
               ForEach-Object { "/resource:" + (Join-Path $repo "tools\$_") }
 
+# One frame per scene, for the banner on each row and beside the description (tools\make_thumbs.py). Optional:
+# a checkout that has never run the sweep just gets a launcher whose rows have no picture.
+$thumbs = Join-Path $repo "tools\scene_thumbs.zip"
+if (Test-Path -LiteralPath $thumbs) {
+    $resources += "/resource:$thumbs"
+    Write-Host ("embedding scene_thumbs.zip (" + [math]::Round((Get-Item -LiteralPath $thumbs).Length / 1KB) + " KB)")
+}
+
 # One binary, windowed. It behaves like a command anyway: cmd waits for it and passes its handles through, so
 # `mgs4-dlss-launcher --report > out.txt` catches what it writes. That only works because Program.KeepCallersOutput
 # does not let AttachConsole throw the caller's redirect away - see the comment there. A console twin was built

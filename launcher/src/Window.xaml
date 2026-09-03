@@ -423,7 +423,7 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
-            <Border x:Name="b" Background="Transparent" BorderBrush="#1B1B1E" BorderThickness="0,0,0,1" Padding="14,8">
+            <Border x:Name="b" Background="Transparent" BorderBrush="#1B1B1E" BorderThickness="0,0,0,1" Padding="0">
               <ContentPresenter/>
             </Border>
             <ControlTemplate.Triggers>
@@ -543,8 +543,19 @@
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
           <Border Grid.Row="0" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
-                  CornerRadius="10,10,0,0" Padding="18,13">
+                  CornerRadius="10,10,0,0" ClipToBounds="True">
             <StackPanel>
+              <!-- The picked scene's own frame, filling the head of the panel edge to edge - no padding of its
+                   own, which is why the padding moved off this Border and onto the block below it. Collapsed
+                   rather than blank when there is none, so a crashing id does not sit under an empty grey box. -->
+              <Border x:Name="PickShotBox" Height="176" CornerRadius="10,10,0,0" ClipToBounds="True"
+                      Background="#111114" Visibility="Collapsed">
+                <!-- ImageBrush, not Image: an Image with UniformToFill anchors the bitmap at its top-left and
+                     clips the rest away, so a panel wider than 16:9 showed the corner of the frame. A brush
+                     centres what it crops. -->
+                <Rectangle x:Name="PickShot" RenderOptions.BitmapScalingMode="HighQuality"/>
+              </Border>
+            <StackPanel Margin="18,13">
               <TextBlock x:Name="PickTitle" Text="Nothing picked" FontSize="14" FontWeight="SemiBold"
                          Foreground="{StaticResource Text}" TextTrimming="CharacterEllipsis"/>
               <TextBlock x:Name="PickSub" Text="Choose a scene on the left." FontSize="11"
@@ -573,6 +584,7 @@
                           ToolTip="Drop what you have typed and go back to the catalog's own name"/>
                 </StackPanel>
               </StackPanel>
+            </StackPanel>
             </StackPanel>
           </Border>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,14,14,10">

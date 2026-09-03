@@ -12,7 +12,24 @@ import obsws_python as obs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths                                                     # noqa: E402
 
-HOST, PORT, PASSWORD = "localhost", 4455, "8TqvlFmdbuWku33O"
+# Port and password are read from OBS's own config rather than hardcoded: OBS regenerates the password when the
+# server is re-enabled, and a stale copy here fails as an auth error that looks like a network problem.
+# MGS4_OBS_HOST / _PORT / _PASSWORD (environment, or config.ini) override.
+_WS_CONFIG = os.path.join(os.environ.get("APPDATA", ""), "obs-studio", "plugin_config", "obs-websocket", "config.json")
+
+
+def _ws_config():
+    try:
+        with open(_WS_CONFIG, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+_WS = _ws_config()
+HOST = paths.setting("MGS4_OBS_HOST", default="localhost")
+PORT = int(paths.setting("MGS4_OBS_PORT", default=str(_WS.get("server_port", 4455))))
+PASSWORD = paths.setting("MGS4_OBS_PASSWORD", default=_WS.get("server_password", ""))
 SCENE = "MGS4 Capture"
 GAME_SOURCE = "MGS4 Game Capture"
 DISPLAY_SOURCE = "MGS4 Display Capture"

@@ -111,10 +111,10 @@ namespace Mgs4Launcher
             // with the add-on idle and frame generation off as well. Verified 2026-08-31; do not add it untested.
             list.Add(new Scene
             {
-                Id = "@main", Kind = "start", ActKey = "start", Rank = 10,
-                Name = "Main menu, skipping the intro",
-                Description = "Drops straight onto the menu selection, past the pre-menu credits and PRESS START. Quick for testing, but it crashes on most launches with frame generation on - use 'Start the game' to play.",
-                Hidden = true, SortAs = ""
+                Id = "@main", Kind = "start", ActKey = "start", Rank = 0,
+                Name = "Start the game",
+                Description = "Straight onto the menu selection, past the pre-menu credits and PRESS START. The one for just playing.",
+                Hidden = false, SortAs = ""
             });
             list.Add(new Scene
             {
@@ -124,11 +124,11 @@ namespace Mgs4Launcher
                 Hidden = false, SortAs = ""
             });
 
-            // Ids that crash or come up black: every one whose id ends in an underscore and digits, which is
-            // every numbered section in the stage table. None of them can be brought up far enough to say what
-            // they are, so the table's "gameplay" is not a claim worth repeating - they are their own kind,
-            // "broken". "_D2" is a cutscene, not a section, and is not caught by this.
-            const string brokenRe = "_\\d+$";
+            // Which ids are broken is measured, not guessed. It used to be one regex, "_\d+$" - every numbered
+            // section - and that was wrong in both directions: s02a20l_1, _9 and _11 boot fine while s01a00l_1
+            // crashes, and nothing readable separates them (see docs/launcher.md). Every id is now booted once by
+            // tools\sweep_stages.ps1 and the verdict lands in scene_info.json as kind "broken" + hidden, which the
+            // override loop below applies. An id with no entry there has not been measured, and is shown.
             var aliasOf = new Dictionary<string, string>();
 
             string csv = Paths.DataText(ScenesCsv);
@@ -147,16 +147,18 @@ namespace Mgs4Launcher
                     info.TryGetValue(id, out o);
                     if (o != null && o.ContainsKey("sameAs")) { aliasOf[id] = o["sameAs"].ToString(); continue; }
 
-                    bool broken = Regex.IsMatch(id, brokenRe);
                     var s = new Scene
                     {
                         Id = id,
-                        Kind = broken ? "broken" : (iKind >= 0 && cells.Length > iKind ? cells[iKind] : ""),
+                        // "stage-entry" is not a category any more: what a bare id shows is whatever the sweep
+                        // measured for it (tools\sweep_stages.ps1 -> scene_info.json), and cutscene is the default
+                        // until it has been measured - a scene that is not a codec call or gameplay is a cutscene.
+                        Kind = iKind >= 0 && cells.Length > iKind ? (cells[iKind] == "stage-entry" ? "cutscene" : cells[iKind]) : "",
                         Name = FormatSceneName(labels.ContainsKey(id) ? labels[id] : null),
                         ActKey = ActKeyFor(id),
                         Rank = 0,
                         Description = "",
-                        Hidden = broken,
+                        Hidden = false,
                         SortAs = ""
                     };
                     if (o != null)
@@ -195,6 +197,9 @@ namespace Mgs4Launcher
                     case "cutscene": e.Note = "in-engine cutscene"; break;
                     case "briefing": e.Note = "mission briefing"; break;
                     case "gameplay": e.Note = "playable section"; break;
+                    case "codec": e.Note = "a Codec call"; break;
+                    case "boss": e.Note = "a boss fight"; break;
+                    case "video": e.Note = "a pre-rendered video"; break;
                     case "start": e.Note = "starts the game"; break;
                     default: e.Note = "boots the stage at its start"; break;
                 }

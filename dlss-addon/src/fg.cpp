@@ -101,8 +101,25 @@ static DWORD g_renderThread = 0;                  // thread that presents (bgfx 
 struct SlCall { SlCall() { ++t_slDepth; } ~SlCall() { --t_slDepth; } };
 static IDXGISwapChain* g_proxySwapchain = nullptr;
 static std::unordered_map<void*, void*> g_proxyFactories;   // native factory -> SL proxy factory
-static uint32_t g_presentFrame = 0;                          // frame index for the present markers
-static bool g_frameHasDraws = false;
+// Frame generation must only run while the game is actually rendering 3D frames. The add-on's DLSS-G inputs
+// (constants + depth / motion-vector tags) are produced at the DLSS insertion point, and that point exists only on
+// frames that render a scene: on MGS4's own menus, loading screens and full-screen videos no insertion happens, so
+// the frame is presented through Streamline with no tags and no constants of its own. DLSS-G then works from another
+// frame's entries in the frame-based tagging pool, which have since been recycled - "mapResource Failed to map
+// buffer", NGX evaluate 0xbad00002 on every present, and a removed device a few seconds later. So DLSS-G is switched
+// off after a few frames without inputs and switched back on when they return, which is also what the Streamline
+// integration guide asks for on menus and loading screens.
+static bool g_inputsThisFrame = false;      // frame_inputs ran for the frame about to be presented
+static uint32_t g_idleFrames = 0;           // consecutive presented frames without inputs
+static uint32_t g_liveFrames = 0;           // consecutive presented frames with inputs
+static uint32_t g_idleTotal = 0;            // frames spent with generation switched off (logging)
+static bool g_fgIdle = false;               // DLSS-G forced off because the game is not rendering a scene
+static bool g_tokenPresented = false;       // this frame's token has already carried the present markers
+// 2, not 1: an isolated frame whose insertion point was missed inside a live scene must not cost a DLSS-G teardown
+// and rebuild, and one untagged present is harmless (the old build survived tens of seconds of them). 2, not more:
+// every frame over the threshold is one Streamline logs as "resource tags for frame N not set yet".
+static const uint32_t kIdleOffFrames = 2;   // frames without inputs before DLSS-G is switched off
+static const uint32_t kIdleOnFrames = 2;    // frames with inputs before it comes back (no flapping on a one-off miss)
 
 static void sl_log(sl::LogType type, const char* msg)
 {
@@ -168,20 +185,24 @@ static HRESULT STDMETHODCALLTYPE hk_Present(IDXGISwapChain* sc, UINT sync, UINT 
 {
     if (sc != g_proxySwapchain || t_inside) return o_Present(sc, sync, flags);
     g_renderThread = GetCurrentThreadId();
-    if (g_token && p_slPCLSetMarker) { p_slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *g_token); p_slPCLSetMarker(sl::PCLMarker::ePresentStart, *g_token); }
+    // A frame with no scene draws never asks for a token of its own, so g_token is still the previous frame's and has
+    // already been through its present. Marking it a second time hands Reflex / PCL a frame that is already finished.
+    const bool fresh = g_token != nullptr && !g_tokenPresented && p_slPCLSetMarker != nullptr;
+    if (fresh) { p_slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *g_token); p_slPCLSetMarker(sl::PCLMarker::ePresentStart, *g_token); g_tokenPresented = true; }
     if (g_frameCb) g_frameCb();
     HRESULT hr; { SlCall guard; t_inside = true; hr = o_Present(sc, sync, flags); t_inside = false; }
-    if (g_token && p_slPCLSetMarker) p_slPCLSetMarker(sl::PCLMarker::ePresentEnd, *g_token);
+    if (fresh) p_slPCLSetMarker(sl::PCLMarker::ePresentEnd, *g_token);
     return hr;
 }
 static HRESULT STDMETHODCALLTYPE hk_Present1(IDXGISwapChain1* sc, UINT sync, UINT flags, const DXGI_PRESENT_PARAMETERS* pp)
 {
     if ((IDXGISwapChain*)sc != g_proxySwapchain || t_inside) return o_Present1(sc, sync, flags, pp);
     g_renderThread = GetCurrentThreadId();
-    if (g_token && p_slPCLSetMarker) { p_slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *g_token); p_slPCLSetMarker(sl::PCLMarker::ePresentStart, *g_token); }
+    const bool fresh = g_token != nullptr && !g_tokenPresented && p_slPCLSetMarker != nullptr;
+    if (fresh) { p_slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *g_token); p_slPCLSetMarker(sl::PCLMarker::ePresentStart, *g_token); g_tokenPresented = true; }
     if (g_frameCb) g_frameCb();
     HRESULT hr; { SlCall guard; t_inside = true; hr = o_Present1(sc, sync, flags, pp); t_inside = false; }
-    if (g_token && p_slPCLSetMarker) p_slPCLSetMarker(sl::PCLMarker::ePresentEnd, *g_token);
+    if (fresh) p_slPCLSetMarker(sl::PCLMarker::ePresentEnd, *g_token);
     return hr;
 }
 
@@ -419,7 +440,7 @@ static void apply_options(uint32_t renderW, uint32_t renderH, uint32_t bbW, uint
     g_lastSizes[0] = renderW; g_lastSizes[1] = renderH; g_lastSizes[2] = bbW; g_lastSizes[3] = bbH;
     sl::DLSSGOptions o;
     uint32_t frames = 1;
-    if (g_set.mode == 0) o.mode = sl::DLSSGMode::eOff;
+    if (g_set.mode == 0 || g_fgIdle) o.mode = sl::DLSSGMode::eOff;
     else if (g_set.mode == 4) {
         if (g_st.dynamicSupported) { o.mode = sl::DLSSGMode::eDynamic; o.dynamicTargetFrameRate = g_set.targetFps; }
         else { o.mode = sl::DLSSGMode::eOn; frames = g_st.adaptiveFrames ? g_st.adaptiveFrames : 1; }   // fallback: adaptive controller
@@ -433,7 +454,7 @@ static void apply_options(uint32_t renderW, uint32_t renderH, uint32_t bbW, uint
     if ((int)o.mode == g_lastOptMode && frames == g_lastOptFrames && o.dynamicTargetFrameRate == g_lastOptTarget && !g_optionsDirty) return;
     sl::Result r; { SlCall guard; r = p_slDLSSGSetOptions(kViewport, o); }
     if (r != sl::Result::eOk) { LOG("FG: slDLSSGSetOptions failed %d", (int)r); snprintf(g_st.lastError, sizeof(g_st.lastError), "slDLSSGSetOptions failed (%d)", (int)r); }
-    else LOG("FG: options applied: mode %s, frames %u, target fps %.0f (render %ux%u, color %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
+    else LOG("FG: options applied: mode %s%s, frames %u, target fps %.0f (render %ux%u, color %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), g_fgIdle ? " (no scene being rendered)" : "", frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
     g_lastOptMode = (int)o.mode; g_lastOptFrames = frames; g_lastOptTarget = o.dynamicTargetFrameRate; g_optionsDirty = false;
     g_st.active = o.mode != sl::DLSSGMode::eOff;
 }
@@ -442,7 +463,19 @@ void poll()
 {
     if (!g_st.initialized) return;
     g_gameFramesSincePoll++;
-    if (g_optionsDirty && g_set.mode == 0 && g_lastSizes[0]) apply_options(g_lastSizes[0], g_lastSizes[1], g_lastSizes[2], g_lastSizes[3]);   // switching off: inputs are no longer sent
+    // Runs on the game's own present, before Streamline presents: the frame judged here is the one DLSS-G is about to
+    // work on. A frame that produced no inputs must not be interpolated from whatever the tagging pool still holds.
+    if (g_inputsThisFrame) {
+        g_idleFrames = 0;
+        if (g_fgIdle && ++g_liveFrames >= kIdleOnFrames) { g_fgIdle = false; g_optionsDirty = true; LOG("FG: the scene is being rendered again after %u frames - frame generation back on", g_idleTotal); }
+    } else {
+        g_liveFrames = 0;
+        if (!g_fgIdle && ++g_idleFrames >= kIdleOffFrames) { g_fgIdle = true; g_idleTotal = 0; g_optionsDirty = true; LOG("FG: no DLSS inputs for %u frames (menu / loading screen / video) - frame generation off until the scene returns", g_idleFrames); }
+        if (g_fgIdle) g_idleTotal++;
+    }
+    g_inputsThisFrame = false;
+    // Applied here and not only at the insertion point: on an idle frame there is no insertion to apply them from.
+    if (g_optionsDirty && g_lastSizes[0]) apply_options(g_lastSizes[0], g_lastSizes[1], g_lastSizes[2], g_lastSizes[3]);
     const ULONGLONG now = GetTickCount64();
     if (g_lastPoll == 0) g_lastPoll = now;
     if (now - g_lastPoll < 1000) return;
@@ -471,13 +504,12 @@ void frame_begin(uint32_t frameIndex)
     if (!g_st.initialized) return;
     if (g_tokenFrame != frameIndex) {
         sl::FrameToken* t = nullptr;
-        if (p_slGetNewFrameToken(t, &frameIndex) == sl::Result::eOk) { g_token = t; g_tokenFrame = frameIndex; }
+        if (p_slGetNewFrameToken(t, &frameIndex) == sl::Result::eOk) { g_token = t; g_tokenFrame = frameIndex; g_tokenPresented = false; }
     }
     if (!g_token) return;
     if (g_reflexDirty) apply_reflex();
     if (p_slReflexSleep) { SlCall guard; p_slReflexSleep(*g_token); }
     if (p_slPCLSetMarker) { p_slPCLSetMarker(sl::PCLMarker::eSimulationStart, *g_token); p_slPCLSetMarker(sl::PCLMarker::eSimulationEnd, *g_token); p_slPCLSetMarker(sl::PCLMarker::eRenderSubmitStart, *g_token); }
-    g_frameHasDraws = true;
 }
 
 // our row-major (column-vector) 4x4 -> SL row-major (row-vector): transpose
@@ -593,6 +625,7 @@ void frame_inputs(uint32_t frameIndex, const FrameInputs& in, const CameraInput&
     if (in.vpW && in.vpH && (in.vpW != in.bbW || in.vpH != in.bbH)) tags[n++] = sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &bbExt);   // FG only on the game image rectangle
     r = p_slSetTagForFrame(*g_token, kViewport, tags, n, in.cmd);
     if (r != sl::Result::eOk) { static int m = 0; if (m++ < 3) LOG("FG: slSetTagForFrame failed %d", (int)r); }
+    else g_inputsThisFrame = true;   // this frame carries constants and tags of its own: DLSS-G may interpolate it
 }
 
 void frame_end(uint32_t) { }

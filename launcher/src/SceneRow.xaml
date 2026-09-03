@@ -1,6 +1,6 @@
 <DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
   <Grid>
-    <Grid Visibility="{Binding HeaderVis}">
+    <Grid Visibility="{Binding HeaderVis}" Margin="14,8">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="18"/>
         <ColumnDefinition Width="*"/>
@@ -11,24 +11,37 @@
                  VerticalAlignment="Center"/>
       <TextBlock Grid.Column="2" Text="{Binding HeadCount}" FontSize="11" Foreground="#6E6E77" VerticalAlignment="Center"/>
     </Grid>
-    <Grid Visibility="{Binding SceneVis}" Margin="18,0,0,0">
+    <!-- No left margin on this one, unlike the header row above: the frame is meant to touch the edge of the
+         row, so the 18px indent moves onto the badge instead. -->
+    <Grid Visibility="{Binding SceneVis}" ClipToBounds="True">
       <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="Auto"/>
         <ColumnDefinition Width="*"/>
         <ColumnDefinition Width="Auto"/>
       </Grid.ColumnDefinitions>
-      <!-- What kind of scene this is, in its own color, at the head of the row: it is the first thing to know
-           about a scene, so it is the first thing on the line. Fixed width so the titles beside them line up. -->
-      <Border Grid.Column="0" Width="84" Margin="0,0,12,0" Padding="0,2" CornerRadius="4" VerticalAlignment="Center"
+      <!-- The scene's own frame, the full height of the row and hard against its left edge.
+           A Rectangle with an ImageBrush rather than an Image, for two reasons. An Image with UniformToFill
+           anchors the scaled bitmap at its top-left and clips the overflow off the right and bottom - it shows a
+           corner of the picture, not the middle of it - where an ImageBrush centres (AlignmentX/Y default to
+           Center). And a Rectangle has no intrinsic size, so the picture takes the row's height instead of
+           setting it. -->
+      <!-- 134 wide against a row that comes out about 75 tall is very close to the frame's own 16:9, so
+           UniformToFill has almost nothing to crop and the whole picture survives. -->
+      <Rectangle Grid.Column="0" Width="134" Visibility="{Binding ThumbVis}" IsHitTestVisible="False">
+        <Rectangle.Fill>
+          <ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/>
+        </Rectangle.Fill>
+      </Rectangle>
+      <!-- What kind of scene this is, in its own color. Fixed width so the titles beside them line up. -->
+      <Border Grid.Column="1" Width="84" Margin="14,8,12,8" Padding="0,2" CornerRadius="4" VerticalAlignment="Center"
               Background="{Binding BadgeBack}" BorderBrush="{Binding BadgeEdge}" BorderThickness="1">
         <TextBlock Text="{Binding BadgeText}" FontSize="10" FontWeight="SemiBold" Foreground="{Binding BadgeInk}"
                    HorizontalAlignment="Center"/>
       </Border>
-      <StackPanel Grid.Column="1">
+      <StackPanel Grid.Column="2" Margin="0,9,0,9">
         <!-- The id is what you would type at a terminal, not what you read the list by, so it rides the far end
-             of the title's own line in the same grey as the line under it. Inside this grid rather than a column
-             of its own, which is what keeps it on the title's line instead of centered over both. The title takes
-             what is left and trims, so a long name runs into the id's gap and stops. -->
+             of the title's own line in the same grey as the line under it. -->
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*"/>
@@ -43,7 +56,7 @@
       </StackPanel>
       <!-- Tag="star" is what the click handler looks for, so a click here toggles the favorite instead of
            picking the scene. -->
-      <TextBlock Grid.Column="2" Tag="star" Text="{Binding Star}" FontSize="16" Foreground="{Binding StarInk}"
+      <TextBlock Grid.Column="3" Tag="star" Text="{Binding Star}" FontSize="16" Foreground="{Binding StarInk}"
                  VerticalAlignment="Center" Margin="12,0,10,0" Cursor="Hand" ToolTip="{Binding StarTip}"/>
     </Grid>
   </Grid>

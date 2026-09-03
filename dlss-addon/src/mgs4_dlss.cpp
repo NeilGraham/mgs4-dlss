@@ -34,6 +34,7 @@
 #include "uimask_cs.h"          // g_uimask_cs  // g_resample_cs[]: compiled src/resample_cs.hlsl (DLSS output -> the game's dynamic-resolution sub-rect)
 #include "fg.h"      // DLSS Frame Generation via Streamline (fg.cpp)
 #include "objmv.h"   // per-object motion vectors via stream output (objmv.cpp)
+#include "MinHook.h" // FileTrace hooks CreateFileW/A (MinHook is already linked, for fg.cpp)
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
@@ -78,6 +79,54 @@ static void logmsg(const char* fmt, ...)
     fprintf(g_log, "[%02d:%02d:%02d.%03d] ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
     va_list ap; va_start(ap, fmt); vfprintf(g_log, fmt, ap); va_end(ap);
     fputc('\n', g_log); fflush(g_log);
+}
+
+// ---- file trace (FileTrace=1) ----------------------------------------------------------------------------------
+// Diagnostic for the numbered-section crash (mgs4.exe+0x74C5A3): the game dies in a file-extension lookup whose
+// key is null, i.e. strrchr(name, '.') found no dot in the name it was classifying. This logs every file the game
+// opens and every one it fails to open, so a crashing stage id can be diffed against a working one. Off by
+// default; it costs a log line per open.
+static int g_cfgFileTrace = 0;
+typedef HANDLE (WINAPI* PFN_CreateFileW)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+typedef HANDLE (WINAPI* PFN_CreateFileA)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+static PFN_CreateFileW o_CreateFileW = nullptr;
+static PFN_CreateFileA o_CreateFileA = nullptr;
+static thread_local bool t_inFileTrace = false;   // logmsg must not re-enter the hook
+static HANDLE WINAPI hk_CreateFileW(LPCWSTR n, DWORD a, DWORD sh, LPSECURITY_ATTRIBUTES sa, DWORD d, DWORD f, HANDLE t)
+{
+    HANDLE h = o_CreateFileW(n, a, sh, sa, d, f, t);
+    if (g_cfgFileTrace && n && !t_inFileTrace) {
+        const DWORD err = (h == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
+        t_inFileTrace = true;
+        if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %ls", err, n); else logmsg("FILE open      %ls", n);
+        t_inFileTrace = false;
+        if (h == INVALID_HANDLE_VALUE) SetLastError(err);
+    }
+    return h;
+}
+static HANDLE WINAPI hk_CreateFileA(LPCSTR n, DWORD a, DWORD sh, LPSECURITY_ATTRIBUTES sa, DWORD d, DWORD f, HANDLE t)
+{
+    HANDLE h = o_CreateFileA(n, a, sh, sa, d, f, t);
+    if (g_cfgFileTrace && n && !t_inFileTrace) {
+        const DWORD err = (h == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
+        t_inFileTrace = true;
+        if (h == INVALID_HANDLE_VALUE) logmsg("FILE MISS (%lu) %s", err, n); else logmsg("FILE open      %s", n);
+        t_inFileTrace = false;
+        if (h == INVALID_HANDLE_VALUE) SetLastError(err);
+    }
+    return h;
+}
+static void install_file_trace()
+{
+    if (!g_cfgFileTrace) return;
+    MH_Initialize();   // already initialized when frame generation is on; harmless either way
+    HMODULE k32 = GetModuleHandleA("kernel32.dll");
+    if (!k32) { logmsg("FileTrace: kernel32 not loaded"); return; }
+    void* w = (void*)GetProcAddress(k32, "CreateFileW");
+    void* a = (void*)GetProcAddress(k32, "CreateFileA");
+    const bool okw = w && MH_CreateHook(w, (void*)hk_CreateFileW, (void**)&o_CreateFileW) == MH_OK && MH_EnableHook(w) == MH_OK;
+    const bool oka = a && MH_CreateHook(a, (void*)hk_CreateFileA, (void**)&o_CreateFileA) == MH_OK && MH_EnableHook(a) == MH_OK;
+    logmsg("FileTrace on: CreateFileW %s, CreateFileA %s", okw ? "hooked" : "FAILED", oka ? "hooked" : "FAILED");
 }
 
 // ---- per-command-list state (what bgfx has bound) ----------------------------------------------------------------
@@ -1818,7 +1867,16 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     } else {
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
         if (NVSDK_NGX_FAILED(r)) { if (g_failCount++ < 5) logmsg("NGX EvaluateFeature -> %s", ngx_str(r)); }
-        else { if (++g_evalCount == 1 || (g_cfgLogEveryN && g_evalCount % g_cfgLogEveryN == 0)) logmsg("NGX EvaluateFeature ok (#%u)", g_evalCount); }
+        else {
+            // One shot, the moment the first real scene frame is resolved. Tools that press through the boot
+            // prompts need to stop the instant the scene starts: SCENE-STATE is half a second behind by design
+            // (it wants 30 frames of the same reading), and half a second of pressing lands inside the scene and
+            // can skip the cutscene. "NGX EvaluateFeature ok (#1)" cannot serve - pre-warm has already spent
+            // evaluations 1..12 on no-3D frames, so the counter is never 1 here.
+            static bool firstReal = false;
+            if (!firstReal) { firstReal = true; logmsg("FIRST-3D-FRAME (frame %u)", g_frame); }
+            if (++g_evalCount == 1 || (g_cfgLogEveryN && g_evalCount % g_cfgLogEveryN == 0)) logmsg("NGX EvaluateFeature ok (#%u)", g_evalCount);
+        }
     }
 
     if (g_cfgPostDof && g_dofSeenThisFrame && g_dofCbValid && g_dofCbGValid && !upscale && !frozenPass && !g_windowMode && !NVSDK_NGX_FAILED(r)
@@ -2911,6 +2969,7 @@ static void reload_config()
     g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
     g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 1, g_iniPath);
     g_cfgTraceFreeze = GetPrivateProfileIntA("DLSS", "TraceFreeze", 0, g_iniPath);
+    g_cfgFileTrace = GetPrivateProfileIntA("DLSS", "FileTrace", 0, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     g_cfgMotionVectors = GetPrivateProfileIntA("DLSS", "MotionVectors", 1, g_iniPath);
@@ -3308,6 +3367,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
         logmsg("mgs4_dlss v1.2.0 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
+        install_file_trace();   // before everything else: the stage load runs ahead of device creation
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
         reshade::register_event<reshade::addon_event::destroy_device>(on_destroy_device);
         reshade::register_event<reshade::addon_event::init_swapchain>(on_init_swapchain);

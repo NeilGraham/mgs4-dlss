@@ -1,0 +1,9 @@
+id,result,seconds,scene_offset,scene_at,video,state,draws,hud,detail
+s01a00l,boot,50,4.87,3.0,s01a00l.mkv,gameplay,1650,155,game exited
+s01a00l_D,boot,17,5.08,3.0,s01a00l_D.mkv,cutscene,123,4,game exited
+s01a05l,no-scene,20,-1.0,-1.0,s01a05l.mkv,no-3d,16,0,no 3D frame in 20s
+s01a05l_D,crash,19,-1.0,-1.0,s01a05l_D.mkv,,-1,-1,new minidump
+s01a40l,boot,24,5.87,3.0,s01a40l.mkv,gameplay,1133,155,cap
+s01a40l_1,boot,24,5.47,3.0,s01a40l_1.mkv,gameplay,1238,215,cap
+s01a40l_2,boot,24,5.27,3.0,s01a40l_2.mkv,cutscene,456,2,cap
+s01a40l_D2,boot,24,5.87,3.0,s01a40l_D2.mkv,cutscene,324,7,cap

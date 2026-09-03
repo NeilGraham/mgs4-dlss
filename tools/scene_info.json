@@ -13,124 +13,1476 @@
     "  sortAs      sort as if the id were this, for a scene that belongs somewhere the id does not put it",
     "  hidden      out of the list unless the 'Known broken' filter is chosen"
   ],
-
   "acts": [
-    { "key": "start",    "title": "Start the game" },
-    { "key": "act1",     "title": "Act 1 - Middle East" },
-    { "key": "act2",     "title": "Act 2 - South America" },
-    { "key": "act3",     "title": "Act 3 - Eastern Europe" },
-    { "key": "act4",     "title": "Act 4 - Shadow Moses" },
-    { "key": "act5",     "title": "Act 5 - Outer Haven" },
-    { "key": "epilogue", "title": "Epilogue - Naked Sin" },
-    { "key": "other",    "title": "Uncategorized" }
+    {
+      "key": "start",
+      "title": "Start the game"
+    },
+    {
+      "key": "act1",
+      "title": "Act 1 - Middle East"
+    },
+    {
+      "key": "act2",
+      "title": "Act 2 - South America"
+    },
+    {
+      "key": "act3",
+      "title": "Act 3 - Eastern Europe"
+    },
+    {
+      "key": "act4",
+      "title": "Act 4 - Shadow Moses"
+    },
+    {
+      "key": "act5",
+      "title": "Act 5 - Outer Haven"
+    },
+    {
+      "key": "epilogue",
+      "title": "Epilogue - Naked Sin"
+    },
+    {
+      "key": "other",
+      "title": "Uncategorized"
+    }
   ],
-
   "scenes": {
     "s10a10l": {
-      "act": "start", "kind": "start", "rank": 0,
-      "name": "Start the game",
-      "description": "The normal boot with the Master Collection launcher skipped: pre-menu credits, PRESS START, then the menu. This is the one for just playing."
+      "act": "start",
+      "kind": "start",
+      "rank": 10,
+      "name": "Start the game, from the credits",
+      "description": "The full boot with only the Master Collection launcher skipped: pre-menu credits, PRESS START, then the menu."
     },
-
     "s10a20l": {
-      "act": "act2", "kind": "briefing", "rank": -100,
+      "act": "act2",
+      "kind": "briefing",
+      "rank": -100,
       "name": "Mission Briefing, before Act 2",
       "description": "The Nomad briefing that leads into Act 2: the cutscenes first, then the interactive briefing."
     },
-    "s10a20l_D1": { "sameAs": "s10a20l" },
+    "s10a20l_D1": {
+      "sameAs": "s10a20l"
+    },
     "s10a20l_D2": {
-      "act": "act2", "kind": "briefing", "rank": -99,
+      "act": "act2",
+      "kind": "briefing",
+      "rank": -99,
       "name": "Mission Briefing, Act 2 - interactive part only",
       "description": "Straight into the interactive Nomad briefing, without the cutscenes that come before it."
     },
-
     "s10a30l": {
-      "act": "act3", "kind": "briefing", "rank": -100,
+      "act": "act3",
+      "kind": "briefing",
+      "rank": -100,
       "name": "Mission Briefing, before Act 3",
       "description": "The Nomad briefing that leads into Act 3."
     },
-    "s10a30l_D1": { "sameAs": "s10a30l" },
+    "s10a30l_D1": {
+      "sameAs": "s10a30l"
+    },
     "s10a30l_D2": {
-      "act": "act3", "kind": "briefing", "rank": -99,
+      "act": "act3",
+      "kind": "briefing",
+      "rank": -99,
       "name": "Mission Briefing, Act 3 - from Naomi and Sunny",
       "description": "Starts in the Nomad area, with the Naomi and Sunny cutscene before the interactive part."
     },
-
     "s10a40l": {
-      "act": "act4", "kind": "briefing", "rank": -100,
+      "act": "act4",
+      "kind": "briefing",
+      "rank": -100,
       "name": "Mission Briefing, before Act 4",
       "description": "The Nomad briefing that leads into Act 4."
     },
-    "s10a40l_D2": { "sameAs": "s10a40l" },
+    "s10a40l_D2": {
+      "sameAs": "s10a40l"
+    },
     "s10a40l_D": {
-      "act": "act4", "kind": "briefing", "rank": -99,
+      "act": "act4",
+      "kind": "briefing",
+      "rank": -99,
       "name": "Mission Briefing, Act 4 - Sunny and the flower",
       "description": "Starts at the cutscene where Sunny smells the flower Naomi gave her."
     },
-
     "s20a00l": {
-      "act": "act5", "kind": "briefing", "rank": -100,
+      "act": "act5",
+      "kind": "briefing",
+      "rank": -100,
       "name": "Mission Briefing, before Act 5",
       "description": "The briefing aboard the USS Missouri, before Outer Haven."
     },
-    "s20a00l_D1": { "sameAs": "s20a00l" },
+    "s20a00l_D1": {
+      "sameAs": "s20a00l"
+    },
     "s20a00l_D2": {
-      "act": "act5", "kind": "briefing", "rank": -99,
+      "act": "act5",
+      "kind": "briefing",
+      "rank": -99,
       "name": "Mission Briefing, Act 5 - before the cigarette",
       "description": "A later cutscene in the same briefing, just before Otacon lights Snake's cigarette."
     },
     "s20a00l_D3": {
-      "act": "act5", "kind": "cutscene", "rank": -98,
+      "act": "act5",
+      "kind": "cutscene",
+      "rank": -98,
       "name": "Act 5 title - Old Sun",
       "description": "The 'Act 5 Old Sun' title screen, before the act officially starts."
     },
-    "s20a10l": { "sameAs": "s20a00l_D3" },
-
+    "s20a10l": {
+      "sameAs": "s20a00l_D3"
+    },
     "s30a00l": {
-      "act": "epilogue", "kind": "cutscene", "rank": 100,
+      "act": "epilogue",
+      "kind": "cutscene",
+      "rank": 100,
       "name": "Epilogue title - Naked Sin",
       "description": "The 'Epilogue Naked Sin' title, then Meryl aboard the Nomad in her wedding dress."
     },
-    "s30a00l_D": { "sameAs": "s30a00l" },
+    "s30a00l_D": {
+      "sameAs": "s30a00l"
+    },
     "s30a00l_D3": {
-      "act": "epilogue", "kind": "cutscene", "rank": 101,
+      "act": "epilogue",
+      "kind": "cutscene",
+      "rank": 101,
       "name": "Meryl and Johnny's wedding",
       "description": "The wedding, outside the Nomad."
     },
     "s30a10l": {
-      "act": "epilogue", "kind": "cutscene", "rank": 102,
+      "act": "epilogue",
+      "kind": "cutscene",
+      "rank": 102,
       "name": "Raiden in hospital",
       "description": "Raiden in hospital, visited by Rosemary and their son."
     },
-    "s30a00l_D2": { "sameAs": "s30a10l" },
+    "s30a00l_D2": {
+      "sameAs": "s30a10l"
+    },
     "s30a00l_D4": {
-      "act": "epilogue", "kind": "cutscene", "rank": 103,
+      "act": "epilogue",
+      "kind": "cutscene",
+      "rank": 103,
       "name": "End credits",
       "description": "The closing credits."
     },
-
     "s00a00l": {
-      "act": "act1", "sortAs": "s01a00m",
-      "description": "The cemetery: Snake and Otacon at Big Boss's grave. Plays after the s01a00l scenes."
+      "act": "act1",
+      "sortAs": "s01a00m",
+      "description": "Old Snake in a suit among the headstones on a grey morning. The epilogue's framing scene.",
+      "kind": "cutscene",
+      "name": "The cemetery"
     },
-    "s00a00l_D": { "sameAs": "s00a00l" },
+    "s00a00l_D": {
+      "sameAs": "s00a00l"
+    },
     "s01a00l": {
-      "description": "The Act 1 opening street, handing over to HUD gameplay after the intro."
+      "description": "The Middle East street at ground level, militia trucks and rubble. Playable.",
+      "kind": "gameplay",
+      "name": "Militia street"
     },
     "s02a40l": {
-      "description": "Jungle path with a PMC patrol, played with the HUD up."
+      "description": "Playable: a bare earth bank above the valley.",
+      "kind": "gameplay",
+      "name": "The dirt bank"
     },
     "s02a50l_D1": {
-      "description": "The research lab: the rose garden and a Gekko."
+      "description": "Snake under the walkway, then the camp beyond.",
+      "kind": "cutscene",
+      "name": "Into the rebel camp"
     },
     "s02a60l": {
-      "description": "Snake alongside the lab building; runs with the port's dynamic resolution active."
+      "description": "Snake against the stonework, then close on his face.",
+      "kind": "cutscene",
+      "name": "Snake at the wall"
     },
     "s03a40l": {
-      "description": "The motorcycle chase."
+      "description": "On the bike, the van ahead through the streets.",
+      "kind": "boss",
+      "name": "The motorcycle chase"
     },
     "s04a10l_D1": {
       "description": "Arriving at Shadow Moses in the snowstorm."
+    },
+    "s00a00l_0": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s00a10l": {
+      "kind": "cutscene",
+      "name": "Walking to the grave",
+      "description": "Snake crosses the cemetery to a headstone marked IN MEMORY OF A PATRIOT, and kneels."
+    },
+    "s00a10l_D": {
+      "kind": "cutscene",
+      "name": "Walking to the grave",
+      "description": "Snake crosses the cemetery to a headstone marked IN MEMORY OF A PATRIOT, and kneels."
+    },
+    "s00a10l_D2": {
+      "kind": "cutscene",
+      "name": "At the headstone",
+      "description": "Close on Snake crouched at the grave, the cemetery soft behind him."
+    },
+    "s00a10l_D3": {
+      "kind": "cutscene",
+      "name": "Into the flashback",
+      "description": "The white ink-wash transition that opens the memory."
+    },
+    "s00a10l_D4": {
+      "kind": "cutscene",
+      "name": "Big Boss at the graves",
+      "description": "The eyepatched Big Boss standing among the headstones, then close on his face."
+    },
+    "s00a10l_D5": {
+      "kind": "cutscene",
+      "name": "The photographs",
+      "description": "A dim room hung with documents and old photographs."
+    },
+    "s00a10l_D6": {
+      "kind": "cutscene",
+      "name": "Two men in long coats",
+      "description": "Big Boss and his companion at the graveside, then close on Big Boss's scarred face."
+    },
+    "s00a10l_D7": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: boots but never reaches a 3D frame."
+    },
+    "s00a10l_D8": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: boots but never reaches a 3D frame."
+    },
+    "s00a10l_D9": {
+      "kind": "cutscene",
+      "name": "Final Results",
+      "description": "The end-of-game statistics panel: play time, continues, alert phases, kills."
+    },
+    "s01a00l_00": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a00l_D": {
+      "kind": "cutscene",
+      "name": "A Hideo Kojima Game",
+      "description": "The title card over the ruined town, hazy yellow sky."
+    },
+    "s01a05l": {
+      "kind": "cutscene",
+      "name": "Snake in the alley",
+      "description": "Snake pressed against a wall in the militia quarter, then close on him lighting a cigarette."
+    },
+    "s01a05l_D": {
+      "kind": "cutscene",
+      "name": "Snake in the alley",
+      "description": "Snake pressed against a wall in the militia quarter, then close on him lighting a cigarette."
+    },
+    "s01a10l": {
+      "kind": "cutscene",
+      "name": "Act 1: Liquid Sun",
+      "description": "The act title card, then the alley it opens onto."
+    },
+    "s01a10l_0": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a10l_1": {
+      "kind": "gameplay",
+      "name": "Liquid Sun, the street",
+      "description": "Playable: the alley and street of the militia quarter."
+    },
+    "s01a10l_D1": {
+      "kind": "cutscene",
+      "name": "Act 1: Liquid Sun",
+      "description": "The act title card, then the alley it opens onto."
+    },
+    "s01a10l_D2": {
+      "kind": "cutscene",
+      "name": "Metal Gear Mk. II",
+      "description": "Snake behind a chain-link fence, then the little robot that has been following him."
+    },
+    "s01a20l": {
+      "kind": "gameplay",
+      "name": "Dark interior",
+      "description": "Playable, in near-darkness - the gauge is the only thing lit."
+    },
+    "s01a20l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a20l_D": {
+      "kind": "cutscene",
+      "name": "Eye Have You",
+      "description": "Snake crouched behind cover, then the PMC Stryker with EYE HAVE YOU stencilled on its flank."
+    },
+    "s01a30l": {
+      "kind": "codec",
+      "name": "Codec: Otacon, 141.12",
+      "description": "A Codec call with Otacon over the militia quarter."
+    },
+    "s01a30l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_09": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a30l_1": {
+      "kind": "codec",
+      "name": "Codec: Otacon, 141.12",
+      "description": "A Codec call with Otacon over the militia quarter."
+    },
+    "s01a30l_2": {
+      "kind": "gameplay",
+      "name": "Drum can",
+      "description": "Playable: the ITEM ACQUIRED card for the drum can Snake can hide inside."
+    },
+    "s01a30l_D2": {
+      "kind": "cutscene",
+      "name": "Oil drums in the street",
+      "description": "A militiaman ahead, and the rusted drum Snake will use for cover."
+    },
+    "s01a40l": {
+      "kind": "gameplay",
+      "name": "The balconied plaza",
+      "description": "Playable: an open courtyard overlooked by balconies, PMC soldiers holding it."
+    },
+    "s01a40l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a40l_1": {
+      "kind": "gameplay",
+      "name": "The balconied plaza",
+      "description": "Playable: an open courtyard overlooked by balconies, PMC soldiers holding it."
+    },
+    "s01a40l_2": {
+      "kind": "cutscene",
+      "name": "Meryl's squad",
+      "description": "A red-haired soldier face to face with a masked trooper."
+    },
+    "s01a40l_D2": {
+      "kind": "cutscene",
+      "name": "Snake and the trooper",
+      "description": "Close on Snake's eyepatched face beside a masked soldier indoors."
+    },
+    "s01a40l_D3": {
+      "kind": "cutscene",
+      "name": "Rat Patrol behind cover",
+      "description": "Soldiers stacked against a wall, the red-haired one at the back."
+    },
+    "s01a50l": {
+      "kind": "gameplay",
+      "name": "Industrial dark",
+      "description": "Playable: a black interior of pipes and machinery."
+    },
+    "s01a50l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a50l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a55l": {
+      "kind": "cutscene",
+      "name": "Militia firefight",
+      "description": "Militia fighters shooting from cover, then Snake low behind a wall."
+    },
+    "s01a55l_D": {
+      "kind": "cutscene",
+      "name": "Militia firefight",
+      "description": "Militia fighters shooting from cover, then Snake low behind a wall."
+    },
+    "s01a57l": {
+      "kind": "gameplay",
+      "name": "The burnt-out street",
+      "description": "Playable: a wide street with a wrecked car, low sun."
+    },
+    "s01a57l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s01a60l": {
+      "kind": "cutscene",
+      "name": "Under the Gekko",
+      "description": "A Gekko's legs against a blown-out sky, then the tarpaulined yard beneath."
+    },
+    "s01a60l_D1": {
+      "kind": "cutscene",
+      "name": "Under the Gekko",
+      "description": "A Gekko's legs against a blown-out sky, then the tarpaulined yard beneath."
+    },
+    "s01a60l_D2": {
+      "kind": "cutscene",
+      "name": "Alone on the terrace",
+      "description": "A lone figure on a concrete stairway above the town."
+    },
+    "s02a10l": {
+      "kind": "cutscene",
+      "name": "Act 2: Solid Sun",
+      "description": "The act title card, then the South American jungle at night."
+    },
+    "s02a10l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a10l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a10l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a10l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a10l_1": {
+      "kind": "gameplay",
+      "name": "Jungle outpost",
+      "description": "Playable: a lit building seen from the treeline at night."
+    },
+    "s02a10l_2": {
+      "kind": "gameplay",
+      "name": "Jungle hillside",
+      "description": "Playable: dense hillside undergrowth."
+    },
+    "s02a10l_3": {
+      "kind": "gameplay",
+      "name": "Night ravine",
+      "description": "Playable: a dark cut through the jungle."
+    },
+    "s02a10l_D1": {
+      "kind": "cutscene",
+      "name": "Act 2: Solid Sun",
+      "description": "The act title card, then the South American jungle at night."
+    },
+    "s02a10l_D2": {
+      "kind": "codec",
+      "name": "Codec: 141.19",
+      "description": "A Codec call over the safe-house interior."
+    },
+    "s02a20l": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the jungle",
+      "description": "A Codec call over the South American treeline."
+    },
+    "s02a20l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a20l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a20l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a20l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a20l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a20l_1": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the jungle",
+      "description": "A Codec call over the South American treeline."
+    },
+    "s02a20l_10": {
+      "kind": "gameplay",
+      "name": "Boulder cover",
+      "description": "Playable: Snake prone in grass behind a boulder."
+    },
+    "s02a20l_11": {
+      "kind": "gameplay",
+      "name": "Boulder cover",
+      "description": "Playable: Snake prone in grass behind a boulder."
+    },
+    "s02a20l_2": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the jungle",
+      "description": "A Codec call over the South American treeline."
+    },
+    "s02a20l_3": {
+      "kind": "gameplay",
+      "name": "The ravine",
+      "description": "Playable: a shadowed gully in the jungle."
+    },
+    "s02a20l_4": {
+      "kind": "gameplay",
+      "name": "The brick wall track",
+      "description": "Playable: a dirt track running beside a long brick wall."
+    },
+    "s02a20l_5": {
+      "kind": "gameplay",
+      "name": "The brick wall track",
+      "description": "Playable: a dirt track running beside a long brick wall."
+    },
+    "s02a20l_6": {
+      "kind": "gameplay",
+      "name": "The waterfall face",
+      "description": "Playable: a wet rock face streaked with falling water."
+    },
+    "s02a20l_7": {
+      "kind": "gameplay",
+      "name": "The waterfall face",
+      "description": "Playable: a wet rock face streaked with falling water."
+    },
+    "s02a20l_8": {
+      "kind": "gameplay",
+      "name": "The boulder field",
+      "description": "Playable: grassland broken by large boulders."
+    },
+    "s02a20l_9": {
+      "kind": "gameplay",
+      "name": "The boulder field",
+      "description": "Playable: grassland broken by large boulders."
+    },
+    "s02a25l": {
+      "kind": "cutscene",
+      "name": "At the fence",
+      "description": "Snake behind a wire fence, then close on his face and the Solid Eye."
+    },
+    "s02a25l_D1": {
+      "kind": "cutscene",
+      "name": "At the fence",
+      "description": "Snake behind a wire fence, then close on his face and the Solid Eye."
+    },
+    "s02a25l_D2": {
+      "kind": "cutscene",
+      "name": "At the fence",
+      "description": "Snake behind a wire fence, then close on his face and the Solid Eye."
+    },
+    "s02a25l_D3": {
+      "kind": "cutscene",
+      "name": "The nanomachine schematic",
+      "description": "A diagram animating out into a wall of data."
+    },
+    "s02a25l_D4": {
+      "kind": "cutscene",
+      "name": "Drebin",
+      "description": "Close on Drebin, the gun launderer, behind his glasses."
+    },
+    "s02a30l": {
+      "kind": "gameplay",
+      "name": "Jungle path",
+      "description": "Playable: a narrow path under the canopy."
+    },
+    "s02a30l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_09": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a30l_1": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the forest road",
+      "description": "A Codec call over the dirt road through the trees."
+    },
+    "s02a30l_10": {
+      "kind": "gameplay",
+      "name": "Spotted at the boulder",
+      "description": "Playable: behind a boulder with the alarm already up."
+    },
+    "s02a30l_11": {
+      "kind": "gameplay",
+      "name": "The rock face",
+      "description": "Playable: a steep rock wall above the track."
+    },
+    "s02a30l_12": {
+      "kind": "gameplay",
+      "name": "The rock face",
+      "description": "Playable: a steep rock wall above the track."
+    },
+    "s02a30l_2": {
+      "kind": "gameplay",
+      "name": "The dirt road",
+      "description": "Playable: the road through the trees, open on both sides."
+    },
+    "s02a30l_3": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the forest road",
+      "description": "A Codec call over the dirt road through the trees."
+    },
+    "s02a30l_4": {
+      "kind": "gameplay",
+      "name": "Jungle path",
+      "description": "Playable: a narrow path under the canopy."
+    },
+    "s02a30l_5": {
+      "kind": "codec",
+      "name": "Codec: 141.80, the fence line",
+      "description": "A Codec call over the timber fence and the hills beyond."
+    },
+    "s02a30l_6": {
+      "kind": "gameplay",
+      "name": "The wooden fence",
+      "description": "Playable: a timber fence on the ridge, hills beyond."
+    },
+    "s02a30l_7": {
+      "kind": "gameplay",
+      "name": "The pylon field",
+      "description": "Playable: open ground under a power pylon."
+    },
+    "s02a30l_8": {
+      "kind": "gameplay",
+      "name": "The pylon field",
+      "description": "Playable: open ground under a power pylon."
+    },
+    "s02a30l_9": {
+      "kind": "gameplay",
+      "name": "Under fire at the rocks",
+      "description": "Playable: pinned behind rock with the alert counter running."
+    },
+    "s02a40l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a40l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a40l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a40l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a40l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a40l_1": {
+      "kind": "gameplay",
+      "name": "The dirt bank",
+      "description": "Playable: a bare earth bank above the valley."
+    },
+    "s02a40l_2": {
+      "kind": "gameplay",
+      "name": "The gully",
+      "description": "Playable: a cut between rock walls, grass to the knees."
+    },
+    "s02a40l_3": {
+      "kind": "gameplay",
+      "name": "The wrecked digger",
+      "description": "Playable: an abandoned digger rusting in the grass."
+    },
+    "s02a50l": {
+      "kind": "cutscene",
+      "name": "The rebel outpost",
+      "description": "A rifle at rest, then a fighter sitting among the sacks."
+    },
+    "s02a50l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a50l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a50l_1": {
+      "kind": "gameplay",
+      "name": "Syringe acquired",
+      "description": "Playable: the ITEM ACQUIRED card for the syringe that restores Psyche."
+    },
+    "s02a50l_2": {
+      "kind": "boss",
+      "name": "Laughing Octopus",
+      "description": "The boss fight: her health bar over the lodge interior."
+    },
+    "s02a50l_3": {
+      "kind": "boss",
+      "name": "Laughing Beauty",
+      "description": "The second phase, once the suit is gone."
+    },
+    "s02a50l_4": {
+      "kind": "gameplay",
+      "name": "Behind the boulder",
+      "description": "Playable: cover among the rocks outside the lodge."
+    },
+    "s02a50l_D2": {
+      "kind": "cutscene",
+      "name": "The medical display",
+      "description": "Anatomical diagrams and readouts on a lab screen."
+    },
+    "s02a50l_D3": {
+      "kind": "cutscene",
+      "name": "Naomi in the lab",
+      "description": "Naomi at her terminal, shelves of reagents behind her."
+    },
+    "s02a50l_D5": {
+      "kind": "cutscene",
+      "name": "Inside the lab",
+      "description": "Dark interior, Snake moving through the equipment."
+    },
+    "s02a50l_D6": {
+      "kind": "cutscene",
+      "name": "Octopus unmasked",
+      "description": "The boards of the lodge floor, and the mask left on them."
+    },
+    "s02a50l_D7": {
+      "kind": "cutscene",
+      "name": "Laughing Beauty",
+      "description": "The white apparition, then the woman beneath it."
+    },
+    "s02a50l_D8": {
+      "kind": "cutscene",
+      "name": "Petals",
+      "description": "Petals falling through the lodge over the sleeping figure."
+    },
+    "s02a60l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: boots but never reaches a 3D frame."
+    },
+    "s02a60l_09": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_1": {
+      "kind": "cutscene",
+      "name": "Snake at the wall",
+      "description": "Snake against the stonework, then close on his face."
+    },
+    "s02a60l_10": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_11": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_12": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a60l_2": {
+      "kind": "gameplay",
+      "name": "The clearing",
+      "description": "Playable: rocks and thin trees opening onto the valley."
+    },
+    "s02a60l_3": {
+      "kind": "gameplay",
+      "name": "In the tall grass",
+      "description": "Playable: chest-high grass with the ridge beyond."
+    },
+    "s02a70l": {
+      "kind": "cutscene",
+      "name": "The watchtower",
+      "description": "A figure under a great tree, then the rebel watchtower above the clearing."
+    },
+    "s02a70l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a70l_D": {
+      "kind": "cutscene",
+      "name": "The watchtower",
+      "description": "A figure under a great tree, then the rebel watchtower above the clearing."
+    },
+    "s02a73l": {
+      "kind": "gameplay",
+      "name": "The village square",
+      "description": "Playable: the square with Drebin's line open, PMCs holding it."
+    },
+    "s02a75l": {
+      "kind": "gameplay",
+      "name": "The hillside advance",
+      "description": "Playable: rebels pushing up the hill under fire."
+    },
+    "s02a78l": {
+      "kind": "gameplay",
+      "name": "The hill push",
+      "description": "Playable: close on armour, then Snake working up the slope."
+    },
+    "s02a80l": {
+      "kind": "gameplay",
+      "name": "The quarry",
+      "description": "Playable: open stony ground with the ridge above."
+    },
+    "s02a80l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a85l": {
+      "kind": "cutscene",
+      "name": "The colonnade",
+      "description": "An arcaded street in the hill town, sandbags stacked in the shade."
+    },
+    "s02a85l_D": {
+      "kind": "cutscene",
+      "name": "The colonnade",
+      "description": "An arcaded street in the hill town, sandbags stacked in the shade."
+    },
+    "s02a90l": {
+      "kind": "gameplay",
+      "name": "The terrace",
+      "description": "Playable: a balustraded terrace over the rooftops."
+    },
+    "s02a90l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a90l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s02a95l": {
+      "kind": "cutscene",
+      "name": "Naomi at the truck",
+      "description": "Naomi in her white coat beside a vehicle, working at a panel."
+    },
+    "s02a95l_D": {
+      "kind": "cutscene",
+      "name": "Naomi at the truck",
+      "description": "Naomi in her white coat beside a vehicle, working at a panel."
+    },
+    "s03a00l": {
+      "kind": "cutscene",
+      "name": "Act 3: Third Sun",
+      "description": "The act title card, then the Eastern European station platform."
+    },
+    "s03a00l_D1": {
+      "kind": "cutscene",
+      "name": "Big Mama",
+      "description": "The arcade at night, then the woman waiting under it."
+    },
+    "s03a10l": {
+      "kind": "gameplay",
+      "name": "Civilian Disguise acquired",
+      "description": "Playable: the ITEM ACQUIRED card for the local's suit."
+    },
+    "s03a10l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_04": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_05": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_06": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_07": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_08": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_09": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_1": {
+      "kind": "gameplay",
+      "name": "Civilian Disguise acquired",
+      "description": "Playable: the ITEM ACQUIRED card for the local's suit."
+    },
+    "s03a10l_10": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_11": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_12": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a10l_2": {
+      "kind": "gameplay",
+      "name": "The van in the alley",
+      "description": "Playable: a parked van under a single lamp."
+    },
+    "s03a10l_3": {
+      "kind": "gameplay",
+      "name": "The van in the alley",
+      "description": "Playable: a parked van under a single lamp."
+    },
+    "s03a10l_4": {
+      "kind": "gameplay",
+      "name": "The lit corner",
+      "description": "Playable: a street corner with the shopfronts lit."
+    },
+    "s03a10l_5": {
+      "kind": "gameplay",
+      "name": "The van in the alley",
+      "description": "Playable: a parked van under a single lamp."
+    },
+    "s03a10l_6": {
+      "kind": "gameplay",
+      "name": "The van in the alley",
+      "description": "Playable: a parked van under a single lamp."
+    },
+    "s03a15l": {
+      "kind": "gameplay",
+      "name": "The lamplit street",
+      "description": "Playable: a narrow street, lamps down one side."
+    },
+    "s03a15l_1": {
+      "kind": "gameplay",
+      "name": "The lamplit street",
+      "description": "Playable: a narrow street, lamps down one side."
+    },
+    "s03a15l_2": {
+      "kind": "gameplay",
+      "name": "The dark courtyard",
+      "description": "Playable: an unlit courtyard, one planted corner."
+    },
+    "s03a15l_3": {
+      "kind": "gameplay",
+      "name": "The lamplit street",
+      "description": "Playable: a narrow street, lamps down one side."
+    },
+    "s03a16l": {
+      "kind": "gameplay",
+      "name": "The unlit passage",
+      "description": "Playable: a passage with almost no light in it."
+    },
+    "s03a16l_1": {
+      "kind": "gameplay",
+      "name": "The unlit passage",
+      "description": "Playable: a passage with almost no light in it."
+    },
+    "s03a16l_2": {
+      "kind": "gameplay",
+      "name": "The unlit passage",
+      "description": "Playable: a passage with almost no light in it."
+    },
+    "s03a20l": {
+      "kind": "gameplay",
+      "name": "The gated street",
+      "description": "Playable: iron railings and a van, the arch beyond lit."
+    },
+    "s03a20l_1": {
+      "kind": "gameplay",
+      "name": "The gated street",
+      "description": "Playable: iron railings and a van, the arch beyond lit."
+    },
+    "s03a20l_2": {
+      "kind": "gameplay",
+      "name": "The alley lamp",
+      "description": "Playable: a single lamp burning in an empty alley."
+    },
+    "s03a20l_3": {
+      "kind": "gameplay",
+      "name": "The gated street",
+      "description": "Playable: iron railings and a van, the arch beyond lit."
+    },
+    "s03a25l": {
+      "kind": "gameplay",
+      "name": "The dark arch",
+      "description": "Playable: a black archway with the street beyond."
+    },
+    "s03a25l_1": {
+      "kind": "gameplay",
+      "name": "The dark arch",
+      "description": "Playable: a black archway with the street beyond."
+    },
+    "s03a25l_2": {
+      "kind": "gameplay",
+      "name": "The dark arch",
+      "description": "Playable: a black archway with the street beyond."
+    },
+    "s03a30l": {
+      "kind": "cutscene",
+      "name": "Following the resistance man",
+      "description": "Snake tails a man in a long coat down a Prague street."
+    },
+    "s03a30l_D1": {
+      "kind": "cutscene",
+      "name": "Following the resistance man",
+      "description": "Snake tails a man in a long coat down a Prague street."
+    },
+    "s03a30l_D2": {
+      "kind": "cutscene",
+      "name": "The church",
+      "description": "Close on Big Mama, then Snake under the chandelier."
+    },
+    "s03a30l_D3": {
+      "kind": "cutscene",
+      "name": "The sketch",
+      "description": "A drawn face coming apart into ink."
+    },
+    "s03a30l_D4": {
+      "kind": "cutscene",
+      "name": "Inside the church",
+      "description": "The nave by candlelight, figures at the far end."
+    },
+    "s03a30l_D5": {
+      "kind": "cutscene",
+      "name": "The mural",
+      "description": "A painted face on the wall, dissolving as the camera passes."
+    },
+    "s03a30l_D6": {
+      "kind": "cutscene",
+      "name": "The library",
+      "description": "Snake among the shelves, then the statue in its arch."
+    },
+    "s03a30l_D7": {
+      "kind": "cutscene",
+      "name": "The vines",
+      "description": "Ink leaves and wires drawn across the frame."
+    },
+    "s03a30l_D8": {
+      "kind": "cutscene",
+      "name": "Big Mama and Snake",
+      "description": "The two of them face to face in the lamplight."
+    },
+    "s03a35l": {
+      "kind": "boss",
+      "name": "The motorcycle chase",
+      "description": "On the bike behind the van, its health bar on the HUD."
+    },
+    "s03a35l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a35l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a35l_1": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a50l": {
+      "kind": "cutscene",
+      "name": "The night street",
+      "description": "The street from above, a vehicle burning at the far end."
+    },
+    "s03a50l_D": {
+      "kind": "cutscene",
+      "name": "On the bike",
+      "description": "Snake and Big Mama on the motorcycle, close, before the night street."
+    },
+    "s03a60l": {
+      "kind": "boss",
+      "name": "Gekko in the street",
+      "description": "A Gekko stalking the square, its health bar up."
+    },
+    "s03a65l": {
+      "kind": "cutscene",
+      "name": "The safe-house window",
+      "description": "Figures at a lit window, the room dark around them."
+    },
+    "s03a70l": {
+      "kind": "cutscene"
+    },
+    "s03a70l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a70l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a70l_03": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s03a70l_1": {
+      "kind": "gameplay"
+    },
+    "s03a70l_2": {
+      "kind": "gameplay"
+    },
+    "s03a70l_D1": {
+      "kind": "cutscene"
+    },
+    "s03a70l_D2": {
+      "kind": "cutscene"
+    },
+    "s03a70l_D3": {
+      "kind": "cutscene"
+    },
+    "s03a70l_D4": {
+      "kind": "cutscene"
+    },
+    "s03a70l_D5": {
+      "kind": "cutscene"
+    },
+    "s03a80l": {
+      "kind": "cutscene"
+    },
+    "s03a90l": {
+      "kind": "cutscene"
+    },
+    "s03a90l_D1": {
+      "kind": "cutscene"
+    },
+    "s03a90l_D2": {
+      "kind": "cutscene"
+    },
+    "s03a90l_D3": {
+      "kind": "cutscene"
+    },
+    "s03a90l_D4": {
+      "kind": "video",
+      "name": "Act 3 ending: on the bridge",
+      "description": "Snake at the riverside at night, then close on his face. Pre-rendered video, not the engine."
+    },
+    "s03a90l_D5": {
+      "kind": "video",
+      "name": "Act 3 ending: the burning barricade",
+      "description": "Fighters around a fire in the street, then Snake down against the parapet. Pre-rendered video."
+    },
+    "s04a05l": {
+      "kind": "gameplay",
+      "name": "Metal Gear Solid (1998)",
+      "description": "Not an MGS4 scene: this id starts the bundled MGS1 as its own mgs4-independent window (mgs1.exe, \"METAL GEAR SOLID\"). It has to be closed separately."
+    },
+    "s04a10l": {
+      "kind": "cutscene",
+      "name": "Act 4: the flight in",
+      "description": "Snake in the cabin watching the Shadow Moses weather go by."
+    },
+    "s04a10l_01": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+    },
+    "s04a10l_02": {
+      "kind": "broken",
+      "hidden": true,
+      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
     }
   }
 }

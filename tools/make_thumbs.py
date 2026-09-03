@@ -1,0 +1,74 @@
+"""Packs one heavily-compressed frame per scene into tools/scene_thumbs.zip, which the launcher embeds and shows
+as the banner on each row and beside the description when a scene is picked.
+
+  python tools/make_thumbs.py                 build from <MGS4_OUT>\\sweep
+  python tools/make_thumbs.py --width 240 --quality 55
+
+One entry per booting scene, named "<id>.jpg". The 20 s frame is preferred (it is the one the classifier judged);
+the 10 s frame, then the 1 s location frame, stand in when it is missing. Sized for the detail pane, not the row: the row banner draws at 64 logical px (128 at 200% DPI) and would be
+happy with a quarter of this, but the pane is a 150-logical-high box, which is 300 physical px on a 4K screen at
+200%. 480x270 covers that without upscaling. The ceiling is 640x360 - what the sweep itself captures - so past
+about 560 wide there is no more detail to recover, only bytes. At 480 / q62 a scene costs ~13 KB and ~180 scenes
+come to ~2.3 MB, against a 980 KB launcher.
+"""
+import os, sys, csv, io, zipfile
+from PIL import Image
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import paths  # noqa: E402
+
+SHOTS = os.path.join(paths.OUT_DIR, "sweep")
+PROBE = os.path.join(HERE, "stage_probe.csv")
+OUT = os.path.join(HERE, "scene_thumbs.zip")
+
+
+
+def main():
+    argv = sys.argv[1:]
+    width, quality = 480, 62
+    while argv:
+        if argv[0] == "--width":
+            width, argv = int(argv[1]), argv[2:]
+        elif argv[0] == "--quality":
+            quality, argv = int(argv[1]), argv[2:]
+        else:
+            argv = argv[1:]
+
+    ids = []
+    if os.path.exists(PROBE):
+        with open(PROBE, newline="") as fh:
+            ids = [r["id"] for r in csv.DictReader(fh) if r.get("result") == "boot"]
+    if not ids:
+        print("no booting ids in %s - run the sweep first" % PROBE)
+        return 1
+
+    total = 0
+    kept = 0
+    with zipfile.ZipFile(OUT, "w", zipfile.ZIP_STORED) as z:   # the JPEGs are already compressed
+        for sid in ids:
+            src = None
+            for suf in ("_b", "_a", "_loc"):
+                p = os.path.join(SHOTS, "%s%s.jpg" % (sid, suf))
+                if os.path.exists(p):
+                    src = p
+                    break
+            if not src:
+                continue
+            full = Image.open(src).convert("RGB")
+            im = full.resize((width, max(1, round(width * full.height / full.width))), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=quality, optimize=True, progressive=False)
+            data = buf.getvalue()
+            z.writestr("%s.jpg" % sid, data)
+            total += len(data)
+
+            kept += 1
+
+    print("%d thumbnails -> %s (%.0f KB, %.1f KB each at %dpx q%d)" %
+          (kept, OUT, os.path.getsize(OUT) / 1024.0, total / 1024.0 / max(kept, 1), width, quality))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

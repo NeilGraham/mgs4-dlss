@@ -37,7 +37,8 @@ namespace Mgs4Launcher
         // file is what matters, not a label.
         bool _gameUp;
         bool _pollBusy;
-        string _pickedId = "";
+        // The primary way in, until the preferences file says which scene was picked last.
+        string _pickedId = "@main";
         // Scene ids the user has starred. Kept in the preferences file next to everything else the window
         // remembers, and written the moment a star is clicked rather than only when the window closes.
         readonly HashSet<string> _favorites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -53,6 +54,8 @@ namespace Mgs4Launcher
         TextBlock _titleText, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
                   _mashNote, _searchHint;
         Image _logoArt;
+        System.Windows.Shapes.Rectangle _pickShot;
+        Border _pickShotBox;
         Panel _navTabs;
         System.Windows.Shapes.Rectangle _heroArt;
         RadioButton _navPlay, _navSettings, _navInstall;
@@ -172,6 +175,8 @@ namespace Mgs4Launcher
             _pickTitle = (TextBlock)f("PickTitle");
             _pickSub = (TextBlock)f("PickSub");
             _pickWarn = (TextBlock)f("PickWarn");
+            _pickShot = (System.Windows.Shapes.Rectangle)f("PickShot");
+            _pickShotBox = (Border)f("PickShotBox");
             _altRow = (FrameworkElement)f("AltRow");
             _altPick = (ComboBox)f("AltPick");
             _editBtn = (Button)f("EditBtn");
@@ -407,7 +412,8 @@ namespace Mgs4Launcher
             {
                 case "Cutscenes": return "Cutscene";
                 case "Mission briefings": return "Briefing";
-                case "Stage entries": return "Stage";
+                case "Stage entries": return "Cutscene";   // the Stage chip is gone: a bare id is judged by what it shows
+                case "Stage": return "Cutscene";
                 case "Known broken": return "Broken";
                 case "Favourites": return FavoritesCat;
                 default: return name;
