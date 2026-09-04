@@ -14,6 +14,8 @@
 #include "MinHook.h"
 #include "velocity_vs.h"   // g_velocity_vs
 #include "velocity_ps.h"   // g_velocity_ps
+#include "monitor_vs.h"    // g_monitor_vs
+#include "monitor_ps.h"    // g_monitor_ps
 
 namespace objmv {
 
@@ -29,6 +31,7 @@ static std::unordered_set<ID3D12RootSignature*> g_soRootSigs;   // the game's ro
 
 struct PsoRec {
     std::vector<uint8_t> vs;
+    ID3D12PipelineState* soPsoUv = nullptr; bool failedUv = false;   // stream-out variant that also captures a texcoord (the monitor)
     std::vector<D3D12_INPUT_ELEMENT_DESC> elems;
     std::vector<std::string> names;          // semantic name storage for elems
     D3D12_RASTERIZER_DESC raster = {};
@@ -52,7 +55,7 @@ static void dump_shader(const D3D12_SHADER_BYTECODE& bc, uint64_t hash, const ch
     FILE* f = fopen(path, "wb"); if (!f) return;
     fwrite(bc.pShaderBytecode, 1, bc.BytecodeLength, f); fclose(f);
 }
-struct SoShared { ID3D12PipelineState* pso = nullptr; bool failed = false; uint32_t users = 0; };
+struct SoShared { ID3D12PipelineState* pso = nullptr; bool failed = false; uint32_t users = 0; ID3D12PipelineState* psoUv = nullptr; bool failedUv = false; };
 static std::unordered_map<uint64_t, SoShared> g_soShared;   // bgfx re-creates pipeline objects continuously; the VS + layout repeat
 static uint64_t fnv(const void* data, size_t n, uint64_t h = 1469598103934665603ull) { const uint8_t* b = static_cast<const uint8_t*>(data); for (size_t i = 0; i < n; ++i) { h ^= b[i]; h *= 1099511628211ull; } return h; }
 
@@ -272,6 +275,75 @@ static ID3D12PipelineState* so_pso(ID3D12PipelineState* pso, const PsoRec** recO
     return out;
 }
 
+// The vertex shader's output signature (DXBC OSGN / OSG5 chunk): the TEXCOORD outputs, for the monitor capture.
+struct VsOutput { std::string name; uint32_t index; uint8_t mask; };
+static std::vector<VsOutput> vs_outputs(const std::vector<uint8_t>& vs)
+{
+    std::vector<VsOutput> out;
+    if (vs.size() < 32 || memcmp(vs.data(), "DXBC", 4) != 0) return out;
+    const uint32_t nchunks = *reinterpret_cast<const uint32_t*>(vs.data() + 28);
+    for (uint32_t c = 0; c < nchunks && 32 + 4 * c + 4 <= vs.size(); ++c) {
+        const uint32_t off = *reinterpret_cast<const uint32_t*>(vs.data() + 32 + 4 * c);
+        if (off + 8 > vs.size()) continue;
+        const char* fourcc = reinterpret_cast<const char*>(vs.data() + off);
+        const bool osgn = memcmp(fourcc, "OSGN", 4) == 0, osg5 = memcmp(fourcc, "OSG5", 4) == 0;
+        if (!osgn && !osg5) continue;
+        const uint8_t* data = vs.data() + off + 8; const uint32_t size = *reinterpret_cast<const uint32_t*>(vs.data() + off + 4);
+        if (off + 8 + size > vs.size() || size < 8) continue;
+        const uint32_t count = *reinterpret_cast<const uint32_t*>(data);
+        const uint32_t entry = osg5 ? 28 : 24, skip = osg5 ? 4 : 0;
+        for (uint32_t i = 0; i < count && 8 + (i + 1) * entry <= size; ++i) {
+            const uint8_t* e = data + 8 + i * entry + skip;
+            const uint32_t nameOff = *reinterpret_cast<const uint32_t*>(e), semIdx = *reinterpret_cast<const uint32_t*>(e + 4);
+            const uint8_t mask = e[20];
+            if (nameOff >= size) continue;
+            out.push_back({ std::string(reinterpret_cast<const char*>(data + nameOff)), semIdx, mask });
+        }
+        break;
+    }
+    return out;
+}
+// Stream-out variant that captures the clip position and one TEXCOORD output (32-byte stride), for the in-world
+// monitor: the first TEXCOORD with at least two components (the screen's texture coordinates on every mesh seen so far).
+static ID3D12PipelineState* so_pso_uv(ID3D12PipelineState* pso, const PsoRec** recOut)
+{
+    auto it = g_psos.find(pso);
+    if (it == g_psos.end()) { g_st.skipped++; return nullptr; }
+    PsoRec& p = it->second;
+    *recOut = &p;
+    if (p.soPsoUv || p.failedUv) return p.soPsoUv;
+    SoShared& sh = g_soShared[p.shareKey];
+    if (sh.psoUv) { p.soPsoUv = sh.psoUv; return sh.psoUv; }
+    if (sh.failedUv) { p.failedUv = true; return nullptr; }
+    p.failedUv = true; sh.failedUv = true;
+    if (!p.rootSig || !g_soRootSigs.count(p.rootSig)) return nullptr;
+    const std::vector<VsOutput> outs = vs_outputs(p.vs);
+    const VsOutput* tex = nullptr;
+    for (const VsOutput& o : outs) if (_stricmp(o.name.c_str(), "TEXCOORD") == 0 && (o.mask & 3) == 3 && (!tex || o.index < tex->index)) tex = &o;
+    { std::string sig; for (const VsOutput& o : outs) { char b[64]; snprintf(b, sizeof b, " %s%u(m%u)", o.name.c_str(), o.index, o.mask); sig += b; } snprintf(g_st.monitorInfo, sizeof g_st.monitorInfo, "vs %016llx outputs:%s -> %s%u", (unsigned long long)p.vsHash, sig.c_str(), tex ? "TEXCOORD" : "none", tex ? tex->index : 0u); LOG("objmv: monitor %s", g_st.monitorInfo); }
+    if (!tex) return nullptr;
+    uint8_t comps = 0; for (uint8_t m = tex->mask; m & 1; m >>= 1) comps++;
+    D3D12_SO_DECLARATION_ENTRY decl[2] = { { 0, "SV_Position", 0, 0, 4, 0 }, { 0, "TEXCOORD", tex->index, 0, comps, 0 } };
+    const UINT strides[1] = { 32 };
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC d = {};
+    d.pRootSignature = p.rootSig;
+    d.VS = { p.vs.data(), p.vs.size() };
+    d.StreamOutput = { decl, 2, strides, 1, D3D12_SO_NO_RASTERIZED_STREAM };
+    d.BlendState.RenderTarget[0].RenderTargetWriteMask = 0;
+    d.SampleMask = UINT_MAX;
+    d.RasterizerState = p.raster; d.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    d.DepthStencilState.DepthEnable = FALSE; d.DepthStencilState.StencilEnable = FALSE;
+    d.InputLayout = { p.elems.data(), (UINT)p.elems.size() };
+    d.IBStripCutValue = p.stripCut; d.PrimitiveTopologyType = p.topo;
+    d.NumRenderTargets = 0; d.DSVFormat = DXGI_FORMAT_UNKNOWN; d.SampleDesc = { 1, 0 }; d.NodeMask = p.nodeMask;
+    ID3D12PipelineState* out = nullptr;
+    t_inside = true; HRESULT hr = g_dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&out)); t_inside = false;
+    if (FAILED(hr) || !out) { LOG("objmv: monitor stream-out PSO (position + TEXCOORD%u x%u) failed 0x%08lX", tex->index, comps, (unsigned long)hr); return nullptr; }
+    p.soPsoUv = out; p.failedUv = false; sh.psoUv = out; sh.failedUv = false;
+    LOG("objmv: monitor stream-out PSO created (position + TEXCOORD%u, %u components)", tex->index, comps);
+    return out;
+}
+
 // ---- pass resources ---------------------------------------------------------------------------------------------------
 static const uint32_t kMaxCaptures = 2048;                     // per frame
 static const uint32_t kCtrStride = 16;                         // bytes between the per-draw buffer-filled-size counters
@@ -310,7 +382,8 @@ struct Occ { uint32_t off, bound, ctr; bool jit, ownVp, claimed; D3D12_VIEWPORT 
 struct Slot { uint32_t lastFrame[2] = { UINT32_MAX, UINT32_MAX }; std::vector<Occ> occ[2]; };   // per frame parity
 static std::unordered_map<uint64_t, Slot> g_slots;
 static uint32_t g_reordered = 0;   // pairings that were not the same occurrence index (diagnostics)
-struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; bool ownVp; D3D12_VIEWPORT vp; };
+struct VelEntry { uint64_t psoKey, psoKeyManual; uint32_t curOff, prevOff, curCtr, prevCtr, bound, flags; bool ownVp; D3D12_VIEWPORT vp; int view; };
+static ID3D12PipelineState* g_projPso = nullptr;   // the monitor projector pass (monitor_vs + monitor_ps, additive)
 static std::vector<VelEntry> g_vel;
 
 static bool create_buffer(ID3D12Resource** out, uint64_t size, D3D12_HEAP_TYPE heap, D3D12_RESOURCE_STATES state, D3D12_RESOURCE_FLAGS flags, const wchar_t* name)
@@ -347,7 +420,7 @@ static bool create_pass_resources()
 
     // velocity pass: root CBV (b0, per frame) + 8 root constants (b1, per draw) + SRV table (t0..t3)
     {
-        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 5, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };
+        D3D12_DESCRIPTOR_RANGE srvRange = { D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 6, 0, 0, D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND };   // t0..t3 buffers, t4 depth, t5 feed vectors
         D3D12_ROOT_PARAMETER params[3] = {};
         params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; params[0].Descriptor = { 0, 0 }; params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS; params[1].Constants = { 1, 0, 8 }; params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -360,12 +433,12 @@ static bool create_pass_resources()
         if (FAILED(hr)) return false;
     }
     {
-        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 10, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };
+        D3D12_DESCRIPTOR_HEAP_DESC hd = { D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 18, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 };   // parity p at p*6, the feed phase's range at 12
         HRESULT hr = g_dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&g_heap));
         if (FAILED(hr)) { LOG("objmv: descriptor heap failed 0x%08lX", (unsigned long)hr); return false; }
         const UINT inc = g_dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
         for (int p = 0; p < 2; ++p) {
-            D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(p) * 5 * inc;
+            D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_heap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(p) * 6 * inc;
             for (int i = 0; i < 2; ++i) {   // [0] cur positions, [1] prev positions
                 D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_UNKNOWN; srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                 srv.Buffer.FirstElement = 0; srv.Buffer.NumElements = (UINT)(kSoBytes / 16); srv.Buffer.StructureByteStride = 16;
@@ -437,7 +510,8 @@ void shutdown()
 {
     g_st.ready = false;
     g_psos.clear();
-    for (auto& kv : g_soShared) if (kv.second.pso) kv.second.pso->Release();
+    for (auto& kv : g_soShared) { if (kv.second.pso) kv.second.pso->Release(); if (kv.second.psoUv) kv.second.psoUv->Release(); }
+    if (g_projPso) { g_projPso->Release(); g_projPso = nullptr; }
     g_soShared.clear();
     g_soRootSigs.clear();
     for (VelPso& v : g_velPsos) if (v.pso) v.pso->Release();
@@ -481,7 +555,7 @@ static void read_timing(uint32_t frame)
 void new_frame(uint32_t frame)
 {
     g_st.capturedLast = g_st.captured; g_st.withPrevLast = g_st.withPrev; g_st.skippedLast = g_st.skipped; g_st.overflowLast = g_st.overflow; g_st.reorderedLast = g_reordered;
-    g_st.captured = g_st.withPrev = g_st.skipped = g_st.overflow = 0; g_reordered = 0;
+    g_st.captured = g_st.withPrev = g_st.skipped = g_st.overflow = 0; g_reordered = 0; g_st.feedCaptured = g_st.monitorCaptured = 0;
     g_accCpu += g_cpuThisFrame; g_cpuThisFrame = 0;
     read_timing(frame);
     const ULONGLONG t = GetTickCount64();
@@ -526,7 +600,7 @@ static void begin_captures(ID3D12GraphicsCommandList* cl)
     transition(cl, g_soBuf[p], &g_soState[p], D3D12_RESOURCE_STATE_STREAM_OUT);
 }
 
-bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN)
+bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN, int view)
 {
     if (!g_st.ready || !gamePso) return false;
     const double t0 = cpu_now_ms();
@@ -537,10 +611,11 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
     const uint64_t bound64 = uint64_t(verts) * (da.instances ? da.instances : 1);
     if (bound64 == 0 || bound64 > 0xFFFFFFFFull) { g_st.skipped++; return false; }
     const uint32_t bound = (uint32_t)bound64;
+    const bool monitor = view == 3;
     ID3D12PipelineState* so; const PsoRec* rec = nullptr;
-    { std::lock_guard<std::mutex> lock(g_mutex); so = so_pso(gamePso, &rec); }
+    { std::lock_guard<std::mutex> lock(g_mutex); so = monitor ? so_pso_uv(gamePso, &rec) : so_pso(gamePso, &rec); }
     if (!so || !rec) return false;
-    const uint64_t bytes = uint64_t(bound) * 16;
+    const uint64_t bytes = uint64_t(bound) * (monitor ? 32 : 16);
     if (g_soBytesThisFrame + bytes > kSoBytes) { g_st.overflow++; return false; }
     if (g_captures >= kMaxCaptures) { g_st.skipped++; return false; }
     if (!g_frameStarted) { begin_captures(cl); g_frameStarted = true; }
@@ -549,6 +624,24 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
     const uint32_t off = (uint32_t)(g_soBytesThisFrame / 16);
     g_soBytesThisFrame += bytes;
 
+    if (monitor) {   // no pairing: the projector pass needs this frame's positions and texture coordinates only
+        VelEntry e = { 0, 0, off, off, idx, idx, bound, 0, ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{}, 3 };
+        g_vel.push_back(e); g_st.monitorCaptured++;
+        if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 4 + 2 * idx);
+        cl->SetPipelineState(so);
+        D3D12_STREAM_OUTPUT_BUFFER_VIEW v = { g_soBuf[p]->GetGPUVirtualAddress() + uint64_t(off) * 16, bytes, g_ctr[p]->GetGPUVirtualAddress() + uint64_t(idx) * kCtrStride };
+        cl->SOSetTargets(0, 1, &v);
+        if (da.indexed) cl->DrawIndexedInstanced(da.count, da.instances, da.first, da.vertexOffset, da.firstInstance);
+        else cl->DrawInstanced(da.count, da.instances, da.first, da.firstInstance);
+        D3D12_STREAM_OUTPUT_BUFFER_VIEW none = { 0, 0, 0 };
+        cl->SOSetTargets(0, 1, &none);
+        cl->SetPipelineState(gamePso);
+        if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 5 + 2 * idx);
+        g_st.captured++;
+        g_cpuThisFrame += cpu_now_ms() - t0;
+        return true;
+    }
+    if (view == 2) g_st.feedCaptured++;
     Slot& s = g_slots[key];
     if (s.lastFrame[p] != g_curFrame) { s.occ[p].clear(); s.lastFrame[p] = g_curFrame; }
     // Diagnostics: a geometry drawn more than once a frame, and a change in how often, is where a wrong pairing comes from
@@ -573,7 +666,7 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
         if (best) {
             best->claimed = true;
             if (bestI != s.occ[p].size()) g_reordered++;
-            VelEntry e = { velKey, velKeyM, off, best->off, idx, best->ctr, bound, (jittered ? 1u : 0u) | (best->jit ? 2u : 0u), ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{} };
+            VelEntry e = { velKey, velKeyM, off, best->off, idx, best->ctr, bound, (jittered ? 1u : 0u) | (best->jit ? 2u : 0u), ownVp != nullptr, ownVp ? *ownVp : D3D12_VIEWPORT{}, view };
             g_vel.push_back(e); g_st.withPrev++;
         }
     }
@@ -594,8 +687,29 @@ bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* g
     return true;
 }
 
+static ID3D12PipelineState* proj_pso()
+{
+    if (g_projPso) return g_projPso;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC d = {};
+    d.pRootSignature = g_velRs;
+    d.VS = { g_monitor_vs, sizeof(g_monitor_vs) }; d.PS = { g_monitor_ps, sizeof(g_monitor_ps) };
+    D3D12_RENDER_TARGET_BLEND_DESC& b = d.BlendState.RenderTarget[0];
+    b.BlendEnable = TRUE; b.SrcBlend = D3D12_BLEND_ONE; b.DestBlend = D3D12_BLEND_ONE; b.BlendOp = D3D12_BLEND_OP_ADD; b.SrcBlendAlpha = D3D12_BLEND_ONE; b.DestBlendAlpha = D3D12_BLEND_ZERO; b.BlendOpAlpha = D3D12_BLEND_OP_ADD; b.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    d.SampleMask = UINT_MAX;
+    d.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID; d.RasterizerState.CullMode = D3D12_CULL_MODE_NONE; d.RasterizerState.DepthClipEnable = TRUE;
+    d.DepthStencilState.DepthEnable = FALSE;
+    d.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    d.NumRenderTargets = 1; d.RTVFormats[0] = DXGI_FORMAT_R16G16_FLOAT; d.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    d.SampleDesc = { 1, 0 };
+    t_inside = true; HRESULT hr = g_dev->CreateGraphicsPipelineState(&d, IID_PPV_ARGS(&g_projPso)); t_inside = false;
+    if (FAILED(hr)) { LOG("objmv: monitor projector PSO failed 0x%08lX", (unsigned long)hr); g_projPso = nullptr; }
+    return g_projPso;
+}
+static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+
 void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& sceneVp,
-              const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth)
+              const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth,
+              ID3D12Resource* feedDepth, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv, ID3D12Resource* feedMv, const float* feedRect, bool flipFeedV)
 {
     if (!g_st.ready || !g_frameStarted) return;
     const double t0 = cpu_now_ms();
@@ -613,11 +727,17 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
         cl->SetDescriptorHeaps(1, heaps);
         cl->SetGraphicsRootSignature(g_velRs);
         cl->SetGraphicsRootConstantBufferView(0, g_velCb->GetGPUVirtualAddress() + cbSlot * 256);
-        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_heap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(p) * 5 * inc;
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu = g_heap->GetGPUDescriptorHandleForHeapStart(); gpu.ptr += UINT64(p) * 6 * inc;
+        D3D12_CPU_DESCRIPTOR_HANDLE pcpu = g_heap->GetCPUDescriptorHandleForHeapStart(); pcpu.ptr += SIZE_T(p) * 6 * inc;
         if (manualDepth) {   // [4] full-grid depth for the manual test
-            D3D12_CPU_DESCRIPTOR_HANDLE dcpu = g_heap->GetCPUDescriptorHandleForHeapStart(); dcpu.ptr += (SIZE_T(p) * 5 + 4) * inc;
+            D3D12_CPU_DESCRIPTOR_HANDLE dcpu = pcpu; dcpu.ptr += 4 * inc;
             D3D12_SHADER_RESOURCE_VIEW_DESC dsrv = {}; dsrv.Format = DXGI_FORMAT_R32_FLOAT; dsrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; dsrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dsrv.Texture2D.MipLevels = 1;
             g_dev->CreateShaderResourceView(manualDepth, &dsrv, dcpu);
+        }
+        if (feedMv) {   // [5] the feed's vectors for the projector pass
+            D3D12_CPU_DESCRIPTOR_HANDLE fcpu = pcpu; fcpu.ptr += 5 * inc;
+            D3D12_SHADER_RESOURCE_VIEW_DESC fsrv = {}; fsrv.Format = DXGI_FORMAT_R16G16_FLOAT; fsrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; fsrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; fsrv.Texture2D.MipLevels = 1;
+            g_dev->CreateShaderResourceView(feedMv, &fsrv, fcpu);
         }
         cl->SetGraphicsRootDescriptorTable(2, gpu);
         if (manualDepth) cl->OMSetRenderTargets(1, &mvRtv, FALSE, nullptr); else cl->OMSetRenderTargets(1, &mvRtv, FALSE, &sceneDsv);
@@ -628,6 +748,7 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
         std::sort(g_vel.begin(), g_vel.end(), [manual](const VelEntry& a, const VelEntry& b) { return (manual ? a.psoKeyManual : a.psoKey) < (manual ? b.psoKeyManual : b.psoKey); });
         uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr; bool curOwn = false; D3D12_VIEWPORT curVp = vp;
         for (const VelEntry& e : g_vel) {
+            if (e.view >= 2) continue;   // the caller feed and the monitor: below
             // objects drawn into their own 3D window use that viewport (their clip positions map to it)
             if (e.ownVp != curOwn || (e.ownVp && memcmp(&e.vp, &curVp, sizeof(curVp)) != 0)) { curOwn = e.ownVp; curVp = e.ownVp ? e.vp : vp; cl->RSSetViewports(1, &curVp); }
             const uint64_t want = manual ? e.psoKeyManual : e.psoKey;
@@ -637,6 +758,49 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
             const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags | (manual ? 4u : 0u) | (e.ownVp ? 8u : 0u), vw, vh, 0 };
             cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
             cl->DrawInstanced(e.bound, 1, 0, 0);
+        }
+        // The video call's caller feed: its objects' vectors into the feed-vector texture, in the feed's rectangle,
+        // tested against the feed's own depth copy (t4 of a second descriptor range).
+        bool anyFeed = false, anyMon = false; for (const VelEntry& e : g_vel) { if (e.view == 2) anyFeed = true; if (e.view == 3) anyMon = true; }
+        if (feedMvRtv.ptr && feedMv && feedRect && anyFeed) {
+            D3D12_CPU_DESCRIPTOR_HANDLE fr = g_heap->GetCPUDescriptorHandleForHeapStart(); fr.ptr += SIZE_T(12) * inc;
+            g_dev->CopyDescriptorsSimple(4, fr, pcpu, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            if (feedDepth) { D3D12_CPU_DESCRIPTOR_HANDLE dcpu = fr; dcpu.ptr += 4 * inc; D3D12_SHADER_RESOURCE_VIEW_DESC dsrv = {}; dsrv.Format = DXGI_FORMAT_R32_FLOAT; dsrv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; dsrv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; dsrv.Texture2D.MipLevels = 1; g_dev->CreateShaderResourceView(feedDepth, &dsrv, dcpu); }
+            else { D3D12_CPU_DESCRIPTOR_HANDLE a = fr, b2 = pcpu; a.ptr += 4 * inc; b2.ptr += 4 * inc; g_dev->CopyDescriptorsSimple(1, a, b2, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); }
+            { D3D12_CPU_DESCRIPTOR_HANDLE a = fr, b2 = pcpu; a.ptr += 5 * inc; b2.ptr += 5 * inc; g_dev->CopyDescriptorsSimple(1, a, b2, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); }
+            D3D12_GPU_DESCRIPTOR_HANDLE fgpu = g_heap->GetGPUDescriptorHandleForHeapStart(); fgpu.ptr += UINT64(12) * inc;
+            cl->SetGraphicsRootDescriptorTable(2, fgpu);
+            cl->OMSetRenderTargets(1, &feedMvRtv, FALSE, nullptr);
+            boundKey = ~0ull; cur = nullptr;
+            for (const VelEntry& e : g_vel) {
+                if (e.view != 2) continue;
+                if (memcmp(&e.vp, &curVp, sizeof(curVp)) != 0) { curVp = e.vp; cl->RSSetViewports(1, &curVp); }
+                if (e.psoKeyManual != boundKey) { boundKey = e.psoKeyManual; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == boundKey) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
+                if (!cur) continue;
+                uint32_t vw = 0, vh = 0; memcpy(&vw, &e.vp.Width, 4); memcpy(&vh, &e.vp.Height, 4);
+                const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags | (feedDepth ? 4u : 0u) | 8u, vw, vh, 0 };
+                cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
+                cl->DrawInstanced(e.bound, 1, 0, 0);
+            }
+            // the monitor reads the feed's vectors now
+            D3D12_RESOURCE_BARRIER bar = {}; bar.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION; bar.Transition = { feedMv, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+            cl->ResourceBarrier(1, &bar);
+            cl->SetGraphicsRootDescriptorTable(2, gpu);
+            cl->OMSetRenderTargets(1, &mvRtv, FALSE, nullptr);
+            cl->RSSetViewports(1, &vp); curVp = vp; curOwn = false;
+            // The monitor: the feed's motion projected through the monitor's texture mapping, added to the surface's own vector
+            if (anyMon && proj_pso()) {
+                cl->SetPipelineState(g_projPso);
+                for (const VelEntry& e : g_vel) {
+                    if (e.view != 3) continue;
+                    const uint32_t consts[8] = { e.curOff, f2u(feedRect[2]), e.curCtr, f2u(feedRect[3]), (manual ? 4u : 0u) | (flipFeedV ? 32u : 0u), f2u(feedRect[0]), f2u(feedRect[1]), 0 };
+                    cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
+                    cl->DrawInstanced(e.bound, 1, 0, 0);
+                    g_st.monitorDrawn++;
+                }
+            }
+            bar.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE; bar.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            cl->ResourceBarrier(1, &bar);
         }
     }
     if (g_queries) cl->EndQuery(g_queries, D3D12_QUERY_TYPE_TIMESTAMP, 3);

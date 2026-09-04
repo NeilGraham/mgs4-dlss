@@ -36,6 +36,8 @@ set FXC="%MGS4_FXC%"
 %FXC% /nologo /T vs_5_0 /E main /O3 /Fh ..\build\velocity_vs.h /Vn g_velocity_vs src\velocity_vs.hlsl || exit /b 1
 
 %FXC% /nologo /T ps_5_0 /E main /O3 /Fh ..\build\velocity_ps.h /Vn g_velocity_ps src\velocity_ps.hlsl || exit /b 1
+%FXC% /nologo /T vs_5_0 /E main /O3 /Fh ..\build\monitor_vs.h /Vn g_monitor_vs src\monitor_vs.hlsl || exit /b 1
+%FXC% /nologo /T ps_5_0 /E main /O3 /Fh ..\build\monitor_ps.h /Vn g_monitor_ps src\monitor_ps.hlsl || exit /b 1
 
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\resample_cs.h /Vn g_resample_cs src\resample_cs.hlsl || exit /b 1
 %FXC% /nologo /T cs_5_0 /E main /O3 /Fh ..\build\depth_stretch_cs.h /Vn g_depth_stretch_cs src\depth_stretch_cs.hlsl || exit /b 1

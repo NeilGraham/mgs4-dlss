@@ -27,6 +27,8 @@ namespace objmv {
         uint32_t capturedLast = 0, withPrevLast = 0, skippedLast = 0, overflowLast = 0;
         uint32_t reorderedLast = 0;   // last frame: pairings with a previous occurrence other than the same-index one (instances of one mesh changed draw order)
         uint32_t slotsUsed = 0, velocityFrames = 0;
+        uint32_t feedCaptured = 0, monitorCaptured = 0, monitorDrawn = 0;   // this frame's caller-feed / monitor captures, monitor projector draws (total)
+        char monitorInfo[160] = "";                                          // the monitor vertex shader's texcoord choice
         // timing, averaged over the last second: GPU ms of the stream-out draws, of the velocity pass, of the whole
         // scene (first scene draw -> after DLSS), and CPU ms spent in capture()/velocity()
         float soGpuMs = 0, velGpuMs = 0, frameGpuMs = 0, cpuMs = 0;
@@ -50,7 +52,11 @@ namespace objmv {
     // model); the velocity pass then rasterizes this object into that rectangle instead of the pass viewport.
     // key identifies the geometry only (several instances of one mesh share it); anchor[anchorN] = the head of the
     // draw's vertex constants, the per-instance signature used to pair this occurrence with last frame's same instance.
-    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN);
+    // view: 0 = the main view (rasterized with the pass viewport), 1 = a 3D window (ownVp = its rectangle in the image),
+    // 2 = the video call's caller feed (ownVp = the feed's rectangle; rasterized into the feed-vector texture with the
+    // feed's own depth), 3 = the in-world monitor showing that feed (a static draw captured with its texture
+    // coordinates; the projector pass maps the feed's vectors through it onto the screen).
+    bool capture(ID3D12GraphicsCommandList* cl, uint64_t key, ID3D12PipelineState* gamePso, uint32_t topology, const DrawArgs& da, bool jittered, const D3D12_VIEWPORT* ownVp, const float* anchor, uint32_t anchorN, int view = 0);
 
     // At the injection point after the camera motion vectors were written: rasterize every captured object that was
     // also captured last frame into mvRtv (R16G16_FLOAT, pixels, prev - cur), depth-tested (reversed-Z, greater-equal)
@@ -59,8 +65,12 @@ namespace objmv {
     // offsets the add-on added to the clip matrices this frame and last frame (removed from the captured positions);
     // prevSize = last frame's scene viewport size (dynamic resolution) so previous positions are taken in that scale.
     // manualDepth: a full-size R32 depth (pixel-shader readable) to depth-test against instead of sceneDsv (which may be 0 then).
+    // feedDepth / feedMvRtv / feedMv / feedRect: the video call's caller feed - its depth copy (may be null: no depth
+    // test), the R16G16 target its objects' vectors are rasterized into (in RENDER_TARGET state; returned to it) and the
+    // feed's rectangle in that texture. The monitor entries then read feedMv and add the projected motion to mvRtv.
     void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& vp,
-                  const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth);
+                  const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth,
+                  ID3D12Resource* feedDepth = nullptr, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv = {}, ID3D12Resource* feedMv = nullptr, const float* feedRect = nullptr, bool flipFeedV = false);
     bool has_captures();
     // Plausibility limits of the velocity pass (velocity_ps.hlsl): a fragment whose vector exceeds maxPixels, or whose
     // vector changes by more than maxGradient pixels per screen pixel across the surface, is discarded (0 = no limit).
