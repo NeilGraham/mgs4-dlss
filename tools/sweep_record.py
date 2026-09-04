@@ -69,7 +69,7 @@ ADDON_LOG = os.path.join(paths.GAME_DIR, "logs", "mgs4_dlss.log")
 LAUNCH_LOG = os.path.join(paths.GAME_DIR, "logs", "launcher.log")
 DUMPS = os.path.join(paths.GAME_DIR, "crash_dumps")
 FIELDS = ["id", "result", "seconds", "scene_offset", "scene_at", "video", "state", "draws", "hud", "kind_live",
-          "demo", "demo_late", "env", "movie", "boss", "assets", "detail"]
+          "demo", "demo_late", "env", "movie", "boss", "detail"]
 
 # The game's window does not cover the screen the instant the add-on says "swapchain created" - the desktop is
 # still there for about a second. Every recording therefore loses at least this much off the front, whatever the
@@ -140,7 +140,7 @@ def record_menu_entry(cl, source, sid, cap):
         final = sid + ".mkv"
     return dict(id=sid, result="boot", seconds=int(time.time() - t0), scene_offset=0.0, scene_at=0.0,
                 video=final, state="", draws=-1, hud=-1, kind_live="start", demo="", demo_late="", env="",
-                movie="", boss="", assets="", detail="menu entry, recorded %.0fs" % cap)
+                movie="", boss="", detail="menu entry, recorded %.0fs" % cap)
 
 
 def game_up():
@@ -257,7 +257,7 @@ def assets_of(log_text):
         if base not in other:
             other.append(base)
     return dict(demo="+".join(demo), demo_late="+".join(late), env="+".join(env), movie="+".join(movie),
-                boss="+".join(boss), assets=";".join(other))
+                boss="+".join(boss))
 
 
 def recompute(out):
@@ -615,7 +615,7 @@ def main():
 
         # what the engine thought it was drawing - the video/scene discriminator - and what it loaded
         state, draws, hud = "", -1, -1
-        fp = dict(demo="", demo_late="", env="", movie="", boss="", assets="")
+        fp = dict(demo="", demo_late="", env="", movie="", boss="")
         if os.path.exists(ADDON_LOG):
             shutil.copyfile(ADDON_LOG, os.path.join(SHOTS, sid + ".addon.log"))
             text = open(ADDON_LOG, errors="replace").read()

@@ -72,7 +72,7 @@ def lit(sid, kinds):
     """Was anything on screen? A video shows a picture; a genuinely broken id shows black. 0.02 mean luma sits
     well below any real frame in the corpus (the darkest measures 0.038) and well above a black screen."""
     f = kinds.get(sid)
-    return bool(f) and f.get("features", {}).get("dark", 0.0) > 0.02
+    return bool(f) and f.get("dark", f.get("features", {}).get("dark", 0.0)) > 0.02
 
 
 def measured_kind(sid, live, state, kinds, hud, demos, envs, bosses):
@@ -261,10 +261,9 @@ def main():
             e["kind"] = "broken"
             e["hidden"] = True
             e.setdefault("description",
-                         "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+                         "Crashes in the game's own loader on this id; nothing to show."
                          if result == "crash" else
-                         "Measured by tools\\sweep_record.py: boots but never reaches a 3D frame, and the "
-                         "screen stays black.")
+                         "Boots, but never draws a frame: the screen stays black.")
         if not e:
             scenes.pop(sid, None)
 

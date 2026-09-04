@@ -1,5 +1,5 @@
-// Everything that can be launched: tools/scenes.csv (the stage table) with names from tools/labels.json and the
-// corrections in tools/scene_info.json. The stage table says a scene exists; only booting it says what it is, so
+// Everything that can be launched: tools/scenes.csv (the stage table) with the names, kinds and story order the
+// sweep measured and wrote to tools/scene_info.json. The stage table says a scene exists; only booting it says what it is, so
 // scene_info.json is where the truth about each one lives - this only assembles it.
 using System;
 using System.Collections.Generic;
@@ -35,7 +35,7 @@ namespace Mgs4Launcher
         // Read through Paths.DataText: the tools folder when it is there, the copy inside the exe when it is not.
         // Without the fallback a launcher moved out of its checkout came up knowing two entries instead of 414,
         // and said nothing about why.
-        const string ScenesCsv = "scenes.csv", LabelsJson = "labels.json", SceneInfoJson = "scene_info.json";
+        const string ScenesCsv = "scenes.csv", SceneInfoJson = "scene_info.json";
 
         static List<Scene> _all;
         public static List<string> ActOrder = new List<string>();
@@ -78,16 +78,6 @@ namespace Mgs4Launcher
         {
             if (_all != null) return _all;
             var ser = new JavaScriptSerializer { MaxJsonLength = 32 * 1024 * 1024 };
-
-            var labels = new Dictionary<string, string>();
-            string labelsText = Paths.DataText(LabelsJson);
-            if (labelsText != null)
-            {
-                var raw = ser.DeserializeObject(labelsText) as Dictionary<string, object>;
-                if (raw != null)
-                    foreach (var kv in raw)
-                        if (kv.Value != null) labels[kv.Key] = kv.Value.ToString();
-            }
 
             var info = new Dictionary<string, Dictionary<string, object>>();
             string infoText = Paths.DataText(SceneInfoJson);
@@ -134,7 +124,7 @@ namespace Mgs4Launcher
             // Which ids are broken is measured, not guessed. It used to be one regex, "_\d+$" - every numbered
             // section - and that was wrong in both directions: s02a20l_1, _9 and _11 boot fine while s01a00l_1
             // crashes, and nothing readable separates them (see docs/launcher.md). Every id is now booted once by
-            // tools\sweep_stages.ps1 and the verdict lands in scene_info.json as kind "broken" + hidden, which the
+            // tools\sweep_record.py and the verdict lands in scene_info.json as kind "broken" + hidden, which the
             // override loop below applies. An id with no entry there has not been measured, and is shown.
             var aliasOf = new Dictionary<string, string>();
 
@@ -158,10 +148,10 @@ namespace Mgs4Launcher
                     {
                         Id = id,
                         // "stage-entry" is not a category any more: what a bare id shows is whatever the sweep
-                        // measured for it (tools\sweep_stages.ps1 -> scene_info.json), and cutscene is the default
+                        // measured for it (tools\sweep_record.py -> apply_sweep.py -> scene_info.json), and cutscene is the default
                         // until it has been measured - a scene that is not a codec call or gameplay is a cutscene.
                         Kind = iKind >= 0 && cells.Length > iKind ? (cells[iKind] == "stage-entry" ? "cutscene" : cells[iKind]) : "",
-                        Name = FormatSceneName(labels.ContainsKey(id) ? labels[id] : null),
+                        Name = "",                // scene_info.json names it below; the id stands in until it does
                         ActKey = ActKeyFor(id),
                         Rank = 0,
                         Description = "",
@@ -230,7 +220,7 @@ namespace Mgs4Launcher
                 if (double.IsNaN(e.Order)) e.Order = e.SortCat == 0 ? 0 : (e.SortCat == 1 ? 500 : 1000000);
             }
 
-            // Anything renamed in the Play tab, laid over the labels: the file says what a scene is called until
+            // Anything renamed in the Play tab, laid over the catalog: the file says what a scene is called until
             // someone here says otherwise, and what the file said is kept so Reset can put it back.
             Dictionary<string, Prefs.SceneEdit> edits;
             try { edits = Prefs.SceneEdits(); } catch { edits = new Dictionary<string, Prefs.SceneEdit>(); }

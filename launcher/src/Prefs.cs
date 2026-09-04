@@ -58,7 +58,7 @@ namespace Mgs4Launcher
 
         // A name and a description someone has typed over the catalog's own. Either half can be unset, which is
         // why this is not just two strings in a dictionary: an edited description with the file's name left alone
-        // has to survive a rebuild of labels.json.
+        // has to survive the catalog being re-measured and re-named.
         public class SceneEdit { public string Name, Description; }
 
         public static Dictionary<string, SceneEdit> SceneEdits()

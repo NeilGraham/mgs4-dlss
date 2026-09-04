@@ -4,3 +4,9 @@
 *.h text
 *.md text
 *.ini text
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.jpg binary
+*.zip binary
+*.lib binary
+*.png binary

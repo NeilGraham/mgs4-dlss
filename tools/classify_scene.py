@@ -1,7 +1,7 @@
 """Decides, from one frame, whether a stage is a Codec call, a cutscene or gameplay.
 
-The judgement is made here, from pixels, not by eye - the sweep grabs a frame ~20 s after the first 3D frame
-(tools\\sweep_stages.ps1) and this reads it.
+The judgement is made here, from pixels, not by eye - the sweep (tools/sweep_record.py) keeps stills at ~5 s, ~18 s
+and the last frame of every recording, and this reads them.
 
   python tools/classify_scene.py <dir-or-file> [...]     classify, print id,kind,score
   python tools/classify_scene.py --features <dir>        dump every feature as CSV, for tuning the cut-offs
@@ -153,7 +153,8 @@ def main():
         kind, score = classify(f)
         sid = scene_id(p)
         rows.append(dict(id=sid, kind=kind, score=round(score, 3), **f))
-        result[sid] = {"kind": kind, "score": round(score, 3), "features": f}
+        # kind and score, plus `dark` for apply_sweep's lit-or-black test; --features prints the rest as CSV
+        result[sid] = {"kind": kind, "score": round(score, 3), "dark": f["dark"]}
 
     if mode == "features":
         wr = csv.DictWriter(sys.stdout, fieldnames=list(rows[0].keys()), lineterminator="\n")

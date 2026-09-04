@@ -1,6 +1,6 @@
 // One frame per scene, shown as the banner on its row and beside the description when it is picked.
 //
-// The set rides inside the exe as a single zip resource (tools\scene_thumbs.zip, built by tools\make_thumbs.py)
+// The set rides inside the exe as a single zip resource (tools\thumbs\*.jpg from tools\make_thumbs.py, zipped by build.ps1)
 // rather than as a few hundred separate resources: csc names a resource after its file, so a directory of them
 // would be a directory of /resource: switches, and the manifest lookup below would have to guess at names.
 //

@@ -242,7 +242,7 @@
     "s00a00l_0": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s00a10l": {
       "kind": "cutscene",
@@ -313,55 +313,55 @@
     "s01a00l_00": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Ground Zero"
     },
     "s01a00l_D": {
@@ -393,55 +393,55 @@
     "s01a10l_0": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Red Zone NW Sector"
     },
     "s01a10l_1": {
@@ -474,43 +474,43 @@
     "s01a20l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Militia Safe House"
     },
     "s01a20l_D": {
@@ -532,55 +532,55 @@
     "s01a30l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_09": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Urban Ruins"
     },
     "s01a30l_1": {
@@ -613,37 +613,37 @@
     "s01a40l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace"
     },
     "s01a40l_1": {
@@ -684,43 +684,43 @@
     "s01a50l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a50l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Advent Palace Garage"
     },
     "s01a55l": {
@@ -744,7 +744,7 @@
     "s01a57l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Middle East, Millennium Park"
     },
     "s01a60l": {
@@ -775,25 +775,25 @@
     "s02a10l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Cove Valley Village"
     },
     "s02a10l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Cove Valley Village"
     },
     "s02a10l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Cove Valley Village"
     },
     "s02a10l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Cove Valley Village"
     },
     "s02a10l_1": {
@@ -832,31 +832,31 @@
     "s02a20l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Power Station"
     },
     "s02a20l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Power Station"
     },
     "s02a20l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Power Station"
     },
     "s02a20l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Power Station"
     },
     "s02a20l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Power Station"
     },
     "s02a20l_1": {
@@ -955,49 +955,49 @@
     "s02a30l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_09": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Confinement Facility"
     },
     "s02a30l_1": {
@@ -1079,31 +1079,31 @@
     "s02a40l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Vista Mansion"
     },
     "s02a40l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Vista Mansion"
     },
     "s02a40l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Vista Mansion"
     },
     "s02a40l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Vista Mansion"
     },
     "s02a40l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Vista Mansion"
     },
     "s02a40l_1": {
@@ -1136,13 +1136,13 @@
     "s02a50l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Research Lab"
     },
     "s02a50l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Research Lab"
     },
     "s02a50l_1": {
@@ -1228,49 +1228,49 @@
     "s02a60l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: boots but never reaches a 3D frame.",
+      "description": "Boots, but never draws a frame: the screen stays black.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_09": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_1": {
@@ -1279,19 +1279,19 @@
     "s02a60l_10": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_11": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_12": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Mountain Trail"
     },
     "s02a60l_2": {
@@ -1321,7 +1321,7 @@
     "s02a70l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America"
     },
     "s02a70l_D": {
@@ -1362,7 +1362,7 @@
     "s02a80l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, High Woodlands Highway"
     },
     "s02a85l": {
@@ -1386,13 +1386,13 @@
     "s02a90l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Marketplace"
     },
     "s02a90l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "South America, Marketplace"
     },
     "s02a95l": {
@@ -1429,55 +1429,55 @@
     "s03a10l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_09": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_1": {
@@ -1486,19 +1486,19 @@
     "s03a10l_10": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_11": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_12": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Midtown S Sector"
     },
     "s03a10l_2": {
@@ -1681,19 +1681,19 @@
     "s03a35l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Church Courtyard"
     },
     "s03a35l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Church Courtyard"
     },
     "s03a35l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Church Courtyard"
     },
     "s03a50l": {
@@ -1733,19 +1733,19 @@
     "s03a70l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Echo's Beacon"
     },
     "s03a70l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Echo's Beacon"
     },
     "s03a70l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Eastern Europe, Echo's Beacon"
     },
     "s03a70l_1": {
@@ -1856,31 +1856,31 @@
     "s04a10l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield"
     },
     "s04a10l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_stages.ps1: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield"
     },
     "s04a10l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield"
     },
     "s04a10l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield"
     },
     "s04a10l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield"
     },
     "s04a10l_1": {
@@ -1999,43 +1999,43 @@
     "s04a20l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_06": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_07": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Nuclear Warhead Storage Bldg 1f"
     },
     "s04a20l_1": {
@@ -2098,37 +2098,37 @@
     "s04a30l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_08": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Snowfield & Communications Tower"
     },
     "s04a30l_1": {
@@ -2200,43 +2200,43 @@
     "s04a40l": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_05": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a40l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Blast Furnace"
     },
     "s04a50l": {
@@ -2250,13 +2250,13 @@
     "s04a50l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Underground Base"
     },
     "s04a50l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Underground Base"
     },
     "s04a50l_D": {
@@ -2278,7 +2278,7 @@
     "s04a60l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Underground Supply Tunnel"
     },
     "s04a60l_2": {
@@ -2324,19 +2324,19 @@
     "s04a65l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Surface Tunnel"
     },
     "s04a65l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Surface Tunnel"
     },
     "s04a65l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Surface Tunnel"
     },
     "s04a68l": {
@@ -2357,19 +2357,19 @@
     "s04a70l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Port Area"
     },
     "s04a70l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Port Area"
     },
     "s04a70l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Shadow Moses, Port Area"
     },
     "s04a75l": {
@@ -2404,31 +2404,31 @@
     "s05a10l_00": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s05a10l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s05a10l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s05a10l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s05a10l_04": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s04a60l_1": {
@@ -2443,7 +2443,7 @@
     "s05a10l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Ship Bow"
     },
     "s05a10l_D": {
@@ -2465,19 +2465,19 @@
     "s05a20l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Command Center"
     },
     "s05a20l_02": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Command Center"
     },
     "s05a20l_03": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Command Center"
     },
     "s05a20l_1": {
@@ -2526,7 +2526,7 @@
     "s05a20l_7": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven, Command Center"
     },
     "s05a20l_D1": {
@@ -2604,13 +2604,13 @@
     "s05a30l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven"
     },
     "s05a30l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven"
     },
     "s05a40l": {
@@ -2624,7 +2624,7 @@
     "s05a40l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven"
     },
     "s05a40l_D": {
@@ -2655,13 +2655,13 @@
     "s05a50l_01": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven"
     },
     "s05a50l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id.",
+      "description": "Crashes in the game's own loader on this id; nothing to show.",
       "location": "Outer Haven"
     },
     "s05a50l_D": {
@@ -2691,37 +2691,37 @@
     "s10a10l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s10a20l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s10a30l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s10a40l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s10a40l_2": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s20a00l_1": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     },
     "s99a99l_0": {
       "kind": "broken",
       "hidden": true,
-      "description": "Measured by tools\\sweep_record.py: the game crashes in its own loader on this id."
+      "description": "Crashes in the game's own loader on this id; nothing to show."
     }
   }
 }

@@ -119,14 +119,12 @@ namespace Mgs4Launcher
             _since.Restart();
 
             double step = Notch(sv), px;
-            int branch;
             if (Math.Abs(e.Delta) < 120)
             {
                 // Under a full notch: a precision touchpad on this machine, saying how far the finger went.
                 // Believe the distance, and catch up with it far sooner so the page stays under the finger.
                 px = e.Delta / 120.0 * step;
                 _tau = TauFine;
-                branch = 0;
             }
             else
             {
@@ -134,9 +132,7 @@ namespace Mgs4Launcher
                 // the same push delivered fast and delivered slowly asks for the same distance.
                 px = e.Delta / 120.0 * step;
                 _tau = Tau;
-                branch = 2;
             }
-            ScrollTrace.Wheel(sv, e.Delta, gap, branch, px, _tau);
 
             // Off the target rather than off the drawn offset, so notches that arrive while the page is still
             // moving add to where it was going instead of to where it happens to have got.
@@ -161,7 +157,6 @@ namespace Mgs4Launcher
             double dt = _clock.Elapsed.TotalMilliseconds;
             _clock.Restart();
             if (dt <= 0) return;
-            ScrollTrace.Frame(dt);
             if (dt > 200) dt = 200;             // after a long stall, glide the rest rather than teleporting
             double f = 1.0 - Math.Exp(-dt / _tau);
 
@@ -188,7 +183,6 @@ namespace Mgs4Launcher
             {
                 CompositionTarget.Rendering -= OnRender;
                 _running = false;
-                ScrollTrace.End();
             }
         }
     }

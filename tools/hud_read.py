@@ -15,7 +15,7 @@ the engine reads as a cutscene (s04a30l_D7) when it is a gameplay entry that ope
 Every still of an id is read (_a at 5 s, _b at 9-18 s, _z the last frame), because the boss bar comes up a few
 seconds after Snake's own and an item card is only there until a button is pressed.
 
-Output: tools/scene_hud.json  {id: {"boss": "Raging Raven" | "", "item": "FaceCamo (Crying Beauty)" | "", "text": ...}}
+Output: tools/scene_hud.json  {id: {"boss": "Raging Raven" | "", "item": "FaceCamo (Crying Beauty)" | ""}}
 """
 import os, re, sys, json, io, difflib, subprocess, tempfile
 
@@ -172,7 +172,8 @@ def main():
             c = card.get(k, "")
             if not item:
                 item = item_in(c)
-        have[sid] = {"boss": boss, "item": item, "text": "".join(texts)}
+        # the verdicts only: the raw text once carried a desktop the recording's tail had drifted onto
+        have[sid] = {"boss": boss, "item": item}
         if boss or item:
             print("%-14s %s%s" % (sid, ("boss " + boss) if boss else "", (" item " + item) if item else ""))
     io.open(OUT, "w", encoding="utf-8", newline="\n").write(json.dumps(have, indent=1, ensure_ascii=False, sort_keys=True) + "\n")

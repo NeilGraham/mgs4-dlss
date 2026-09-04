@@ -431,7 +431,7 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------- renaming a scene
 
-        // The catalog's names come off the stage table and labels.json, and most scenes have none: what a scene
+        // The catalog's names come off scene_info.json, and a scene the sweep never named has none: what a scene
         // actually is only shows once it has been booted and watched. Whatever is typed here is kept in the
         // preferences file under the scene's id, so it outlives any rebuild of the data files.
         void BeginEdit()

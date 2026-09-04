@@ -1,188 +1,159 @@
 {
+ "@collection": {
+  "boss": "",
+  "item": ""
+ },
+ "@main": {
+  "boss": "",
+  "item": ""
+ },
  "s00a00l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s00a10l_D9": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a00l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a00l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a05l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a05l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a10l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a10l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a20l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a30l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a30l_2": {
   "boss": "",
-  "item": "Dr m an",
-  "text": ""
+  "item": "Dr m an"
  },
  "s01a30l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a40l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a40l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a40l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a40l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a40l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a50l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a55l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a57l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a60l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s01a60l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a10l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a10l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a10l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a10l_D1": {
   "boss": "",
@@ -191,947 +162,758 @@
  },
  "s02a10l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_10": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_11": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a20l_9": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a25l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a25l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a25l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_10": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_11": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_12": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a30l_9": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a40l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a40l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a40l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a40l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_1": {
   "boss": "",
-  "item": "A syringe that restores Psyche and suppresses na",
-  "text": ""
+  "item": "A syringe that restores Psyche and suppresses na"
  },
  "s02a50l_2": {
   "boss": "Laughing Octopus",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_3": {
   "boss": "Laughing Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a50l_D8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a60l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a60l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a60l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a70l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a73l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a75l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a78l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a80l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a85l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a90l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s02a95l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a00l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a00l_D1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a10l": {
   "boss": "",
-  "item": "Signa ceptor",
-  "text": ""
+  "item": "Signa ceptor"
  },
  "s03a10l_1": {
   "boss": "",
-  "item": "Signa ceptor",
-  "text": ""
+  "item": "Signa ceptor"
  },
  "s03a10l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a10l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a10l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a10l_5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a10l_6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a15l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a15l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a15l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a15l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a16l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a16l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a16l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a20l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a20l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a20l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a25l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a25l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a25l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a30l_D8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a35l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a40l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a50l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a60l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a65l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l": {
   "boss": "Raging Raven",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l_1": {
   "boss": "Raging Raven",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l_2": {
   "boss": "Raging Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l_D3": {
   "boss": "Raging Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a70l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a80l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a90l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a90l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a90l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a90l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s03a90l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a05l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_10": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_11": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_12": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_9": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a10l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_7": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a20l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_2": {
   "boss": "Crying Wolf",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_3": {
   "boss": "Crying Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D5": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D6": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a30l_D7": {
   "boss": "",
-  "item": "FaceCamo (Crying Beauty)",
-  "text": ""
+  "item": "FaceCamo (Crying Beauty)"
  },
  "s04a50l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a50l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a60l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a60l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a60l_D1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a60l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a60l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a65l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a68l": {
-  "boss": "",
-  "item": "",
-  "text": ""
+  "boss": "Metal Gear Ray",
+  "item": ""
  },
  "s04a70l": {
   "boss": "Metal Gear Ray",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a75l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a75l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s04a75l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a10l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_11": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_12": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_5": {
   "boss": "Screaming Mantis",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_6": {
   "boss": "Screaming Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D1": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D10": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D11": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D12": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D2": {
   "boss": "Screaming Mantis",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D5": {
   "boss": "Screaming Beauty",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D8": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a20l_D9": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a40l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a45l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a45l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a50l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a50l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s05a55l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a10l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a20l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a20l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a30l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a30l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a40l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a40l_D": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s10a40l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s20a00l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s20a00l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s20a00l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s30a00l": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s30a00l_D2": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s30a00l_D3": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  },
  "s30a00l_D4": {
   "boss": "",
-  "item": "",
-  "text": ""
+  "item": ""
  }
 }

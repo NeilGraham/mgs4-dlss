@@ -75,7 +75,6 @@ def make(rows, force):
 
 
 def brief(rows, act, out_path):
-    labels = json.load(open(os.path.join(HERE, "labels.json"), encoding="utf-8"))
     names = json.load(open(os.path.join(HERE, "scene_names.json"), encoding="utf-8"))
     info = json.load(open(os.path.join(HERE, "scene_info.json"), encoding="utf-8")).get("scenes", {})
     cat = {r["stage_entry"].strip(): r for r in sr.catalog()}
@@ -101,11 +100,6 @@ def brief(rows, act, out_path):
         if r.get("movie"):
             fp.append("video %s" % r["movie"])
         lines.append("- engine fingerprint: %s" % (", ".join(fp) or "none"))
-        lab = labels.get(sid) if isinstance(labels, dict) else None
-        if isinstance(lab, dict):
-            lab = lab.get("name") or lab.get("label")
-        if lab:
-            lines.append("- label: %s" % lab)
         prev = names.get(sid) or {}
         if prev.get("name"):
             lines.append("- earlier name: %s" % prev["name"])

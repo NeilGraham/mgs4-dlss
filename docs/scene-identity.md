@@ -15,8 +15,9 @@ Booting and kind are handled - see `tools/sweep_record.py` and `tools/classify_s
 
 ## What is already in the toolbox: comparing the video
 
-`tools/find_duplicates.py` records each scene, reduces it to 2 frames a second of 64x36 greyscale, and scores a
-pair at its best alignment. It works. Measured on the four ids that share the `s01a40l` stem, all recorded
+`tools/find_duplicates.py` reduces each recording to 2 frames a second of 64x36 greyscale and scores a pair at its
+best alignment. It works, and today it is asked only about gameplay entries that share an environment bank - the
+one case the engine data below cannot settle (see *What was built on it*). Measured on the four ids that share the `s01a40l` stem, all recorded
 through the same pipeline:
 
 ```

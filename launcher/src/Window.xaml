@@ -584,7 +584,7 @@
               </StackPanel>
               <!-- The catalog's names are read off the stage table and the labels file, and most scenes have
                    none at all. Anything can be given a name and a note of its own here; they are kept in the
-                   preferences file, so rebuilding labels.json cannot lose them. -->
+                   preferences file, so a re-measured catalog cannot lose them. -->
               <Button x:Name="EditBtn" Content="Rename" Style="{StaticResource Link}" HorizontalAlignment="Left"
                       Margin="0,9,0,0" ToolTip="Give this scene a name and a description of your own"/>
               <StackPanel x:Name="EditPanel" Margin="0,9,0,0" Visibility="Collapsed">

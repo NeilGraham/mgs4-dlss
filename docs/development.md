@@ -24,7 +24,8 @@ config.example.ini           machine-local paths; copy to config.ini (git-ignore
 dlss-addon/                  src/mgs4_dlss.cpp, build.bat, install.sh, mgs4_dlss.ini (sample)
 tools/paths.py|ps1|sh        where the game / the output folder live on this machine
 tools/install_manifest.json  the file list, verified versions and download links the checks render
-tools/scenes.csv             every launchable scene; labels.json the names, scene_info.json the corrections
+tools/scenes.csv             every launchable scene; scene_info.json everything measured and written about each
+tools/thumbs/                one 960x540 frame per scene, zipped into the exe at build time
 third_party/minhook/         MinHook (BSD-2), vendored
 third_party/reshade/         ReShade add-on API headers (v6.8.0, BSD-3)
 third_party/DLSS/            NVIDIA DLSS SDK headers + nvsdk_ngx_s.lib (DLLs git-ignored)
@@ -66,23 +67,15 @@ gh release create v1.3.0 --title v1.3.0 --notes-file release\notes-1.3.0.md rele
 
 Pushing a tag `v<version>` does the same on GitHub: `.github\workflows\release.yml` builds the add-on and the exe on a Windows runner and publishes the release with that version's notes. The `## v<version>` section in [releases.md](releases.md) has to exist before the tag is pushed.
 
-## Recording the in-game cutscenes (4K60 AV1)
+## Recording and measuring the scenes
 
-`tools\record_cutscenes.py` records every one of the in-game cutscenes unattended (102 entries in `tools\scenes.csv`):
-
-- boots each `<stage>_D<n>` entry in chronological order (`tools/scenes.csv`),
-- drives OBS over obs-websocket (`tools/obs_control.py`): a dedicated scene with a Game Capture source cropped to the
-  game's 16:9 image and fitted to a 3840x2160 / 60 fps canvas, NVENC **AV1** at CQP 22 into `MGS4_OUT`,
-- taps **Cross** on a virtual DualShock 4 (`tools/ds4.py`, ViGEmBus through ctypes - no installer) about once a second:
-  it gets past the auto-save notice and "press any button" screens and triggers MGS4's in-cutscene **flashback**
-  prompts. The game only accepts input while it is the foreground window, so `tools/winfocus.py` re-focuses it,
-- decides that a cutscene is over from the add-on's `SCENE-STATE` log (HUD appearing = gameplay) or from a static
-  screen - the recording's byte rate separates a static continue/act-end screen from a prerecorded video playing
-  inside the cutscene, so long Bink segments are not cut off,
-- checks the free space on the output drive after every recording and stops below the configured floor (default 100 GB).
-
-`tools/label_recordings.py` then pulls thumbnails out of the recordings, applies semantic names from `labels.json`
-(`23_act2-south-america_naomi-lab-rose-garden_s02a50l_D1.mkv`) and writes `index.csv` / `index.md`.
+The whole catalog - every id `tools\scenes.csv` lists - is recorded, classified, deduplicated, named and given a
+thumbnail by the tools in the *Measuring the catalog* table of [launcher.md](launcher.md#measuring-the-catalog):
+`sweep_record.py` boots each id and records it through OBS (4K60 AV1) for as long as the scene needs, reading the
+engine's own name for what it loaded from the add-on's `AssetTrace` line; `scene_identity.py`, `hud_read.py`,
+`stage_names.py`, `apply_sweep.py`, `sweep_sheets.py`, `pick_thumbs.py` and `make_thumbs.py` do the rest, and
+`verify_detection.py --cases` re-derives the reviewed verdicts from the recordings alone. How a scene is identified is
+in [scene-identity.md](scene-identity.md).
 
 ## Stage rotation for testing
 

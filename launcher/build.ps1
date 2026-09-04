@@ -9,7 +9,7 @@
 # the PowerShell app used.
 #
 # Everything the exe needs rides inside it as resources: the XAML, the tools\ data it reads (the scene table, the
-# labels, the install file list), and - when they have been built - mgs4_dlss.addon64 and mgs4_dlss.ini, so the
+# thumbnails, the install file list), and - when they have been built - mgs4_dlss.addon64 and mgs4_dlss.ini, so the
 # one file a release carries can put the add-on next to mgs4.exe by itself. A checkout's copies on disk still win
 # over the built-in ones when they are there (Paths.DataText, Install.FindBundled).
 #
@@ -98,15 +98,23 @@ $resources = @(
     ("/resource:" + (Join-Path $src "Window.xaml")),
     ("/resource:" + (Join-Path $src "SceneRow.xaml"))
 )
-$resources += @("install_manifest.json", "scenes.csv", "labels.json", "scene_info.json") |
+$resources += @("install_manifest.json", "scenes.csv", "scene_info.json") |
               ForEach-Object { "/resource:" + (Join-Path $repo "tools\$_") }
 
-# One frame per scene, for the banner on each row and beside the description (tools\make_thumbs.py). Optional:
-# a checkout that has never run the sweep just gets a launcher whose rows have no picture.
-$thumbs = Join-Path $repo "tools\scene_thumbs.zip"
-if (Test-Path -LiteralPath $thumbs) {
+# One frame per scene, for the banner on each row and beside the description: tools\thumbs\<id>.jpg, kept as
+# individual files in the repo so a re-pick changes one file, zipped here into the single resource Thumbs.cs
+# reads. Optional: a checkout with no pictures just gets a launcher whose rows have no banner.
+$thumbDir = Join-Path $repo "tools\thumbs"
+if ((Test-Path -LiteralPath $thumbDir) -and (Get-ChildItem -LiteralPath $thumbDir -Filter *.jpg | Select-Object -First 1)) {
+    $thumbs = Join-Path $repo "build\scene_thumbs.zip"
+    New-Item -ItemType Directory -Force (Split-Path $thumbs) | Out-Null
+    if (Test-Path -LiteralPath $thumbs) { Remove-Item -LiteralPath $thumbs -Force }
+    # Stored, not deflated: the JPEGs are already compressed, and Thumbs.cs inflates the whole thing at startup.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory($thumbDir, $thumbs, [IO.Compression.CompressionLevel]::NoCompression, $false)
     $resources += "/resource:$thumbs"
-    Write-Host ("embedding scene_thumbs.zip (" + [math]::Round((Get-Item -LiteralPath $thumbs).Length / 1KB) + " KB)")
+    Write-Host ("embedding scene_thumbs.zip (" + (Get-ChildItem -LiteralPath $thumbDir -Filter *.jpg).Count + " frames, " +
+                [math]::Round((Get-Item -LiteralPath $thumbs).Length / 1KB) + " KB)")
 }
 
 # One binary, windowed. It behaves like a command anyway: cmd waits for it and passes its handles through, so

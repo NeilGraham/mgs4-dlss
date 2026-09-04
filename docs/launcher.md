@@ -34,7 +34,7 @@ powershell -ExecutionPolicy Bypass -File launcher\build.ps1              :: a lo
 powershell -ExecutionPolicy Bypass -File launcher\build.ps1 -Release     :: the release exe
 ```
 
-**One file, everything in it.** The exe carries its XAML, the scene table, the labels and the install file list as
+**One file, everything in it.** The exe carries its XAML, the scene table, the thumbnails and the install file list as
 resources, and - once `dlss-addon\build.bat` has run - `mgs4_dlss.addon64` and `mgs4_dlss.ini` too, so a copy
 carried off on its own can do the whole install. A file on disk wins over the built-in copy whenever it is there
 (`tools\scenes.csv`, `build\mgs4_dlss.addon64`, ...), so editing or rebuilding in a checkout changes what the app
@@ -112,8 +112,8 @@ which is the one case where a tool that needs the game folder still has to be us
 
 ## Play
 
-The list is `tools\scenes.csv` (the stage table) with names from `tools\labels.json` and the corrections in
-`tools\scene_info.json`, plus the two ways of starting the game itself. Pick one, tick what should happen while it
+The list is `tools\scenes.csv` (the stage table) with everything the sweep measured and wrote about each id in
+`tools\scene_info.json` - kind, name, description, location, story order, duplicates - plus the two ways of starting the game itself. Pick one, tick what should happen while it
 runs, press Launch. The panel shows the command line that does the same thing, so anything set up in the window can
 be pasted into a terminal or put in a shortcut — **Copy** puts it on the clipboard, and the box is selectable text.
 
@@ -146,8 +146,8 @@ out to work, set by hand in `scene_info.json`. Its green is kept clear of Start'
 
 **Any scene can be renamed.** The panel on the right has a **Rename** link under the scene's name: it opens a name
 and a description, **Save** keeps them, **Reset** drops them and lets the data files speak again. They are stored
-per stage id in `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`, not in `tools\labels.json`, so rebuilding the
-data files cannot lose them - and because the catalog reads them wherever it is used, a renamed scene keeps its
+per stage id in `%LOCALAPPDATA%\mgs4-dlss-launcher\launcher.json`, not in the catalog's data files, so re-measuring and
+re-naming the catalog cannot lose them - and because the catalog reads them wherever it is used, a renamed scene keeps its
 name in `--list` and in the shortcuts you make from it. Either half stands alone: a description typed over a scene
 whose name you left alone keeps the catalog's name.
 
@@ -213,27 +213,25 @@ unattended; every step is resumable or re-runnable.
 
 | step | what it does |
 |---|---|
-| `tools\sweep_record.py` | boots every id one at a time and **records each through OBS** (4K60 AV1, audio), for as long as the scene turns out to need: 10 s of gameplay, a cutscene until it hands over to gameplay or 5 min, 20 s of anything else. With `AssetTrace=1` in `mgs4_dlss.ini` it also reads the engine's own name for the scene - the demo number, the environment bank, the video file - into `tools\stage_probe.csv`, and cuts a repeat of an id already recorded off at 3 s. Skips ids already in the CSV, so Ctrl+C and re-run is safe; `--skip-broken-acts 1,2,3` leaves out ids an earlier pass measured as broken. Recordings land in `<MGS4_OUT>\sweep\video\<id>.mkv`, stills at ~5 s and ~18 s in `<MGS4_OUT>\sweep\<id>_a.jpg` / `_b.jpg`. (`tools\sweep_stages.ps1` is the older stills-only sweep.) |
+| `tools\sweep_record.py` | boots every id one at a time and **records each through OBS** (4K60 AV1, audio), for as long as the scene turns out to need: 10 s of gameplay, a cutscene until it hands over to gameplay or 5 min, 20 s of anything else. With `AssetTrace=1` in `mgs4_dlss.ini` it also reads the engine's own name for the scene - the demo number, the environment bank, the video file - into `tools\stage_probe.csv`, and cuts a repeat of an id already recorded off at 3 s. Skips ids already in the CSV, so Ctrl+C and re-run is safe; `--skip-broken-acts 1,2,3` leaves out ids an earlier pass measured as broken. Recordings land in `<MGS4_OUT>\sweep\video\<id>.mkv`, stills at ~5 s and ~18 s in `<MGS4_OUT>\sweep\<id>_a.jpg` / `_b.jpg`. |
 | `tools\scene_identity.py --apply` | which ids are the same scene, from the engine fingerprint: the same demo or video is the same scene outright, and two gameplay entries that share an environment are handed to `tools\find_duplicates.py` (the video comparison) to split. Writes `sameAs` and a `fingerprint` into `scene_info.json`. See [scene-identity.md](scene-identity.md). |
 | `tools\stage_names.py` | the location banner the game draws when a stage starts ("MIDDLE EAST / GROUND ZERO"), read out of the game's own string table and stage scripts rather than off the picture. `apply_sweep.py` carries it into `scene_info.json` as `location`, and the Play tab shows it ahead of the description. |
 | `tools\classify_scene.py --json tools\scene_kinds.json <MGS4_OUT>\sweep` | reads the ~18 s still and decides **codec / cutscene / gameplay** from the pixels. `--features` dumps the raw numbers as CSV for re-tuning the cut-offs. |
-| `tools\sweep_sheets.py` | one contact sheet per 16 frames of each recording, from the scene's own start, under `<MGS4_OUT>\sweep\sheets\`, so a scene can be read - subtitles included - from a few images; `--brief 1 out.md` writes the per-act brief the names are written from. (`tools\contact_sheet.py` is the older two-stills-per-row sheet.) |
+| `tools\sweep_sheets.py` | one contact sheet per 16 frames of each recording, from the scene's own start, under `<MGS4_OUT>\sweep\sheets\`, so a scene can be read - subtitles included - from a few images; `--brief 1 out.md` writes the per-act brief the names are written from. |
 | `tools\hud_read.py` | OCR (Windows' own engine, `tools\ocr.ps1`) of every still's top-left and centre: the boss's name on the second health bar - only on a frame that also reads OLD SNAKE - and the ITEM ACQUIRED card. Writes `tools\scene_hud.json`; `apply_sweep.py` turns a boss name into kind **boss** and an item card with no HUD into **gameplay**. |
 | `tools\verify_detection.py --cases` | re-derives every kind, merge and order verdict from the recordings alone (`.mkv` frames through the classifier and the OCR, the add-on log for the demo / environment / video) and prints the evidence beside each one. The cases are the ones a review found wrong; keep it green before editing `scene_names.json`. |
 | `tools\pick_thumbs.py` | the frame each scene is shown by, chosen by eye from its contact sheets and kept as a **timestamp** in `tools\scene_thumbs.json` (`offset` seconds into the scene, plus a few words on why). `--brief 1 out.md` lists every sheet of an act for the picker, `--merge` folds the answers in, `--apply` cuts each picked frame out of its recording at 1280 wide into `<MGS4_OUT>\sweep\thumbs\`. A pick survives a re-recording because the offset is measured from the scene's own start. |
-| `tools\make_thumbs.py` | packs one frame per recorded scene into `tools\scene_thumbs.zip` (960x540, q74, ~40 KB each), which the launcher embeds and draws as the banner on each row and beside the description. The picked frame when there is one, else the sweep's ~18 s still. 960 is the detail pane's physical width on a 4K screen at 200%, and the launcher decodes at that size rather than the logical one. |
+| `tools\make_thumbs.py` | writes one frame per recorded scene to `tools\thumbs\<id>.jpg` (960x540, q74, ~47 KB each) - the picked frame when there is one, else the sweep's ~18 s still. Individual files so a re-pick changes one file in git; `launcher\build.ps1` zips the folder into the exe at build time, and the launcher decodes at the detail pane's physical width (960 on a 4K screen at 200%) rather than the logical one. |
 | `tools\apply_sweep.py` | folds `stage_probe.csv`, `scene_kinds.json`, `scene_hud.json`, the locations and the written `tools\scene_names.json` into `tools\scene_info.json`, which is what the launcher reads. The kind is measured (`measured_kind`: Codec screen > boss bar > 400-series demo = video > item card > environment-at-boot = gameplay > the sweep's live reading) and so is the story order inside a stage (`story_order`: cutscenes by demo number, a playable entry right after the cutscene that hands over into the environment it boots into; the launcher sorts on `order`). Run `scene_identity.py --apply` after it, so an alias row is only ever `sameAs`. |
-
-`tools\grab.ps1` is the screen grab the sweep uses, split out so it can be tested on its own. It captures the game
-window through GDI and writes a downscaled JPEG — no OBS, so an unattended run has no extra moving parts.
 
 **How the classifier decides**, and why it is these three signals:
 
 - **Gameplay** — the psyche gauge in the top-left corner: a long horizontal run of saturated amber (`OLD SNAKE`
   over a `STRESS` readout). It is a fixed-size UI element, so the measurement lands at ~0.74 on unrelated gameplay
   frames; warm scenery is saturated too but never forms a bar.
-- **Codec** — the call screen is dark, near-monochrome and left-right symmetric (the two callers' portraits) all at
-  once. No one of those is enough on its own.
+- **Codec** — the call screen is *ruled*: long straight horizontal edges across the frame, which rendered 3D
+  essentially never draws (0.039-0.053 on the calls against ~0.000 elsewhere), with a weak green-dominance guard.
+  Darkness and symmetry were tried and dropped - a call sits over whatever scene was running.
 - **Cutscene** — whatever is left. A scene that draws no gauge and is not a call is a cutscene.
 
 Letterboxing is deliberately **not** a signal. The port's cutscenes are not letterboxed at the swapchain: the black
@@ -241,15 +239,17 @@ bands that show up when one of these frames is viewed are the viewer padding the
 are the scene (row 0 of a title-card frame measures 0.85 luma, not 0.0). That was checked before being relied on.
 - **Ids that crash or come up black** are out of the list, one by one as the sweep found them rather than by id
   shape. The **Broken** chip shows them if you want them anyway, and searching for one by id still finds it.
-- **The categories are Start, Gameplay, Boss, Cutscene, Codec, Briefing and Broken.** There is no "Stage" chip:
-  what a bare stage id shows is gameplay or a cutscene like anything else, and it is filed under whichever the
-  classifier measured. **`Briefing` and `Boss` are hand-written** in `scene_names.json` rather than measured. A
-  briefing says what a scene is *for*, which a frame cannot show; and a boss fight differs from ordinary gameplay
-  only by the name on the second health bar — the row profiles of `LAUGHING OCTOPUS` and `STRESS 0.7%` are
-  identical, so telling them apart needs OCR, and `DREBIN 893` would false-positive besides. `apply_sweep.py`
-  keeps any hand-written kind rather than letting the classifier overwrite it.
-- `s00a00l` and `s00a00l_D` are the cemetery scene, which plays inside Act 1 rather than with the rest of `s00`, so
-  they sit in Act 1 after the `s01a00l` entries (`sortAs` in the data file puts them there).
+- **The categories are Start, Gameplay, Boss, Cutscene, Codec, Video, Briefing and Broken.** There is no "Stage"
+  chip: what a bare stage id shows is gameplay or a cutscene like anything else, and it is filed under whatever
+  was measured. Only **`Briefing`** (and `Start`) is hand-written in `scene_names.json`: a briefing says what a
+  scene is *for*, which nothing measured can show. **`Boss` is measured**: every boss fight loads its own music
+  bank (`bgm_sm_boss_vamp`, `bgm_boss_mantis01`, the Beauty phase's `E_bgm_*_boss_*_phase_01`), and the name on
+  the second health bar, OCR'd by `tools\hud_read.py`, confirms it. **`Video`** is the drawn-schematic series of
+  demo numbers, 431 and up. `apply_sweep.py` keeps a hand-written kind over a measured one, except that a measured
+  boss beats a hand-written cutscene or gameplay.
+- `s00a00l` and `s00a00l_D` are the "three days earlier" cemetery scene, which plays inside Act 1 rather than with
+  the rest of `s00`, so they sit in Act 1 right after the militia-town opening (`sortAs` and `order` in
+  `scene_names.json` put them there).
 
 The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
 to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
