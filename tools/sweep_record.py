@@ -41,6 +41,8 @@ own folder ("SCENE-ASSET open f<frame> <path>"). The ones that matter, per docs/
   e_d###.bank        the demo - MGS4's own number for a cutscene; two ids that load the same one are one scene
   env_<stage>_NN.bank a gameplay entry's environment
   BK2\\*.bk2          a pre-rendered video
+  *boss_*.bank        a boss fight's music (bgm_sm_boss_vamp, bgm_boss_mantis01, E_bgm_ee_boss_raven_phase_01 for
+                      the Beauty phase) where an escort section loads bgm_*_event_* (the Stryker legs, the bike)
 Only the opens up to a few seconds after FIRST-3D-FRAME count as the scene's own ("demo"); anything chained in
 later is kept apart ("demo_late"), so a long capture and a short one of the same scene still agree.
 
@@ -67,7 +69,7 @@ ADDON_LOG = os.path.join(paths.GAME_DIR, "logs", "mgs4_dlss.log")
 LAUNCH_LOG = os.path.join(paths.GAME_DIR, "logs", "launcher.log")
 DUMPS = os.path.join(paths.GAME_DIR, "crash_dumps")
 FIELDS = ["id", "result", "seconds", "scene_offset", "scene_at", "video", "state", "draws", "hud", "kind_live",
-          "demo", "demo_late", "env", "movie", "assets", "detail"]
+          "demo", "demo_late", "env", "movie", "boss", "assets", "detail"]
 
 # The game's window does not cover the screen the instant the add-on says "swapchain created" - the desktop is
 # still there for about a second. Every recording therefore loses at least this much off the front, whatever the
@@ -94,8 +96,51 @@ def ps(cmd):
 
 
 def kill_game():
-    # mgs1 too: s04a05l starts the bundled MGS1 as its own process, which nothing else closes.
-    ps("Get-Process mgs4,mgs1,mgs4-dlss-launcher -ErrorAction SilentlyContinue | Stop-Process -Force")
+    # mgs1 too: s04a05l starts the bundled MGS1 as its own process, which nothing else closes; and the Master
+    # Collection's own front-end (@collection), matched by its path so no other launcher.exe is touched.
+    ps("Get-Process mgs4,mgs1,mgs4-dlss-launcher -ErrorAction SilentlyContinue | Stop-Process -Force; "
+       "Get-Process launcher -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*METAL GEAR SOLID 4*' } | Stop-Process -Force")
+
+
+def record_menu_entry(cl, source, sid, cap):
+    """The two menu entries that are not stage ids: @main (mgs4.exe --skip-to-main-menu) and @collection (the
+    Master Collection's Unity front-end, a different process the add-on never sees). Nothing to wait for and
+    nothing to fingerprint: launch, record `cap` seconds from the moment the window is up, keep stills."""
+    t0 = time.time()
+    proc = subprocess.Popen([LAUNCHER, sid])
+    time.sleep(2.5)                                   # the window is up within a couple of seconds
+    cl.start_record(); rec_started = time.time()
+    shots = {}
+    while time.time() - rec_started < cap:
+        el = time.time() - rec_started
+        if "a" not in shots and el >= 5.0 and source:
+            shots["a"] = shot(cl, source, os.path.join(SHOTS, sid + "_a.jpg"))
+        if "b" not in shots and el >= cap - 1.5 and source:
+            shots["b"] = shot(cl, source, os.path.join(SHOTS, sid + "_b.jpg"))
+        time.sleep(0.5)
+    if source:
+        shot(cl, source, os.path.join(SHOTS, sid + "_z.jpg"))
+    out_path = None
+    try:
+        out_path = cl.stop_record().output_path
+    except Exception as e:
+        print("   stop_record failed:", e)
+    try:
+        proc.kill()
+    except Exception:
+        pass
+    kill_game(); time.sleep(1.5)
+    final = ""
+    if out_path and os.path.exists(out_path):
+        dst = os.path.join(VIDEO, sid + ".mkv")
+        if trim(out_path, dst, 0.0, cap):
+            os.remove(out_path)
+        else:
+            shutil.move(out_path, dst)
+        final = sid + ".mkv"
+    return dict(id=sid, result="boot", seconds=int(time.time() - t0), scene_offset=0.0, scene_at=0.0,
+                video=final, state="", draws=-1, hud=-1, kind_live="start", demo="", demo_late="", env="",
+                movie="", boss="", assets="", detail="menu entry, recorded %.0fs" % cap)
 
 
 def game_up():
@@ -176,7 +221,7 @@ def assets_of(log_text):
     m = FIRST_RE.search(log_text)
     if m:
         first = int(m.group(1))
-    demo, late, env, movie, other = [], [], [], [], []
+    demo, late, env, movie, boss, other = [], [], [], [], [], []
     env_at = None
     for ok, frame, path in ASSET_RE.findall(log_text):
         if ok != "open":
@@ -204,10 +249,15 @@ def assets_of(log_text):
             if base not in movie:
                 movie.append(base)
             continue
+        bb = re.search(r"boss_([a-z_]+?)\d*(?:_beast|_phase)?(?:_\d+)?\.bank$", lower)   # bgm_sm_boss_vamp, E_bgm_ee_boss_raven_phase_01, bgm_boss_mantis01
+        if bb:
+            if bb.group(1) not in boss:
+                boss.append(bb.group(1))
+            continue
         if base not in other:
             other.append(base)
     return dict(demo="+".join(demo), demo_late="+".join(late), env="+".join(env), movie="+".join(movie),
-                assets=";".join(other))
+                boss="+".join(boss), assets=";".join(other))
 
 
 def recompute(out):
@@ -358,6 +408,14 @@ def main():
     max_cap = max(args.cap_gameplay, args.cap_cutscene, args.cap_other)
     for n, sid in enumerate(todo, 1):
         kill_game(); time.sleep(1)
+        if sid.startswith("@"):
+            row = record_menu_entry(cl, source, sid, args.cap_other)
+            tally["boot"] += 1
+            with open(args.out, "a", newline="") as fh:
+                csv.DictWriter(fh, FIELDS).writerow(row)
+            print("[%4d/%d] %-14s %-9s %4ds %-9s %s" % (n, len(todo), sid, row["result"], row["seconds"],
+                                                       row["kind_live"], row["detail"]), flush=True)
+            continue
         # Delete the add-on log before launching. The add-on recreates it (fopen "w") on every start, but until
         # the new process gets that far the file still holds the *previous* run - and reading that made every
         # trigger fire instantly on stale "swapchain created" / "FIRST-3D-FRAME" lines, so a known-crashing id
@@ -390,7 +448,7 @@ def main():
         # 2. wait for the first 3D frame - or for a pre-rendered video to open. A video never draws a 3D frame
         #    (the engine reads no-3d throughout), yet to the player it is a cutscene, so it is recorded as one:
         #    the moment the .bk2 is opened counts as the scene's start.
-        scene_at, video_scene = None, False
+        scene_at, video_scene, start_entry = None, False, False
         deadline = (rec_started or t0) + args.boot_timeout
         while time.time() < deadline:
             tail = tail_since(ADDON_LOG, 0)
@@ -398,8 +456,16 @@ def main():
                 scene_at = time.time(); break
             if rec_started and time.time() - rec_started > 3.0 and assets_of(tail).get("movie"):
                 scene_at, video_scene = time.time(), True; break
-            if dumps_count() > before or proc.poll() is not None:
+            if dumps_count() > before:
                 break
+            # The launcher leaves at once on a game-start entry (the credits and the menu, s10a10l): there are no
+            # boot prompts to press through, so it launches and returns. The game is still up and is recorded
+            # for the `cap-other` budget like anything without a scene. Any other early exit is the game dying.
+            if proc.poll() is not None:
+                if game_up():
+                    start_entry = True
+                else:
+                    break
             time.sleep(0.2)
 
         # 3. hold until the scene ends, the game dies, or its kind's cap - whichever comes first.
@@ -421,7 +487,7 @@ def main():
                     end_reason = "game exited"; break
                 # the launcher leaves the moment the game's window is gone, seconds before the process is: a
                 # recording that runs on past that point is of the desktop (s01a05l_D, s04a30l_D7)
-                if proc.poll() is not None:
+                if proc.poll() is not None and not start_entry:
                     end_reason = "the game's window closed"; break
                 hits = STATE_RE.findall(tail_since(ADDON_LOG, 0))
                 if hits:
@@ -523,11 +589,14 @@ def main():
                 # the last frame, for what only shows up late: a boss's health bar, an item card, the HUD after a
                 # cutscene's handover. tools/hud_read.py reads these.
                 shot(cl, source, os.path.join(SHOTS, sid + "_z.jpg"))
-        elif rec_started and proc.poll() is None and dumps_count() == before:
+        elif rec_started and (proc.poll() is None or start_entry) and dumps_count() == before and game_up():
             # alive but never drew a 3D frame: a video, a menu, black - or the bundled MGS1 running in its own
             # process. Keep a still of it and a short recording.
             if mgs1_up():
                 kind_live, end_reason = "mgs1", "the bundled MGS1 (mgs1.exe) is running"
+            elif start_entry:
+                kind_live, end_reason = "start", "a game-start entry: recorded %.0fs of it" % args.cap_other
+                time.sleep(max(0.0, args.cap_other - (time.time() - rec_started)))
             if source:
                 shot_a = shot(cl, source, os.path.join(SHOTS, sid + "_a.jpg"))
                 shot_b = shot(cl, source, os.path.join(SHOTS, sid + "_b.jpg"))
@@ -546,7 +615,7 @@ def main():
 
         # what the engine thought it was drawing - the video/scene discriminator - and what it loaded
         state, draws, hud = "", -1, -1
-        fp = dict(demo="", demo_late="", env="", movie="", assets="")
+        fp = dict(demo="", demo_late="", env="", movie="", boss="", assets="")
         if os.path.exists(ADDON_LOG):
             shutil.copyfile(ADDON_LOG, os.path.join(SHOTS, sid + ".addon.log"))
             text = open(ADDON_LOG, errors="replace").read()
@@ -604,9 +673,10 @@ def main():
                 id=sid, result=result, seconds=int(time.time() - t0), scene_offset=offset,
                 scene_at=scene_in, video=final, state=state, draws=draws, hud=hud, kind_live=kind_live,
                 detail=(detail if result != "boot" else end_reason), **fp))
-        print("[%4d/%d] %-14s %-9s %4ds %-9s d%-4s env:%-14s %-8s draws:%-5s %s   boot %d / crash %d / no-scene %d"
+        print("[%4d/%d] %-14s %-9s %4ds %-9s d%-4s env:%-14s %-8s draws:%-5s %s %s  boot %d / crash %d / no-scene %d"
               % (n, len(todo), sid, result, int(time.time() - t0), kind_live or "-", fp["demo"] or "-",
-                 fp["env"] or "-", state, draws, fp["movie"], tally["boot"], tally["crash"], tally["no-scene"]),
+                 fp["env"] or "-", state, draws, fp["movie"], ("boss:" + fp["boss"]) if fp["boss"] else "",
+                 tally["boot"], tally["crash"], tally["no-scene"]),
               flush=True)
 
     print("\ndone: boot %d, crash %d, no-scene %d -> %s"

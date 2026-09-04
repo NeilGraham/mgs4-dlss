@@ -32,6 +32,12 @@ def main():
                 clean["description"] = e["description"].strip()
             if e.get("kind") in ALLOWED_KINDS:
                 clean["kind"] = e["kind"]
+            # hand-set placement survives a re-naming: a batch only speaks about names
+            for keep in ("order", "sortAs"):
+                if keep in e:
+                    clean[keep] = e[keep]
+                elif sid in names and keep in names[sid]:
+                    clean[keep] = names[sid][keep]
             if sid in names:
                 replaced += 1
             else:

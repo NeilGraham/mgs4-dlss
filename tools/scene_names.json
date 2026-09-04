@@ -1,8 +1,8 @@
 {
   "_comment": "Names and descriptions written from the sweep's frames (and the subtitles OCR'd out of them). The kind is NOT set here except where a frame cannot show it - that is measured by tools/classify_scene.py. Merged into scene_info.json by tools/apply_sweep.py.",
   "s00a00l": {
-    "name": "The cemetery",
-    "description": "Old Snake in a suit among the headstones on a grey morning. The epilogue's framing scene.",
+    "name": "Three Days Earlier at the cemetery",
+    "description": "The game's opening framing scene, before Act 1. Old Snake, in a suit, salutes Big Boss's grave; Otacon comes to fetch him and Campbell briefs him in the helicopter on Liquid's whereabouts, leading into Liquid Sun.",
     "sortAs": "s01a05l",
     "order": 900
   },
@@ -11,36 +11,41 @@
     "description": "Old Snake in a suit among the headstones on a grey morning. The epilogue's framing scene."
   },
   "s00a10l": {
-    "name": "Walking to the grave",
-    "description": "Snake crosses the cemetery to a headstone marked IN MEMORY OF A PATRIOT, and kneels."
+    "name": "Snake at Big Boss's grave",
+    "description": "The epilogue after Outer Haven. Snake lays flowers at the grave marked 'In memory of a patriot', smokes a last cigarette, then draws the Operator and puts it in his mouth. Ends on the white-out before Big Boss appears."
   },
   "s00a10l_D": {
     "name": "Walking to the grave",
     "description": "Snake crosses the cemetery to a headstone marked IN MEMORY OF A PATRIOT, and kneels."
   },
   "s00a10l_D2": {
-    "name": "At the headstone",
-    "description": "Close on Snake crouched at the grave, the cemetery soft behind him."
+    "name": "Big Boss appears",
+    "description": "Naked Sin. Snake could not pull the trigger; as he kneels in the cemetery Big Boss walks out of the light pushing Zero's wheelchair. Guns are drawn, then Big Boss disarms and embraces his son. Leads into the ink-wash history."
   },
   "s00a10l_D3": {
-    "name": "Into the flashback",
-    "description": "The white ink-wash transition that opens the memory."
+    "name": "How the Patriots were born",
+    "description": "Big Boss tells Snake where it all started: The Boss, Zero, himself, Ocelot, EVA, Para-Medic and Sigint, drawn as ink-wash sketches. Cuts back to the cemetery with Zero, then into the photographs of Zero's system."
   },
   "s00a10l_D4": {
-    "name": "Big Boss at the graves",
-    "description": "The eyepatched Big Boss standing among the headstones, then close on his face."
+    "name": "Big Boss on Zero's system",
+    "description": "Standing over Zero's wheelchair, Big Boss explains how Zero's fear of losing control grew into the AI network. Archival photographs and circuit lines illustrate it, then back to the cemetery and the ruined Zero."
   },
   "s00a10l_D5": {
-    "name": "The photographs",
-    "description": "A dim room hung with documents and old photographs."
+    "name": "The war economy, then Zero",
+    "description": "The tail of Big Boss's account: the photo montage of the AIs' war economy, then back to the cemetery where Big Boss turns to the withered, hundred-year-old Zero. Leads straight into Zero's death."
   },
   "s00a10l_D6": {
-    "name": "Two men in long coats",
-    "description": "Big Boss and his companion at the graveside, then close on Big Boss's scarred face."
+    "name": "Zero's last breath",
+    "description": "Big Boss looks down at Zero, once his closest friend and the founder of the Patriots, and quietly ends him. He wheels the chair away and turns to Snake for his own farewell."
+  },
+  "s00a10l_D7": {
+    "name": "The staff credits",
+    "description": "The end-credits roll after Big Boss's death, played in the game to 'Here's to You': motion-capture cast, production staff, programming, art, sound and Kojima Productions. Pre-rendered video, no 3D.",
+    "order": 305.5
   },
   "s00a10l_D9": {
     "name": "Final Results",
-    "description": "The end-of-game statistics panel: play time, continues, alert phases, kills."
+    "description": "The very end. Sunny's eggs cook in the pan, at last sunny side up, then the Final Results panel: play time, continues, alerts, kills, Drebin points and the emblem title you earned."
   },
   "s01a00l": {
     "name": "Ground Zero: first street, playable",
@@ -786,5 +791,162 @@
   "s04a75l_D3": {
     "name": "Liquid sails, the chopper comes",
     "description": "The act's last scene: Liquid on Outer Haven's deck as the Missouri closes in and Haven dives; Snake lies bleeding on the pier until Otacon's helicopter finds him. Ends on the Act 4 results screen."
+  },
+  "s05a10l": {
+    "name": "Ship bow: sneaking onto Outer Haven",
+    "description": "Act 5 gameplay begins. Snake has landed on Outer Haven's bow after the Nomad catapult and must slip past the Haven Troopers on deck to get inside the ship. Starts crawling among the containers below the superstructure."
+  },
+  "s05a10l_D": {
+    "name": "Snake lands on Outer Haven's deck",
+    "description": "The act's opening after the Nomad briefing: Snake comes to on the deck, coughs through his failing body, sizes up the superstructure as Haven Troopers patrol above, and the Mk. III joins him. Leads into the ship-bow gameplay."
+  },
+  "s05a20l": {
+    "name": "Into the ship's corridors",
+    "description": "Snake is inside Outer Haven, in the dim corridors between the deck and the command center where Screaming Mantis waits. Playable stage entry with the stun knife drawn, before the command center cutscene."
+  },
+  "s05a20l_11": {
+    "name": "Missile hangar catwalk, playable",
+    "description": "After leaving Meryl to hold the corridor, Snake runs the long lattice catwalk of the missile hangar toward the microwave corridor and GW. Playable, alone on the catwalk; s05a20l_12 is the same run with Haven Troopers behind."
+  },
+  "s05a20l_12": {
+    "name": "Haven Troopers chase through the missile hangar",
+    "description": "Same missile hangar catwalk as s05a20l_11, but the entry starts at the door with a squad of Haven Troopers pouring in behind Snake. He has to outrun them down the hangar while Meryl covers the corridor he just left."
+  },
+  "s05a20l_2": {
+    "name": "Command center, playable",
+    "description": "Snake in the Outer Haven command center just after arriving, a Haven Trooper down beside the central pillar and Screaming Mantis not yet revealed. Same room as s05a20l_D1 but starts in gameplay after a brief demo."
+  },
+  "s05a20l_5": {
+    "name": "Screaming Mantis puppets Meryl",
+    "description": "Mid-fight with Screaming Mantis: her strings have Meryl on the floor turning her own gun on herself, so Snake must break the hold with the syringe while dodging Mantis. Includes her Psycho Mantis-style screen tricks."
+  },
+  "s05a20l_6": {
+    "name": "Screaming Beauty phase",
+    "description": "Second half of the command center fight. With the suit beaten, Screaming Beauty steps out and comes for Snake; the entry starts with her grabbing him and forcing him to the deck. Beating her leads into Psycho Mantis's return."
+  },
+  "s05a20l_D1": {
+    "name": "Snake reaches the command center",
+    "description": "Snake enters the command center under the GW globe and finds Haven Troopers already dead on the floor. One jerks back to life on Screaming Mantis's strings and lunges at him, and the fight begins. Hands over to gameplay."
+  },
+  "s05a20l_D10": {
+    "name": "Psycho Mantis returns, and Drebin's story",
+    "description": "After the Beauty falls, Psycho Mantis's spirit takes over the empty Mantis rig and rages until Snake reaches for the doll and the suit tears itself apart. Ends in a long Drebin codec on Mantis's childhood in a torture cellar."
+  },
+  "s05a20l_D11": {
+    "name": "Meryl freed, then she holds the corridor",
+    "description": "Meryl wakes from Mantis's control as Haven Troopers storm the command center; she and Snake fight them off together, then retreat. At the corridor door Meryl stays to hold the line and Snake runs on to the missile hangar."
+  },
+  "s05a20l_D12": {
+    "name": "Meryl and Johnny hold the corridor",
+    "description": "Snake has run for the missile hangar; Meryl and Johnny are left holding the corridor door against the Haven Troopers. Wounded and low on ammo, Johnny finally proposes, Meryl accepts with a kiss, and they fight on back to back."
+  },
+  "s05a20l_D2": {
+    "name": "Screaming Mantis takes Meryl and Johnny",
+    "description": "The command center boss intro. Snake finds Meryl on the floor, her own gun turning on her head, and Johnny walks in and drops too: Screaming Mantis descends from the GW globe and shows herself. Hands over to the Mantis fight."
+  },
+  "s05a20l_D5": {
+    "name": "Screaming Beauty steps out",
+    "description": "Halfway through the command center fight. The Mantis suit is beaten and spun apart, and the wailing Beauty peels out of it, dancing and lunging at Snake. Hands over to the Beauty phase of the fight."
+  },
+  "s05a20l_D8": {
+    "name": "The Beauty falls, Psycho Mantis returns",
+    "description": "Screaming Beauty collapses in the white light and Snake reaches for the empty Mantis rig, only for Psycho Mantis's ghost to seize it. Runs on into Drebin's codec on Mantis's childhood. s05a20l_D9 is the other version."
+  },
+  "s05a20l_D9": {
+    "name": "The Beauty falls in the command center",
+    "description": "Other version of the Beauty's defeat: she dies on the command center floor, Snake sheathes his knife, and Psycho Mantis's ghost takes the discarded rig before the suit tears itself apart. Runs on into Drebin's codec."
+  },
+  "s05a30l": {
+    "name": "Raiden's stand: 'I'm no hero'",
+    "description": "Past the missile hangar Snake's body gives out as Haven Troopers close in, and Raiden, arms gone and sword in his teeth, cuts through them. He refuses to be sent away and holds the door while Snake goes on to the microwave corridor."
+  },
+  "s05a40l": {
+    "name": "GW: Otacon's Mk. III and the FOXALIVE",
+    "description": "Pre-rendered end of the microwave corridor. Snake crawls burned into the lily-filled GW server room, the Mk. III jacks in and Otacon uploads FOXALIVE as the servers die, then Dwarf Gekko swarm him; Raiden and Meryl intercut."
+  },
+  "s05a45l": {
+    "name": "Liquid's last words before the fight",
+    "description": "Same deck lead-in as s05a45l_D, starting at Liquid's monologue over the photo collage of Big Boss and the Patriots, then the dusk deck where he calls Snake to his feet. Hands over to the Liquid Ocelot fist fight."
+  },
+  "s05a45l_D": {
+    "name": "Liquid hauls Snake onto the deck",
+    "description": "FOXALIVE has killed GW and the Patriots' AIs. Otacon reels at what they have done while Snake comes to on the top deck at dusk with Liquid Ocelot over him. Liquid's last speech leads into the fist fight; hands over to gameplay."
+  },
+  "s05a50l": {
+    "name": "Liquid vs Snake on Outer Haven's deck",
+    "description": "The final fist fight, entered straight into gameplay on the sunset deck with the OLD SNAKE and LIQUID bars up and Encounter playing. It runs through its MGS1, MGS2 and MGS3 phases to Ocelot's last words. Same fight as s05a50l_D."
+  },
+  "s05a50l_D": {
+    "name": "The deck fight as Liquid staged it",
+    "description": "The fist fight's cutscene run: Liquid stands over Snake at dusk, drags him up and sheds his coat, then the fight plays through its phase changes, the syringe in Snake's neck and the blows that leave Ocelot kneeling. Leads into s05a55l."
+  },
+  "s05a55l": {
+    "name": "Ocelot's last words and the harbour",
+    "description": "The act's ending. Ocelot falls on the deck, tells Snake he is pretty good, and dies as Snake kneels beside him. Boats and a helicopter come out from the Missouri, Otacon collects Snake, and the save prompt leads to the epilogue."
+  },
+  "s10a10l": {
+    "name": "Start from the title screen",
+    "description": "Boots the game the way it starts itself: the Kojima Productions logo, then the title screen over the cemetery with PRESS ANY BUTTON, and on to the main menu. Not a scene, just the normal front door.",
+    "kind": "start"
+  },
+  "s10a20l": {
+    "name": "Mission Briefing before Act 2",
+    "description": "The Nomad after Liquid Sun. Snake has collapsed after his fit in the Middle East; Otacon and Sunny look after him, and Naomi's message from South America sets up Solid Sun. Starts on the cutscenes, then the interactive Nomad.",
+    "kind": "briefing"
+  },
+  "s10a20l_D2": {
+    "name": "Act 2 briefing, interactive part",
+    "description": "The Act 2 Mission Briefing joined at its interactive half: Snake is already up, Sunny brings the eggs and Otacon plays Naomi's message at his computer. Skips the opening cutscene; roam the Nomad before Solid Sun.",
+    "kind": "briefing"
+  },
+  "s10a30l": {
+    "name": "Mission Briefing before Act 3",
+    "description": "The Nomad after Solid Sun, with Naomi aboard. She joins Sunny at the stove, pins a blue flower in her hair under Olga's photo, and the eggs finally come out right. Cutscenes first, then the interactive Nomad before Third Sun.",
+    "kind": "briefing"
+  },
+  "s10a30l_D2": {
+    "name": "Act 3 briefing, from Naomi and Sunny",
+    "description": "The Act 3 Mission Briefing without its egg-frying opener: begins with Sunny at the stove as Naomi joins her, through the flower and Olga's photo to the Nomad in flight, then hands over to the interactive part before Third Sun.",
+    "kind": "briefing"
+  },
+  "s10a40l": {
+    "name": "Mission Briefing before Act 4",
+    "description": "The Nomad after Third Sun, Naomi gone with Liquid. Sunny cooks alone with the flower Naomi left her, then the Mk. II's last footage of Naomi among Liquid's people points to Shadow Moses. Cutscenes first, then the interactive Nomad.",
+    "kind": "briefing"
+  },
+  "s10a40l_D": {
+    "name": "Act 4 briefing, Sunny and the flower",
+    "description": "The Act 4 Mission Briefing without its egg-frying opener: Sunny alone at the stove with Naomi's flower, the Mk. II's recovered footage, and Otacon unveiling the Mk. III, then the interactive Nomad before Twin Suns.",
+    "kind": "briefing"
+  },
+  "s20a00l": {
+    "name": "Mission Briefing before Act 5",
+    "description": "After Shadow Moses, aboard the Missouri. Mei Ling briefs the team from a projector on the run at Outer Haven: Snake on oxygen, Meryl and Rat Patrol, Otacon with the Mk. III. Cutscene and interactive parts trade off before Old Sun.",
+    "kind": "briefing"
+  },
+  "s20a00l_D2": {
+    "name": "Snake and Otacon, a last cigarette",
+    "description": "The end of the Act 5 briefing. Snake smokes under a No Smoking sign in the Missouri's storeroom; Otacon comes in with the Mk. III, still grieving Naomi, and they settle how the assault on Outer Haven will go. Ends on the save prompt.",
+    "kind": "briefing"
+  },
+  "s20a00l_D3": {
+    "name": "Act 5 opens: Old Sun",
+    "description": "The Act 5 title card, then the Missouri under way: Mei Ling on the bridge with her crew, Snake, Otacon, Meryl and Rat Patrol on deck, and Drebin perched on a gun barrel offering Snake a drink before the run at Outer Haven."
+  },
+  "s30a00l": {
+    "name": "Meryl and Johnny's wedding",
+    "description": "The Epilogue title, Naked Sin, then the wedding on the airstrip by the Nomad: Meryl in her dress with Mei Ling, Campbell arriving to make peace with his daughter, Johnny at the altar, and Drebin's Stryker rolling up at the vows."
+  },
+  "s30a00l_D2": {
+    "name": "Raiden, Rose and their son",
+    "description": "Raiden wakes in a hospital bed in his new body. Rose visits with flowers and brings little John; she tells him the miscarriage and her marriage to Campbell were a cover to shield them from the Patriots, and he meets his son."
+  },
+  "s30a00l_D3": {
+    "name": "Drebin tells his story",
+    "description": "After the wedding. Drebin and Otacon sit by the Stryker with a bottle while Drebin admits he was raised a child soldier and worked for the Patriots, now that they are gone; Little Gray and the dancing wedding party around them."
+  },
+  "s00a10l_D8": {
+    "name": "The title logo, and nothing more",
+    "description": "A stub of the ending: the game boots to the Metal Gear Solid 4 logo and stays there. No scene follows; the credits and Final Results are their own entries."
   }
 }

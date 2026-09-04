@@ -77,7 +77,9 @@ namespace Mgs4Launcher
         // The frame the sweep grabbed of this scene, at the width the row draws it. Bound straight from the
         // template, so a scene the sweep never reached (or a build with no thumbnails in it) yields null and the
         // Image simply draws nothing - the placeholder behind it keeps the column aligned either way.
-        public ImageSource Thumb { get { return IsHeader ? null : Thumbs.Get(Id, 128); } }
+        // Decoded at the physical size they are drawn on a 4K screen at 200%: the row banner is 128 logical px
+        // wide, the pane 480 - a decode at the logical width was being stretched two to one.
+        public ImageSource Thumb { get { return IsHeader ? null : Thumbs.Get(Id, 256); } }
         public string ThumbVis { get { return !IsHeader && Thumbs.Has(Id) ? "Visible" : "Hidden"; } }
 
         // A filled star for a favorite, an outline for the rest. Both are one character wide, so the column does
@@ -401,10 +403,10 @@ namespace Mgs4Launcher
 
             // Decoded wider here than for a row: this one is drawn at a few hundred pixels, and asking for the
             // row's width would put a 128px image up at panel size.
-            System.Windows.Media.ImageSource shot = Thumbs.Get(scene.Id, 480);
+            System.Windows.Media.ImageSource shot = Thumbs.Get(scene.Id, 960);
             _pickShot.Fill = shot == null ? null : new System.Windows.Media.ImageBrush(shot)
             {
-                Stretch = System.Windows.Media.Stretch.UniformToFill,   // centred, unlike an Image's own crop
+                Stretch = System.Windows.Media.Stretch.Uniform,         // the whole frame; the box is 16:9 to fit it
             };
             _pickShotBox.Visibility = shot != null ? Visibility.Visible : Visibility.Collapsed;
 

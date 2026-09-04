@@ -28,7 +28,7 @@ import sweep_record as sr  # noqa: E402
 SWEEP = os.path.join(paths.OUT_DIR, "sweep")
 VIDEO = os.path.join(SWEEP, "video")
 PROBE = os.path.join(HERE, "stage_probe.csv")
-DIAGRAM_DEMO = 400
+DIAGRAM_DEMO = 430
 
 # expected verdicts from the review; "merge" names the id it should fold into
 CASES = [
@@ -55,6 +55,9 @@ CASES = [
     ("s04a30l_3", dict(kind="boss")),
     ("s02a50l_1", dict(kind="gameplay")),
     ("s04a70l", dict(kind="boss")),
+    ("s04a60l", dict(kind="boss")),
+    ("s04a60l_2", dict(kind="boss")),
+    ("s02a73l", dict(kind="gameplay")),
     ("s01a05l_D", dict(merge="s01a05l")),
     ("s01a10l_D1", dict(merge="s01a10l")),
 ]
@@ -132,6 +135,8 @@ def decide(eng, frames):
     stills = [f["still"] for f in early]
     if "codec" in stills:
         return "codec", "Codec screen on an early still (ruled %s)" % max(f["ruled"] for f in early)
+    if eng.get("boss"):
+        return "boss", "the engine loaded the boss music bank bgm_*_boss_%s" % eng["boss"]
     boss = next((f["boss"] for f in frames if f["boss"]), "")
     if boss:
         return "boss", "boss bar reads %r" % boss

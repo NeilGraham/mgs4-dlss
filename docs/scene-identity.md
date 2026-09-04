@@ -167,6 +167,27 @@ number is the same cutscene *from the same start*, not a chapter point inside it
 engine key merged nine pairs outright and the video comparison one (`s01a40l` / `s01a40l_1`, score 5.37 in a
 shared environment); the sweep now stops a repeat at 3 s, which is where five minutes of cutscene used to go.
 
+**The banks say more than identity.** A boss fight loads its own music bank - `bgm_sm_boss_vamp`,
+`bgm_boss_mantis01`, `E_bgm_ee_boss_raven_phase_01` for the Beauty phase - where an escort section (the Stryker
+legs, the motorcycle) loads `bgm_*_event_*`. That is the `boss` column of `stage_probe.csv` and what makes a
+row a Boss in the launcher; the name OCR'd off the second health bar only confirms it, and cannot read VAMP at
+all. The MGS1 dream (`s04a05l`) is the one entry the engine hands to another process, `mgs1.exe`, and the sweep
+records that instead of a 3D frame.
+
+**The banks say more than identity.** A boss fight loads its own music bank - `bgm_sm_boss_vamp`,
+`bgm_boss_mantis01`, `E_bgm_ee_boss_raven_phase_01` for the Beauty phase - where an escort section (the Stryker
+legs, the motorcycle) loads `bgm_*_event_*`. That is the `boss` column of `stage_probe.csv` and what makes a
+row a Boss in the launcher; the name OCR'd off the second health bar only confirms it, and cannot read VAMP at
+all. The MGS1 dream (`s04a05l`) is the one entry the engine hands to another process, `mgs1.exe`, and the sweep
+records that instead of a 3D frame.
+
+**The whole catalog, measured (2026-09-03).** 315 ids swept (the 105 that acts 1-3 had already measured as broken
+were left out): 256 boot, 57 die in the loader, 2 never draw a frame. 66 ids fold into another row - by demo
+number or video file outright, by a shared environment plus the video comparison for the rest - and every row
+that stands on its own carries a measured kind, a story position, a location banner, a name written from its
+contact sheets and a frame picked from them. `tools/verify_detection.py --cases` re-derives the reviewed
+verdicts from the recordings alone.
+
 ## Where things are
 
 | path | what it is |

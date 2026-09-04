@@ -17,19 +17,22 @@
     <SolidColorBrush x:Key="Text" Color="#ECECEE"/>
     <SolidColorBrush x:Key="Muted" Color="#97979F"/>
     <SolidColorBrush x:Key="Accent" Color="#7C9CFF"/>
+    <!-- 6 wide with a 4 px thumb, which is what Windows 11 draws for an idle overlay scrollbar. The thumb keeps a
+         minimum length: Track sizes it by the viewport-to-content ratio, and on a short window over a 400-row
+         list that came out a few pixels tall. -->
     <Style TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Width" Value="11"/>
+      <Setter Property="Width" Value="6"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ScrollBar">
             <Grid Background="Transparent">
               <Track x:Name="PART_Track" IsDirectionReversed="True">
                 <Track.Thumb>
-                  <Thumb>
+                  <Thumb MinHeight="40">
                     <Thumb.Template>
                       <ControlTemplate TargetType="Thumb">
-                        <Border x:Name="t" CornerRadius="4" Background="#35353C" Margin="3,2"/>
+                        <Border x:Name="t" CornerRadius="2" Background="#35353C" Margin="1,2"/>
                         <ControlTemplate.Triggers>
                           <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="t" Property="Background" Value="#4A4A54"/>
@@ -410,6 +413,7 @@
     <Style TargetType="ListBox">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
       <!-- By default a ListBox scrolls in whole rows, so an offset of 1 is one scene and the smooth scrolling
            below would move 72 rows rather than 72 pixels. ScrollUnit=Pixel keeps recycling virtualization (the
@@ -418,21 +422,28 @@
       <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
       <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel"/>
     </Style>
+    <!-- The picked row is a filled row with an accent bar down its left edge - not WPF's dotted keyboard-focus
+         rectangle (FocusVisualStyle null on the list and its items) and not a coloured rule under it. -->
     <Style TargetType="ListBoxItem">
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBoxItem">
             <Border x:Name="b" Background="Transparent" BorderBrush="#1B1B1E" BorderThickness="0,0,0,1" Padding="0">
-              <ContentPresenter/>
+              <Grid>
+                <ContentPresenter/>
+                <Rectangle x:Name="acc" Width="3" HorizontalAlignment="Left" Fill="#7C9CFF" Visibility="Collapsed"
+                           IsHitTestVisible="False"/>
+              </Grid>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="b" Property="Background" Value="#19191C"/>
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="b" Property="Background" Value="#232C48"/>
-                <Setter TargetName="b" Property="BorderBrush" Value="#3A5BD9"/>
+                <Setter TargetName="b" Property="Background" Value="#20263A"/>
+                <Setter TargetName="acc" Property="Visibility" Value="Visible"/>
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -514,7 +525,9 @@
 
       <Border Grid.Column="0" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}"
               BorderThickness="1" CornerRadius="10">
-        <Grid>
+        <!-- SceneCardBody is clipped to the card's rounded corners from code (MainWindow.RoundClip): the rows run
+             edge to edge and a square row would otherwise poke out of the bottom corners. -->
+        <Grid x:Name="SceneCardBody">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -530,7 +543,7 @@
               <WrapPanel x:Name="Filters" Margin="0,10,0,-6"/>
             </StackPanel>
           </Border>
-          <ListBox x:Name="SceneList" Grid.Row="1" Margin="0,4,0,6"/>
+          <ListBox x:Name="SceneList" Grid.Row="1" Margin="0"/>
         </Grid>
       </Border>
 
@@ -548,7 +561,9 @@
               <!-- The picked scene's own frame, filling the head of the panel edge to edge - no padding of its
                    own, which is why the padding moved off this Border and onto the block below it. Collapsed
                    rather than blank when there is none, so a crashing id does not sit under an empty grey box. -->
-              <Border x:Name="PickShotBox" Height="176" CornerRadius="10,10,0,0" ClipToBounds="True"
+              <!-- No fixed height: the box follows the panel's width at 16:9 (MainWindow keeps it so), and the
+                   whole frame shows - the crop is for the row banner, not for here. -->
+              <Border x:Name="PickShotBox" CornerRadius="10,10,0,0" ClipToBounds="True"
                       Background="#111114" Visibility="Collapsed">
                 <!-- ImageBrush, not Image: an Image with UniformToFill anchors the bitmap at its top-left and
                      clips the rest away, so a panel wider than 16:9 showed the corner of the frame. A brush

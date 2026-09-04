@@ -30,10 +30,10 @@ INFO = os.path.join(HERE, "scene_info.json")
 # fight is only distinguishable from ordinary gameplay by the name on the second health bar, and reading text
 # needs OCR that is not installed here. They are written by hand in scene_names.json instead.
 KEEP_KIND = {"start", "briefing"}
-# The engine numbers an act's in-engine cutscenes in the 300s and keeps a 400 series for the ones that are drawn
+# The engine numbers an act's in-engine cutscenes from 307 up through Act 5's 416 and keeps a series from 431 for the ones that are drawn
 # UI and schematics rather than a scene - Naomi's slides, EVA's ink sketches, the briefing diagrams (s02a50l_D2 =
 # 432, s03a30l_D3/D5/D7 = 433-435, s03a90l_D2 = 436). Those the launcher calls "video".
-DIAGRAM_DEMO = 400
+DIAGRAM_DEMO = 430
 # Compass points stay upper-case when the banner's capitals are folded: "MIDTOWN NW SECTOR" -> "Midtown NW Sector".
 KEEP_UPPER = {"N", "S", "E", "W", "NE", "NW", "SE", "SW"}
 
@@ -75,13 +75,15 @@ def lit(sid, kinds):
     return bool(f) and f.get("features", {}).get("dark", 0.0) > 0.02
 
 
-def measured_kind(sid, live, state, kinds, hud, demos, envs):
+def measured_kind(sid, live, state, kinds, hud, demos, envs, bosses):
     """What the scene is, from everything measured about it, strongest signal first.
 
     * A Codec call is read off the still (the call screen's ruled lines): it wins over the engine's "gameplay",
       which is what the engine says under a call (s01a30l), and over the psyche gauge, which stays up beside it.
-    * A boss fight is the boss's name on the second health bar, OCR'd from any of the stills (tools/hud_read.py).
-      It comes up a few seconds after Snake's own bar, which is why the last frame is read too.
+    * A boss fight is, first, the engine's own word: every one loads a bgm_*_boss_* music bank (the sweep's `boss`
+      column - vamp, octopus, raven, wolf, mantis, rex_vs_ray) where an escort section loads bgm_*_event_*. The
+      boss's name on the second health bar, OCR'd from the stills (tools/hud_read.py), is the second witness; the
+      OCR cannot read VAMP in the HUD's stencil face at all, which is why the bank comes first.
     * A 400-series demo is drawn UI and schematics: "video".
     * The ITEM ACQUIRED card with no HUD reads as a cutscene to the engine; it is a gameplay entry that opened on
       a pickup (s04a30l_D7).
@@ -99,7 +101,7 @@ def measured_kind(sid, live, state, kinds, hud, demos, envs):
     k = live.get(sid) if live.get(sid) in ("cutscene", "gameplay", "codec", "video") else None
     if still == "codec" or k == "codec":
         return "codec"
-    if h.get("boss"):
+    if bosses.get(sid) or h.get("boss"):
         return "boss"
     demo = demos.get(sid, "")
     if demo and all(int(d) >= DIAGRAM_DEMO for d in demo.split("+") if d.isdigit()):
@@ -186,7 +188,7 @@ def main():
     if not os.path.exists(PROBE):
         print("no %s - run the sweep first" % PROBE)
         return 1
-    probe, live, state, demos, envs = {}, {}, {}, {}, {}
+    probe, live, state, demos, envs, bosses = {}, {}, {}, {}, {}, {}
     with open(PROBE, newline="") as fh:
         for row in csv.DictReader(fh):
             probe[row["id"]] = row["result"]
@@ -194,6 +196,7 @@ def main():
             state[row["id"]] = row.get("state", "")
             demos[row["id"]] = row.get("demo", "")
             envs[row["id"]] = row.get("env", "")
+            bosses[row["id"]] = row.get("boss", "")
     kinds = json.load(open(KINDS)) if os.path.exists(KINDS) else {}
     hud = json.load(open(HUD, encoding="utf-8")) if os.path.exists(HUD) else {}
     names = json.load(open(NAMES)) if os.path.exists(NAMES) else {}
@@ -206,6 +209,8 @@ def main():
     named = kinded = 0
     for sid, result in sorted(probe.items()):
         counts[result] = counts.get(result, 0) + 1
+        if sid.startswith("@"):
+            continue                      # @main / @collection: the launcher makes those rows itself; only the thumbnail is theirs
         e = scenes.get(sid)
         if e is not None and "sameAs" in e:
             continue                      # an alias row: it follows the id it duplicates
@@ -218,7 +223,7 @@ def main():
                 # The sweep's own reading first: a demo loaded at boot makes a cutscene whatever the ~18 s still
                 # shows (by then it may have handed over to gameplay), and it saw the HUD stay up for gameplay.
                 # The still decides only what the sweep could not - and a Codec call is read off the still anyway.
-                k = measured_kind(sid, live, state, kinds, hud, demos, envs)
+                k = measured_kind(sid, live, state, kinds, hud, demos, envs, bosses)
                 if k:
                     e["kind"] = k
                     kinded += 1
@@ -229,16 +234,18 @@ def main():
                     e["name"] = n["name"]
                 if n.get("description"):
                     e["description"] = n["description"]
-                if n.get("kind") and not (hud.get(sid, {}).get("boss") and n["kind"] in ("cutscene", "gameplay")):
+                if n.get("kind") and not ((hud.get(sid, {}).get("boss") or bosses.get(sid)) and n["kind"] in ("cutscene", "gameplay")):
                     e["kind"] = n["kind"]  # a hand-assigned category wins over the measured one - except a boss bar
                 named += 1
         elif result == "no-scene" and lit(sid, kinds):
+            if e.get("description", "").startswith("Measured by tools"):
+                e.pop("description", None)
             # It ran the whole timeout showing something, and the engine never drew a 3D frame. That is what a
             # pre-rendered video looks like from out here: the picture is a decoded stream, not a rendered scene,
             # so the add-on reports no-3d throughout and scene detection never fires. Nothing to hide - it plays.
             if e.get("kind") not in KEEP_KIND:
                 # the bundled MGS1 is not a video: the sweep saw mgs1.exe running (s04a05l) - it is played
-                e["kind"] = "gameplay" if live.get(sid) == "mgs1" else "video"
+                e["kind"] = "gameplay" if live.get(sid) == "mgs1" else ("start" if live.get(sid) == "start" else "video")
                 kinded += 1
             e.pop("hidden", None)
             n = names.get(sid)

@@ -177,6 +177,17 @@ namespace Mgs4Launcher
             _pickWarn = (TextBlock)f("PickWarn");
             _pickShot = (System.Windows.Shapes.Rectangle)f("PickShot");
             _pickShotBox = (Border)f("PickShotBox");
+            // The picture box is as wide as the panel and 16:9, so the whole frame shows; the crop belongs to
+            // the row banner. Both it and the list's card are clipped to their rounded corners - a Border's
+            // CornerRadius shapes its own background and stroke only, and what it holds overflows the curve.
+            _pickShotBox.SizeChanged += (o, e) =>
+            {
+                double w = _pickShotBox.ActualWidth;
+                if (w > 0 && (double.IsNaN(_pickShotBox.Height) || Math.Abs(_pickShotBox.Height - w * 9 / 16) > 0.5)) _pickShotBox.Height = w * 9 / 16;
+                RoundClip(_pickShotBox, 10, true);
+            };
+            var sceneCardBody = (FrameworkElement)f("SceneCardBody");
+            sceneCardBody.SizeChanged += (o, e) => RoundClip(sceneCardBody, 10, false);
             _altRow = (FrameworkElement)f("AltRow");
             _altPick = (ComboBox)f("AltPick");
             _editBtn = (Button)f("EditBtn");
@@ -532,5 +543,14 @@ namespace Mgs4Launcher
                 if (it != null && it.Tag != null && it.Tag.ToString() == wxh) { _resPick.SelectedIndex = i; return; }
             }
         }
+        /// <summary>Clip an element to a rounded rectangle of its own size. topOnly rounds the top corners and
+        /// leaves the bottom square (the geometry runs past the bottom edge, and ClipToBounds squares it off).</summary>
+        static void RoundClip(FrameworkElement e, double radius, bool topOnly)
+        {
+            double w = e.ActualWidth, h = e.ActualHeight;
+            if (w <= 0 || h <= 0) { e.Clip = null; return; }
+            e.Clip = new System.Windows.Media.RectangleGeometry(new Rect(0, 0, w, topOnly ? h + radius : h), radius, radius);
+        }
+
 }
 }

@@ -1,15 +1,16 @@
-"""Packs one heavily-compressed frame per scene into tools/scene_thumbs.zip, which the launcher embeds and shows
-as the banner on each row and beside the description when a scene is picked.
+"""Packs one frame per scene into tools/scene_thumbs.zip, which the launcher embeds and shows as the banner on
+each row and beside the description when a scene is picked.
 
-  python tools/make_thumbs.py                 build from <MGS4_OUT>\\sweep
-  python tools/make_thumbs.py --width 240 --quality 55
+  python tools/make_thumbs.py                 build from <MGS4_OUT>\sweep
+  python tools/make_thumbs.py --width 640 --quality 60
 
-One entry per booting scene, named "<id>.jpg". The 20 s frame is preferred (it is the one the classifier judged);
-the 10 s frame, then the 1 s location frame, stand in when it is missing. Sized for the detail pane, not the row: the row banner draws at 64 logical px (128 at 200% DPI) and would be
-happy with a quarter of this, but the pane is a 150-logical-high box, which is 300 physical px on a 4K screen at
-200%. 480x270 covers that without upscaling. The ceiling is 640x360 - what the sweep itself captures - so past
-about 560 wide there is no more detail to recover, only bytes. At 480 / q62 a scene costs ~13 KB and ~180 scenes
-come to ~2.3 MB, against a 980 KB launcher.
+One entry per recorded scene, named "<id>.jpg". The frame is the one picked by eye from the scene's contact
+sheets and cut from its recording (tools/pick_thumbs.py -> <MGS4_OUT>\sweep\thumbs\<id>.jpg); until a scene has a
+pick, the sweep's own ~18 s still stands in (the ~9 s one, then the location frame, when that is missing).
+
+Sized for the detail pane at its physical size: the pane is 480 logical px wide, 960 on a 4K screen at 200%,
+and the launcher decodes at that width, so 960x540 shows without upscaling. At q74 a scene costs ~40 KB and ~200
+scenes come to ~8 MB inside the exe.
 """
 import os, sys, csv, io, zipfile
 from PIL import Image
@@ -26,7 +27,7 @@ OUT = os.path.join(HERE, "scene_thumbs.zip")
 
 def main():
     argv = sys.argv[1:]
-    width, quality = 480, 62
+    width, quality = 960, 74
     while argv:
         if argv[0] == "--width":
             width, argv = int(argv[1]), argv[2:]
@@ -47,12 +48,15 @@ def main():
     kept = 0
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_STORED) as z:   # the JPEGs are already compressed
         for sid in ids:
-            src = None
-            for suf in ("_b", "_a", "_loc"):
-                p = os.path.join(SHOTS, "%s%s.jpg" % (sid, suf))
-                if os.path.exists(p):
-                    src = p
-                    break
+            # the frame picked by eye (tools/pick_thumbs.py) first; the sweep's own stills only until there is one
+            src = os.path.join(SHOTS, "thumbs", sid + ".jpg")
+            if not os.path.exists(src):
+                src = None
+                for suf in ("_b", "_a", "_loc"):
+                    p = os.path.join(SHOTS, "%s%s.jpg" % (sid, suf))
+                    if os.path.exists(p):
+                        src = p
+                        break
             if not src:
                 continue
             full = Image.open(src).convert("RGB")

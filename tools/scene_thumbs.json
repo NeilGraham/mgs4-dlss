@@ -1,0 +1,774 @@
+{
+ "@collection": {
+  "offset": 30.0,
+  "why": "The Master Collection title screen: Snake's face and the logo"
+ },
+ "@main": {
+  "offset": 13.0,
+  "why": "MGS4's own main menu over the tree"
+ },
+ "s00a00l": {
+  "offset": 20.0,
+  "why": "Old Snake saluting among the headstones"
+ },
+ "s00a10l": {
+  "offset": 105.0,
+  "why": "Close on Snake's scarred face, lit"
+ },
+ "s00a10l_D2": {
+  "offset": 45.0,
+  "why": "Big Boss appears among the headstones"
+ },
+ "s00a10l_D3": {
+  "offset": 90.0,
+  "why": "Ink-wash splash with the Patriots' faces"
+ },
+ "s00a10l_D4": {
+  "offset": 20.0,
+  "why": "Big Boss's eyepatched face, Snake behind"
+ },
+ "s00a10l_D5": {
+  "offset": 45.0,
+  "why": "The wall of documents and photographs"
+ },
+ "s00a10l_D6": {
+  "offset": 285.0,
+  "why": "Snake and Big Boss face to face"
+ },
+ "s00a10l_D7": {
+  "offset": 9.0,
+  "why": "Credits roll, motion-capture cast centred"
+ },
+ "s00a10l_D8": {
+  "offset": 12.0,
+  "why": "MGS4 logo, the only content the boot reaches"
+ },
+ "s00a10l_D9": {
+  "offset": 30.0,
+  "why": "Final Results panel, steady and complete"
+ },
+ "s01a00l": {
+  "offset": 6.0,
+  "why": "Snake crouched by the truck, HUD up, banner just faded"
+ },
+ "s01a00l_D": {
+  "offset": 190.0,
+  "why": "Hooded Snake with AK and cigarette by the truck, face lit"
+ },
+ "s01a05l": {
+  "offset": 60.0,
+  "why": "Old Snake close-up, OctoCamo reveal, David Hayter credit"
+ },
+ "s01a10l": {
+  "offset": 40.0,
+  "why": "The Act 1: Liquid Sun card itself"
+ },
+ "s01a10l_1": {
+  "offset": 6.0,
+  "why": "Snake prone under the Praying Mantis poster, HUD up, no banner"
+ },
+ "s01a10l_D2": {
+  "offset": 125.0,
+  "why": "Snake with Solid Eye and Operator, lit by the grate window"
+ },
+ "s01a20l": {
+  "offset": 4.0,
+  "why": "Only tile where Snake is visible in night vision; banner still on"
+ },
+ "s01a20l_D": {
+  "offset": 110.0,
+  "why": "Drebin's face, clean, mid-lecture"
+ },
+ "s01a30l": {
+  "offset": 10.0,
+  "why": "Otacon's portrait drawn, 'Drebin does have a point' line"
+ },
+ "s01a30l_2": {
+  "offset": 4.0,
+  "why": "Snake prone by the crates; Drum Can acquired overlay on every tile"
+ },
+ "s01a30l_D2": {
+  "offset": 30.0,
+  "why": "PMC soldier aiming past the rusted oil drum, sharp and lit"
+ },
+ "s01a40l": {
+  "offset": 8.0,
+  "why": "Snake crouched at the doorway over the atrium, HUD up, banner gone"
+ },
+ "s01a40l_2": {
+  "offset": 125.0,
+  "why": "Meryl close-up across the table, face lit"
+ },
+ "s01a40l_D2": {
+  "offset": 195.0,
+  "why": "Rat Patrol lined up under the skylight: Ed, Meryl, Jonathan, Johnny"
+ },
+ "s01a40l_D3": {
+  "offset": 100.0,
+  "why": "Snake and Meryl together in the garage, both faces lit"
+ },
+ "s01a50l": {
+  "offset": 6.0,
+  "why": "Snake prone in the garage with the M4, HUD up, banner gone"
+ },
+ "s01a55l": {
+  "offset": 85.0,
+  "why": "Militia firing at a Gekko beside the bulldozer, sharp and lit"
+ },
+ "s01a57l": {
+  "offset": 6.0,
+  "why": "Snake prone by the burnt-out car, HUD up, banner gone"
+ },
+ "s01a60l": {
+  "offset": 180.0,
+  "why": "Liquid Ocelot close-up on the balcony, face lit"
+ },
+ "s01a60l_D2": {
+  "offset": 205.0,
+  "why": "Liquid Ocelot face, clear and lit, mid-gloat"
+ },
+ "s02a10l": {
+  "offset": 85.0,
+  "why": "Snake face lit in the tall grass, act opening"
+ },
+ "s02a10l_1": {
+  "offset": 8.0,
+  "why": "Snake prone by the village house, no caption overlay"
+ },
+ "s02a10l_D2": {
+  "offset": 12.0,
+  "why": "Campbell portrait, 'Psychological counselor?'"
+ },
+ "s02a20l": {
+  "offset": 12.0,
+  "why": "Codec with the unknown caller's symbol, 'That voice.'"
+ },
+ "s02a20l_10": {
+  "offset": 6.0,
+  "why": "Snake crouched in grass behind the boulder"
+ },
+ "s02a20l_3": {
+  "offset": 2.0,
+  "why": "Snake at the ravine mouth under the bright sky"
+ },
+ "s02a20l_4": {
+  "offset": 6.0,
+  "why": "Snake crouched on the track beside the brick wall"
+ },
+ "s02a20l_6": {
+  "offset": 6.0,
+  "why": "Snake against the rock face, road and fence beyond"
+ },
+ "s02a20l_8": {
+  "offset": 6.0,
+  "why": "Snake in the grass between the boulders"
+ },
+ "s02a25l": {
+  "offset": 45.0,
+  "why": "Drebin holds the apple out to Snake, EYE HAVE YOU behind"
+ },
+ "s02a25l_D3": {
+  "offset": 55.0,
+  "why": "SOP schematic with the Patriots' founders' portraits"
+ },
+ "s02a25l_D4": {
+  "offset": 35.0,
+  "why": "Drebin reaches to shake Snake's hand at the Stryker door"
+ },
+ "s02a30l": {
+  "offset": 6.0,
+  "why": "Snake on the jungle track between the rocks"
+ },
+ "s02a30l_1": {
+  "offset": 10.0,
+  "why": "Codec, unknown caller: 'This is Jack, isn't it?'"
+ },
+ "s02a30l_11": {
+  "offset": 6.0,
+  "why": "Snake crouched at the rock face, watchtower ahead"
+ },
+ "s02a30l_2": {
+  "offset": 6.0,
+  "why": "Snake crouched at the edge of the dirt road"
+ },
+ "s02a30l_3": {
+  "offset": 12.0,
+  "why": "Codec: 'I am Raiden. Jack is no more.'"
+ },
+ "s02a30l_5": {
+  "offset": 12.0,
+  "why": "Codec at the fence line: 'I am Raiden. Jack is no more.'"
+ },
+ "s02a30l_6": {
+  "offset": 6.0,
+  "why": "Snake at the ridge fence, compound and tower below"
+ },
+ "s02a30l_7": {
+  "offset": 6.0,
+  "why": "Snake on the track under the pylons, huts ahead"
+ },
+ "s02a30l_9": {
+  "offset": 6.0,
+  "why": "Snake behind the boulder, watchtowers across the yard"
+ },
+ "s02a40l": {
+  "offset": 6.0,
+  "why": "Snake crouched in the dry gully"
+ },
+ "s02a40l_2": {
+  "offset": 6.0,
+  "why": "Snake inside the roofless outbuilding looking out"
+ },
+ "s02a40l_3": {
+  "offset": 10.0,
+  "why": "Snake crouched beside the rebels' bulldozer"
+ },
+ "s02a50l": {
+  "offset": 155.0,
+  "why": "Naomi's face, looking up from the desk"
+ },
+ "s02a50l_1": {
+  "offset": 5.0,
+  "why": "Snake standing in the lab; only tile without the syringe item card"
+ },
+ "s02a50l_2": {
+  "offset": 5.0,
+  "why": "Snake in the doorway with Octopus's tentacles behind; rest of the recording is Snake on the floor"
+ },
+ "s02a50l_3": {
+  "offset": 5.0,
+  "why": "Snake facing the Beauty across the lab; only tile with her in it"
+ },
+ "s02a50l_4": {
+  "offset": 6.0,
+  "why": "Snake crouched by the boulder, white gate ahead"
+ },
+ "s02a50l_D2": {
+  "offset": 50.0,
+  "why": "Body scan with the nanomachine and founders diagram"
+ },
+ "s02a50l_D3": {
+  "offset": 270.0,
+  "why": "Snake's face close up, taking the diagnosis"
+ },
+ "s02a50l_D5": {
+  "offset": 58.0,
+  "why": "Laughing Octopus upright, framed by her tentacle rings"
+ },
+ "s02a50l_D6": {
+  "offset": 92.0,
+  "why": "Laughing Beauty's face, smiling, lit by the window"
+ },
+ "s02a50l_D7": {
+  "offset": 30.0,
+  "why": "The Beauty's face on the floor among the petals"
+ },
+ "s02a50l_D8": {
+  "offset": 85.0,
+  "why": "Snake holding up the FaceCamo"
+ },
+ "s02a60l": {
+  "offset": 64.0,
+  "why": "Snake crouched with his hand on the ground, reading the trail"
+ },
+ "s02a60l_2": {
+  "offset": 6.0,
+  "why": "Snake behind the tree on the Mountain Trail"
+ },
+ "s02a60l_3": {
+  "offset": 6.0,
+  "why": "Snake prone in the tall grass, ridge beyond"
+ },
+ "s02a70l": {
+  "offset": 65.0,
+  "why": "Vamp and Naomi at the chopper door on the helipad"
+ },
+ "s02a73l": {
+  "offset": 8.0,
+  "why": "Snake on the Stryker's roof gun, Vista Mansion ahead"
+ },
+ "s02a75l": {
+  "offset": 12.0,
+  "why": "Snake on the turret, Gekko bounding after the Stryker"
+ },
+ "s02a78l": {
+  "offset": 10.0,
+  "why": "The turret against the Power Station valley"
+ },
+ "s02a80l": {
+  "offset": 10.0,
+  "why": "Snake on the turret out of the tunnel, highway ahead"
+ },
+ "s02a85l": {
+  "offset": 210.0,
+  "why": "Raiden, eyes glowing, sword out against the Gekko"
+ },
+ "s02a90l": {
+  "offset": 6.0,
+  "why": "Snake crouched among the market stalls, no caption"
+ },
+ "s02a95l": {
+  "offset": 90.0,
+  "why": "Vamp with his knife, Raiden squaring up behind him"
+ },
+ "s03a00l": {
+  "offset": 10.0,
+  "why": "Act 3: Third Sun card fully drawn"
+ },
+ "s03a00l_D1": {
+  "offset": 10.0,
+  "why": "station concourse, Snake in coat by the lamp"
+ },
+ "s03a10l": {
+  "offset": 2.0,
+  "why": "Snake crouched by the dumpster, only tile without item card"
+ },
+ "s03a10l_2": {
+  "offset": 10.0,
+  "why": "Snake beside the van, street lamps behind"
+ },
+ "s03a10l_4": {
+  "offset": 4.0,
+  "why": "Snake crouched under the arched doorway"
+ },
+ "s03a15l": {
+  "offset": 2.0,
+  "why": "Snake running past the statue into Central Sector"
+ },
+ "s03a15l_2": {
+  "offset": 10.0,
+  "why": "Snake in the fountain courtyard, statue lit"
+ },
+ "s03a16l": {
+  "offset": 6.0,
+  "why": "Snake by the parked car, arched windows lit"
+ },
+ "s03a16l_1": {
+  "offset": 2.0,
+  "why": "lamp glow in the dark passage; all tiles near-black"
+ },
+ "s03a20l": {
+  "offset": 10.0,
+  "why": "Snake on the gated street, van and lamp behind"
+ },
+ "s03a20l_2": {
+  "offset": 10.0,
+  "why": "Snake under the single alley lamp"
+ },
+ "s03a25l": {
+  "offset": 6.0,
+  "why": "Snake crouched in the narrow alley, lit doorway; all tiles dark"
+ },
+ "s03a30l": {
+  "offset": 120.0,
+  "why": "Big Mama's face revealed, church behind"
+ },
+ "s03a30l_D2": {
+  "offset": 105.0,
+  "why": "Big Mama face on, lit, in the library"
+ },
+ "s03a30l_D3": {
+  "offset": 105.0,
+  "why": "the Patriots founders sketch, all six faces"
+ },
+ "s03a30l_D4": {
+  "offset": 25.0,
+  "why": "Big Mama in profile at the altar, Snake behind"
+ },
+ "s03a30l_D5": {
+  "offset": 60.0,
+  "why": "DNA helix with the twin infant photos"
+ },
+ "s03a30l_D6": {
+  "offset": 90.0,
+  "why": "the painting of Big Boss with EVA and Ocelot"
+ },
+ "s03a30l_D7": {
+  "offset": 250.0,
+  "why": "Snake and Big Mama in the courtyard doorway"
+ },
+ "s03a30l_D8": {
+  "offset": 265.0,
+  "why": "Big Mama's face as her man raises the Mauser"
+ },
+ "s03a35l": {
+  "offset": 6.0,
+  "why": "bike and vans bursting out of the church gate"
+ },
+ "s03a40l": {
+  "offset": 10.0,
+  "why": "Snake pillion behind Big Mama beside the Humvee"
+ },
+ "s03a50l": {
+  "offset": 40.0,
+  "why": "Sliders swooping on the bike, Snake and Big Mama"
+ },
+ "s03a60l": {
+  "offset": 8.0,
+  "why": "Snake and Big Mama on the bike, headlight blazing"
+ },
+ "s03a65l": {
+  "offset": 90.0,
+  "why": "Snake holding the hurt Big Mama under the arches"
+ },
+ "s03a70l": {
+  "offset": 98.0,
+  "why": "Snake aiming the M4 at Raging Raven hovering in the arch"
+ },
+ "s03a70l_1": {
+  "offset": 8.0,
+  "why": "Snake at the pillar with Raven's bar up; all tiles dark"
+ },
+ "s03a70l_2": {
+  "offset": 8.0,
+  "why": "Raging Beauty walking at Snake, her bar up"
+ },
+ "s03a70l_D3": {
+  "offset": 145.0,
+  "why": "Raging Beauty unmasked, face to camera"
+ },
+ "s03a70l_D4": {
+  "offset": 70.0,
+  "why": "Snake hefting the MGL-140"
+ },
+ "s03a70l_D5": {
+  "offset": 5.0,
+  "why": "the Beauty's face in a storm of feathers"
+ },
+ "s03a80l": {
+  "offset": 105.0,
+  "why": "Big Mama's face under the lit arches"
+ },
+ "s03a90l": {
+  "offset": 130.0,
+  "why": "Liquid and Snake face to face on the riverside"
+ },
+ "s03a90l_D2": {
+  "offset": 170.0,
+  "why": "Liquid raising his fist over the river"
+ },
+ "s03a90l_D3": {
+  "offset": 45.0,
+  "why": "Snake convulsing as the System turns on him"
+ },
+ "s03a90l_D4": {
+  "offset": 168.0,
+  "why": "Liquid's mock salute, the System his"
+ },
+ "s03a90l_D5": {
+  "offset": 267.0,
+  "why": "Snake cradling the dying Big Mama, boat burning behind"
+ },
+ "s04a05l": {
+  "offset": 12.0,
+  "why": "MGS1's dock, the only lit tiles"
+ },
+ "s04a10l": {
+  "offset": 10.0,
+  "why": "Snake seated in the helicopter cabin, Alaskan storm in the window"
+ },
+ "s04a10l_1": {
+  "offset": 2.0,
+  "why": "Snake kneeling in the whiteout, Snowfield checkpoint banner"
+ },
+ "s04a10l_10": {
+  "offset": 2.0,
+  "why": "Snake in the hangar doorway, wrecked truck in the canyon beyond"
+ },
+ "s04a10l_11": {
+  "offset": 4.0,
+  "why": "Snake crouched in the doorway, canyon pines and truck in view"
+ },
+ "s04a10l_12": {
+  "offset": 10.0,
+  "why": "Snake on the canyon floor under the rock wall"
+ },
+ "s04a10l_2": {
+  "offset": 4.0,
+  "why": "Snake on the rocky pass between the cliffs"
+ },
+ "s04a10l_3": {
+  "offset": 4.0,
+  "why": "Snake on the ridge, heliport and hangar through the blizzard"
+ },
+ "s04a10l_4": {
+  "offset": 4.0,
+  "why": "Snake crouched beside the parked trucks on the helipad"
+ },
+ "s04a10l_5": {
+  "offset": 4.0,
+  "why": "Snake at the gantry rail over the heliport"
+ },
+ "s04a10l_6": {
+  "offset": 2.0,
+  "why": "Snake striding out between the cliff walls, Heliport banner"
+ },
+ "s04a10l_7": {
+  "offset": 4.0,
+  "why": "Snake in the icicle-hung trench"
+ },
+ "s04a10l_8": {
+  "offset": 4.0,
+  "why": "Snake in the snowed concrete gallery by the grating"
+ },
+ "s04a10l_9": {
+  "offset": 2.0,
+  "why": "Snake at the hangar door, the old tank inside, Tank Hangar banner"
+ },
+ "s04a10l_D2": {
+  "offset": 90.0,
+  "why": "Snake in the snow, hand to his ear, face lit"
+ },
+ "s04a20l": {
+  "offset": 4.0,
+  "why": "icy 1F loading bay, Snake prone, Warhead Storage 1F banner"
+ },
+ "s04a20l_2": {
+  "offset": 4.0,
+  "why": "Snake in the B2 corridor by the cell doors, B2 banner"
+ },
+ "s04a20l_3": {
+  "offset": 4.0,
+  "why": "Snake among the lab cubicles, B2 banner"
+ },
+ "s04a20l_5": {
+  "offset": 4.0,
+  "why": "Snake on the walkway over the warhead racks, 1F banner"
+ },
+ "s04a20l_7": {
+  "offset": 4.0,
+  "why": "overhead of the empty storage hall, 1F banner"
+ },
+ "s04a20l_D": {
+  "offset": 90.0,
+  "why": "Snake's face close-up at Otacon's terminal"
+ },
+ "s04a30l": {
+  "offset": 4.0,
+  "why": "Snake stepping out onto the snowfield, Snowfield & Comms Tower banner"
+ },
+ "s04a30l_2": {
+  "offset": 12.0,
+  "why": "Snake at the fallen tree by the trucks, Crying Wolf's bar up"
+ },
+ "s04a30l_3": {
+  "offset": 6.0,
+  "why": "Snake with the Operator and the Beauty at his shoulder, her bar up"
+ },
+ "s04a30l_D1": {
+  "offset": 40.0,
+  "why": "Crying Wolf pouncing with the rail gun"
+ },
+ "s04a30l_D2": {
+  "offset": 65.0,
+  "why": "the Beauty weeping, close-up in the snow"
+ },
+ "s04a30l_D4": {
+  "offset": 75.0,
+  "why": "Snake holding the rail gun among the pines"
+ },
+ "s04a30l_D5": {
+  "offset": 60.0,
+  "why": "Snake's face close-up in the falling snow"
+ },
+ "s04a30l_D6": {
+  "offset": 60.0,
+  "why": "the white wolf carrying Crying Wolf's body off"
+ },
+ "s04a30l_D7": {
+  "offset": 5.0,
+  "why": "FaceCamo item card (the scene is the popup; later tiles are the desktop)"
+ },
+ "s04a50l": {
+  "offset": 2.0,
+  "why": "Snake with rifle in the dark concrete passage, Underground Base banner"
+ },
+ "s04a50l_D": {
+  "offset": 110.0,
+  "why": "Snake face to face with REX's rusted head"
+ },
+ "s04a60l": {
+  "offset": 34.0,
+  "why": "Vamp close and bare-chested, both health bars up"
+ },
+ "s04a60l_2": {
+  "offset": 44.0,
+  "why": "Split screen: Raiden with his blade, Snake on the rail gun"
+ },
+ "s04a60l_D1": {
+  "offset": 65.0,
+  "why": "Vamp with Naomi at his side, both faces lit"
+ },
+ "s04a60l_D2": {
+  "offset": 150.0,
+  "why": "Raiden with his blade drawn across his face"
+ },
+ "s04a60l_D3": {
+  "offset": 150.0,
+  "why": "Naomi holding the syringe over Vamp, her face lit"
+ },
+ "s04a65l": {
+  "offset": 2.0,
+  "why": "REX striding up the Surface Tunnel, self-destruct clock and banner"
+ },
+ "s04a68l": {
+  "offset": 55.0,
+  "why": "RAY leaping down onto the docks"
+ },
+ "s04a70l": {
+  "offset": 4.0,
+  "why": "REX squared up to RAY, both bars up, Port Area banner"
+ },
+ "s04a75l": {
+  "offset": 100.0,
+  "why": "Snake's bloodied face in the rain on the pier"
+ },
+ "s04a75l_D2": {
+  "offset": 125.0,
+  "why": "Snake kneeling on the pier as Outer Haven looms"
+ },
+ "s04a75l_D3": {
+  "offset": 15.0,
+  "why": "Liquid's face on Outer Haven's deck"
+ },
+ "s05a10l": {
+  "offset": 2.0,
+  "why": "Snake standing at the ship bow, HUD up"
+ },
+ "s05a10l_D": {
+  "offset": 65.0,
+  "why": "Snake's face lit, M4 in hand, at the bow"
+ },
+ "s05a20l": {
+  "offset": 6.0,
+  "why": "Command center corridor, HUD up; Snake never in frame"
+ },
+ "s05a20l_11": {
+  "offset": 6.0,
+  "why": "Snake running the missile hangar catwalk"
+ },
+ "s05a20l_12": {
+  "offset": 10.0,
+  "why": "Snake facing the Haven Trooper rush on the catwalk"
+ },
+ "s05a20l_2": {
+  "offset": 2.0,
+  "why": "Snake aiming the M4 close-up in the command center"
+ },
+ "s05a20l_5": {
+  "offset": 6.0,
+  "why": "Snake aiming, Meryl down, Screaming Mantis and Meryl bars up"
+ },
+ "s05a20l_6": {
+  "offset": 4.0,
+  "why": "Screaming Beauty grabbing Snake, boss bar up"
+ },
+ "s05a20l_D1": {
+  "offset": 25.0,
+  "why": "Snake standing lit in the command center"
+ },
+ "s05a20l_D10": {
+  "offset": 50.0,
+  "why": "Screaming Mantis floating with her puppets, arms spread"
+ },
+ "s05a20l_D11": {
+  "offset": 65.0,
+  "why": "Meryl and Snake back to back with pistols"
+ },
+ "s05a20l_D12": {
+  "offset": 240.0,
+  "why": "Johnny and Meryl face to face at the corridor door"
+ },
+ "s05a20l_D2": {
+  "offset": 135.0,
+  "why": "Screaming Mantis hovering, four arms spread, lit"
+ },
+ "s05a20l_D5": {
+  "offset": 245.0,
+  "why": "Screaming Beauty striding out across the command center"
+ },
+ "s05a20l_D8": {
+  "offset": 145.0,
+  "why": "Snake aiming the Operator straight down the lens"
+ },
+ "s05a20l_D9": {
+  "offset": 125.0,
+  "why": "Psycho Mantis's ghost spread over the empty Mantis rig"
+ },
+ "s05a30l": {
+  "offset": 105.0,
+  "why": "Raiden holding the door, blade clenched in his teeth"
+ },
+ "s05a40l": {
+  "offset": 282.0,
+  "why": "Snake's face lit red among the GW server racks"
+ },
+ "s05a45l": {
+  "offset": 80.0,
+  "why": "Liquid standing over the fallen Snake against the sunset"
+ },
+ "s05a45l_D": {
+  "offset": 165.0,
+  "why": "Liquid Ocelot close-up, sunset behind"
+ },
+ "s05a50l": {
+  "offset": 5.0,
+  "why": "Snake and Liquid squared up on the deck at sunset, both bars up"
+ },
+ "s05a50l_D": {
+  "offset": 225.0,
+  "why": "Snake's punch landing on Liquid, both faces lit by the sunset"
+ },
+ "s05a55l": {
+  "offset": 70.0,
+  "why": "Snake kneeling over Liquid on the deck at sunset"
+ },
+ "s10a20l": {
+  "offset": 110.0,
+  "why": "Sunny and Otacon in the Nomad's cabin"
+ },
+ "s10a20l_D2": {
+  "offset": 190.0,
+  "why": "Otacon and Snake at the Nomad's monitors"
+ },
+ "s10a30l": {
+  "offset": 200.0,
+  "why": "Naomi placing the blue flower in Sunny's hair"
+ },
+ "s10a30l_D2": {
+  "offset": 30.0,
+  "why": "Naomi and Sunny at the stove, both faces"
+ },
+ "s10a40l": {
+  "offset": 70.0,
+  "why": "Sunny smiling at the blue flower"
+ },
+ "s10a40l_D": {
+  "offset": 30.0,
+  "why": "Sunny holding the flower, close and lit"
+ },
+ "s20a00l": {
+  "offset": 185.0,
+  "why": "Mei Ling's face aboard the Missouri"
+ },
+ "s20a00l_D2": {
+  "offset": 40.0,
+  "why": "Snake's cigarette under the No Smoking sign"
+ },
+ "s20a00l_D3": {
+  "offset": 15.0,
+  "why": "Act 5 Old Sun title card, steady"
+ },
+ "s30a00l": {
+  "offset": 205.0,
+  "why": "Meryl in her wedding dress and Johnny walking off the ramp"
+ },
+ "s30a00l_D2": {
+  "offset": 245.0,
+  "why": "Raiden's face, in the hospital bed"
+ },
+ "s30a00l_D3": {
+  "offset": 225.0,
+  "why": "Drebin and Otacon beside the DREBINS APC at sunset"
+ }
+}
