@@ -112,6 +112,42 @@ which is the one case where a tool that needs the game folder still has to be us
 
 ## Play
 
+**The tab has two views, and it opens on the one that gives nothing away.** The scene list is a spoiler: it names
+every cutscene in the game, in the order the story tells them, with a frame of itself on each row — who is in it,
+where it happens and how it ends. That is exactly what the person measuring the catalog wants and exactly what
+someone who has not finished MGS4 does not.
+
+- **Just the ways to start the game** (the default) is three cards: **Start the game** (`--main`, straight to the
+  menu selection), **Start from the title screen** (`s10a10l`, the logos and PRESS ANY BUTTON first) and **Master
+  Collection launcher** (`--collection`). A picture of each, its name and what it is under that; click to pick, and
+  **Launch**, **Enter** or a double-click starts it. Each card wears a **Fast** / **Normal** / **Slow** tag in the
+  top corner of its picture — green, amber, red — for how long that route makes you wait before you are in the
+  game: the menu straight away, the logos and the title screen first, or a second program to get through before
+  MGS4 starts at all. One automation is offered, **Skip the boot prompts**, off as
+  it comes — and enabled only on the title-screen boot, because the other two open a menu, where a button press
+  picks an entry rather than getting past a prompt. It sits in a card with the three buttons on its right, the same
+  shape as Setup's "do it for me" rows.
+- **All scenes** is the working view described in the rest of this section: the search box, the filter chips and
+  the four hundred rows.
+
+**The bottom bar switches them**, in both directions and from either side — **Show all scenes** one way, **Just the
+start options** the other. That strip carries nothing else on this tab, and a switch that is only reachable from
+one of two views is a switch you can be stranded away from. Going *towards* the scene list asks first, in as many
+words, and asks **once ever**: `SpoilerSeen` in `launcher.json` remembers the answer, because the warning is worth
+reading the first time and is nagging by the third, and someone who has said yes has already seen what is behind
+it. Coming back asks nothing.
+
+Which view is on is `MGS4_PLAY_VIEW` in `config.ini` — `simple` (or nothing, or anything unrecognised) and `all`.
+Settings has it as **Play tab** in the **Launcher** card, and the bottom bar's button writes the same key, so the
+two never disagree. It is machine-local like every other `config.ini` key, so a release opens on the safe side on a
+machine that has never run it.
+
+**The simple view is centred in whatever room it has**, bounded to 1400 px wide, rather than piled against the top
+with the slack under it: three 16:9 cards side by side cannot fill a tall window however they are laid out - their
+height is a third of the width - so the leftover goes above and below (a little more below, which is where the eye
+reads a block as centred) instead of all in one place. `MinHeight` on the block is the ScrollViewer's own
+`ViewportHeight`, so a window too short for it drops back to scrolling.
+
 The list is `tools\scenes.csv` (the stage table) with everything the sweep measured and wrote about each id in
 `tools\scene_info.json` - kind, name, description, location, story order, duplicates - plus the two ways of starting the game itself. Pick one, tick what should happen while it
 runs, press Launch. The panel shows the command line that does the same thing, so anything set up in the window can
@@ -190,7 +226,10 @@ lists both, not their overlap.
   and the no-3D gaps around it were then presented with no tags of their own. The add-on now switches frame
   generation off across those gaps (fixed 2026-09-02), so the entry stands on its own.
 - **`s10a10l`** is the same boot the long way round: only the Master Collection launcher skipped, so the pre-menu
-  credits and PRESS START play first. Listed as "Start the game, from the credits".
+  credits and PRESS START play first. Listed as "Start from the title screen". It is the one start entry the run
+  options mean anything on - `Runner.Run` refuses them for `@main` and `@collection` (`Catalog.IsMenuEntry`),
+  because those land on a menu where a press picks NEW GAME rather than getting past a prompt, and this one is the
+  game starting itself with a first 3D frame - the title over the cemetery - for the press loop to stop at.
 - **Inside a stage, the cutscenes come before the gameplay**: `s01a10l`, then `s01a10l_D1` and `_D2`, then
   `s01a10l_01` onwards. Sorting on the id alone puts `_00` first, because a digit sorts before a letter, which is
   backwards - the demo of a stage plays before the sections it introduces. `_D10` also sorts after `_D9` rather
@@ -298,10 +337,48 @@ on the Master Collection screen first, so a plain "run the game" shortcut needs 
 
 ## Settings
 
-**Every group says whose setting it is**, in a badge left of its title: **Game**, **MGS4 DLSS**, **RenoDX**, and
-**Debug** alongside the add-on's on the diagnostics, which cost frames and are not for normal play. The game's
-groups come first, because they are the ones that have to be right before any of the rest matters. Each card names
-the file - or files - its rows are written to.
+**Every group says whose setting it is**, in a badge left of its title: **Launcher**, **Game**, **MGS4 DLSS**,
+**RenoDX**, and **Debug** alongside the add-on's on the diagnostics, which cost frames and are not for normal play.
+The window's own group leads, then the game's, because those are the ones that have to be right before any of the
+rest matters. Each card names the file - or files - its rows are written to.
+
+- **Launcher** — *this window's own*, in `config.ini`. **Play tab** (`MGS4_PLAY_VIEW`) is which of the two Play
+  views is on: the three ways to start the game, or every scene in it. **Menu music** (`MGS4_MUSIC`) and **Music
+  volume** (`MGS4_MUSIC_VOLUME`) are below it — see the section under this one. These are the settings about the
+  app rather than about the game, which is why the card wears a badge of its own rather than the Game one the other
+  two `config.ini` keys take - those are the game's settings kept in our file.
+
+### Menu music
+
+The window can play the game's own soundtrack while it is open. **None**, **Random**, or one of the tracks the
+install actually has — the list is read off disk when the form is built, so it is that machine's answer rather than
+a list written here. It stops the moment a run starts and comes back when the game is gone: the game gets the
+speakers to itself.
+
+**Where the music is.** `<GameDir>\common\bank\default`, one FMOD Studio bank per track and named for the track:
+`At_Dawn.bank`, `Sea_Breeze.bank`, `Beyond_The_Bounds.bank`. 272 banks there, 73 of them named tracks — the rest
+are the combat and alert cues (`bgm_*`), the per-stage ambience (`env_*`) and FMOD's own project banks, none of
+which is music to sit a menu on. 48 kHz stereo, two and a half to four and a half minutes each.
+
+**Why it needs a decoder.** Inside each bank is a RIFF/`FEV` wrapper around an FSB5 block, and the audio in that is
+Vorbis — but FMOD strips the setup headers out of the stream and leaves a CRC naming which codebooks it was built
+against (`0xc4c30a29`, the same for every track here). Without those codebooks not one byte decodes. **ffmpeg
+cannot do it**: it has an `fsb` demuxer, but carving the FSB5 out and feeding it in answers `version 5 is not
+implemented` — FSB3 and FSB4 only. `vgmstream` carries the codebook table and reads these directly, at about a
+third of a second for a three-and-a-half-minute track.
+
+**How the decoder gets there.** It is not shipped here — the release is still the one exe. The **Download
+vgmstream** button in the Launcher card fetches it (about 4 MB, from vgmstream's own GitHub release) into
+`%LOCALAPPDATA%\mgs4-dlss-launcher\tools\vgmstream`. It is a press rather than something the app does on its own
+the first time it runs: that is this program reaching out to the internet, and it is the person's call. Already
+have one? `MGS4_VGMSTREAM` in `config.ini` names it, and a `vgmstream-cli.exe` on PATH is found too. With no
+decoder the setting still shows and says what is missing, the way "Keep pressing X" explains ViGEmBus.
+
+**Nothing of Konami's is copied into this repo or into a release.** The banks are read from the install the person
+already owns, decoded into a cache under their own `%LOCALAPPDATA%\mgs4-dlss-launcher\music`, and played there —
+the same rule the window already follows for the key art and the game's icon. The cache keeps the four
+most-recently-used tracks and drops the rest; a decode is a third of a second and a WAV is 40 MB, so keeping every
+track anyone ever tried would be paying gigabytes to save nothing.
 
 - **Display** and **Quality** — *the game's own*, out of `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`, the
   same file its in-game menu writes: renderer (`api`), display index, vsync, frame limiter, the four quality levels

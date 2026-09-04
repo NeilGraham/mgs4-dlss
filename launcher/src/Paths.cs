@@ -137,6 +137,10 @@ namespace Mgs4Launcher
             }
         }
 
+        // config.ini is read once and kept - it is asked for on every launch and every settings row. Anything that
+        // writes the file says so here, or the process goes on believing what it read at startup.
+        public static void ForgetConfig() { _config = null; }
+
         public static string Setting(string key, string fallback)
         {
             string v = Environment.GetEnvironmentVariable(key);
@@ -317,7 +321,7 @@ namespace Mgs4Launcher
             string folder = Path.GetDirectoryName(ConfigPath);
             if (!Exists(folder)) Directory.CreateDirectory(folder);
             File.WriteAllLines(ConfigPath, lines.ToArray());
-            _config = null;
+            ForgetConfig();
             return ConfigPath;
         }
     }

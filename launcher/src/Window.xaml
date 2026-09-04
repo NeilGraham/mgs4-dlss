@@ -654,6 +654,63 @@
       </Border>
     </Grid>
 
+    <!-- The Play tab as it opens: the three ways to start the game, and nothing that says what is in the rest of
+         it. The scene list next door names all four hundred entries and shows a frame of each, which is the whole
+         story given away to anyone who has not played it - so it is behind the setting this view's own button
+         writes (Settings, Launcher, "Play tab"). The cards themselves are built in MainWindow.Start.cs: they carry
+         thumbnails, and the pictures are data. -->
+    <Grid x:Name="StartView" Grid.Row="1" Margin="22,16,22,16" Visibility="Collapsed">
+      <ScrollViewer x:Name="StartScroll" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0" Background="Transparent">
+        <!-- The tab has one thing to say, so what is left over is split above and below it rather than left in a
+             heap under the last button - a little more below than above, which is where the eye reads a block as
+             centred. MinHeight is the viewport, so on a window too short for the block the rows collapse to
+             nothing and it simply scrolls as it did. -->
+        <Grid MinHeight="{Binding ViewportHeight, ElementName=StartScroll}">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="0.7*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*"/>
+          </Grid.RowDefinitions>
+          <!-- Bounded as well as centred. Stretched across a 4K-wide window the three cards become billboards with
+               two lines of text lost in the middle of them; held to this, the block stays the size it was designed
+               at and the extra room goes round the outside, which is what the space is for. -->
+          <StackPanel Grid.Row="1" MaxWidth="1400" HorizontalAlignment="Center">
+            <TextBlock Text="Start the game" FontSize="19" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+            <TextBlock Text="Where MGS4 opens. Pick one and press Launch, or double-click it."
+                       FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+            <!-- Three across on a wide window, fewer as it narrows: MainWindow.Start.cs sets the column count from
+                 this panel's own width, so the cards never squeeze below a readable one. The negative side margins
+                 cancel each card's own, so the row lines up with the card below it. -->
+            <UniformGrid x:Name="StartCards" Columns="3" Margin="-7,18,-7,0"/>
+            <!-- What happens when it starts, and the three ways to act on it: the shape every "do it for me" row
+                 in Setup takes - the explanation on the left, the buttons on the right - rather than a checkbox and
+                 a button rank stacked loose down the page. -->
+            <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+                    CornerRadius="10" Margin="0,4,0,0">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Margin="18,15,18,15" VerticalAlignment="Center">
+                  <CheckBox x:Name="StartAdvance" Content="Skip the boot prompts"/>
+                  <TextBlock x:Name="StartAdvanceNote" FontSize="11" Foreground="{StaticResource Muted}"
+                             MaxWidth="620" HorizontalAlignment="Left" TextWrapping="Wrap" Margin="25,4,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                            Margin="16,15,18,15">
+                  <Button x:Name="StartShortcutBtn" Content="Create shortcut" Style="{StaticResource Flat}"/>
+                  <Button x:Name="StartStopBtn" Content="Close the game" Style="{StaticResource Flat}" Margin="10,0,0,0"/>
+                  <Button x:Name="StartLaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="26,11"
+                          Margin="10,0,0,0" ToolTip="Enter"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+
     <ScrollViewer x:Name="InstallView" Grid.Row="1" Margin="22,16,10,0" VerticalScrollBarVisibility="Auto"
                   Padding="0,0,12,0" Visibility="Collapsed" AllowDrop="True" Background="Transparent">
       <StackPanel x:Name="InstallHost"/>
@@ -685,12 +742,36 @@
         <TextBlock x:Name="Status" Grid.Column="0" VerticalAlignment="Center" FontSize="11"
                    Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
         <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <!-- The Play tab's two views, switched from the one strip that is on screen in both of them. The label
+               says where it goes, not where you are, and MainWindow.Start.cs writes it. -->
+          <Button x:Name="ViewSwitchBtn" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
           <Button x:Name="CopyBtn" Content="Copy report" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
           <Button x:Name="RecheckBtn" Content="Re-check  (F5)" Style="{StaticResource Primary}" Visibility="Collapsed"/>
           <Button x:Name="ReloadBtn" Content="Reload" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
           <Button x:Name="SaveBtn" Content="Save settings" Style="{StaticResource Primary}" Visibility="Collapsed"/>
         </StackPanel>
       </Grid>
+    </Border>
+
+    <!-- One question, in the window's own colors. WPF's MessageBox comes up white in front of a dark window and
+         cannot be styled, and the only thing this app has to ask - whether to reveal the scene list - deserves to
+         be read rather than dismissed. Declared last so it paints over everything, and it covers the header too:
+         the caption stays draggable because the chrome, not this Border, owns that strip. -->
+    <Border x:Name="Veil" Grid.Row="0" Grid.RowSpan="3" Background="#D00B0B0C" Visibility="Collapsed">
+      <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+              CornerRadius="12" Padding="26,22" MaxWidth="480" Margin="22"
+              VerticalAlignment="Center" HorizontalAlignment="Center">
+        <StackPanel>
+          <TextBlock x:Name="VeilTitle" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text}"
+                     TextWrapping="Wrap"/>
+          <TextBlock x:Name="VeilBody" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,9,0,0"
+                     TextWrapping="Wrap" LineHeight="18"/>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button x:Name="VeilCancelBtn" Content="Cancel" Style="{StaticResource Flat}"/>
+            <Button x:Name="VeilOkBtn" Style="{StaticResource Primary}" Margin="10,0,0,0"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
     </Border>
   </Grid>
 </Window>

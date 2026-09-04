@@ -178,6 +178,7 @@ namespace Mgs4Launcher
 
             string addonIni = IniForm.IniPath(_gameDir);
             string gameIni = IniForm.PathFor(IniSource.Game, _gameDir);
+            IniForm.MusicChoices(_gameDir);     // the track list is this install's, so it is read before the rows
 
             // Grouped first, so a card can say every file its rows write - Display writes two of them.
             foreach (var group in IniForm.Spec.GroupBy(k => k.Group))
@@ -203,6 +204,7 @@ namespace Mgs4Launcher
                 if (missing) continue;
                 foreach (IniKey spec in keys)
                     body.Children.Add(SettingRow(spec, IniForm.Read(spec, addonIni, gameIni)));
+                if (group.Key == "Launcher") body.Children.Add(DecoderRow());
             }
 
             // Building the form gives one of its controls focus, and WPF brings a focused control into view - so
@@ -325,6 +327,12 @@ namespace Mgs4Launcher
                 catch (Exception e) { Say("could not write " + IniForm.SourceLabel(source) + ": " + e.Message); return; }
             }
             foreach (Binding b in _settingReaders) b.Original = b.Read();   // what is on screen is what is on disk
+            // config.ini was read once and kept, and some of what was just written lives in it - the Play tab's
+            // own view among it, which has to change on the spot rather than at the next start.
+            Paths.ForgetConfig();
+            ApplyPlayView(true);
+            StopMusic();            // the track or the volume may have just changed; ApplyMusic picks the new one up
+            ApplyMusic();
             UpdateSaveButton();
             Say(written.Count > 0 ? "written: " + string.Join(", ", written) : "nothing to write");
             StartSetupRefresh();      // the Setup tab's view of the game's settings just changed

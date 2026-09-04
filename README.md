@@ -42,6 +42,11 @@ Each stage is taken apart, feature by feature, in **[docs/dlss-pipeline.md](docs
 3. Follow the cards in order: put the game on DirectX 12 with one button, drop the ReShade setup, `streamline.zip` and
    `renodx-dlss5.addon64` on the tab, press **Install the add-on**, re-check, play.
 
+**Play** opens on the three ways to start the game and nothing else. The scene list — every cutscene in MGS4, named
+and with a frame of itself, in the order the story tells them — is behind **Show all scenes** in the bottom bar,
+which asks first, once; the same button switches back, and Settings › **Launcher** › **Play tab** is the same
+switch. Nothing on the default view spoils anything.
+
 The full walk-through, the manual route and the versions this was verified on are in **[docs/install.md](docs/install.md)**.
 
 ## Requirements

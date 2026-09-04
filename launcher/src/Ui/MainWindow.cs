@@ -52,7 +52,7 @@ namespace Mgs4Launcher
         // Named controls from the XAML, by the names the PowerShell app used.
         Border _headerBar, _lockBanner;
         TextBlock _titleText, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
-                  _mashNote, _searchHint;
+                  _mashNote, _searchHint, _startAdvanceNote, _veilTitle, _veilBody;
         Image _logoArt;
         System.Windows.Shapes.Rectangle _pickShot;
         Border _pickShotBox;
@@ -62,13 +62,18 @@ namespace Mgs4Launcher
         Grid _playView, _artBand;
         ScrollViewer _installView;
         Grid _settingsView;
+        // The Play tab's other half: the three ways to start the game, and the panel their cards live in.
+        Grid _startView;
+        UniformGrid _startHost;
+        Border _veil;
         StackPanel _installHost, _settingsHost;
         WrapPanel _filters;              // the filter chips wrap onto a second line when the window is narrow
         ListBox _sceneList;
         TextBox _search, _holdSecs, _cmdPreview;
         ComboBox _resPick;
-        CheckBox _optAdvance, _optMashX, _optEnd, _optHold, _optRes;
+        CheckBox _optAdvance, _optMashX, _optEnd, _optHold, _optRes, _startAdvance;
         Button _launchBtn, _stopBtn, _shortcutBtn, _copyBtn, _cmdCopyBtn, _recheckBtn, _reloadBtn, _saveBtn;
+        Button _viewSwitchBtn, _veilOkBtn, _veilCancelBtn, _startLaunchBtn, _startStopBtn, _startShortcutBtn;
         Button _minBtn, _maxBtn, _closeBtn;
         ComboBox _altPick;
         FrameworkElement _altRow;
@@ -113,10 +118,14 @@ namespace Mgs4Launcher
             WireKeys();
             LoadFavorites();       // before the rows are built: each one is created knowing whether it is starred
             WirePlay();
+            WireStart();
             WireSettings();
             WireSetup();
 
             RestorePrefs();
+            // Which half of the Play tab is on is decided before the selection is restored: in the simple view a
+            // scene picked last time is not one of the three, and is replaced rather than launched by mistake.
+            ApplyPlayView(false);
             RestoreSelection();
             ShowTab(startTab);
             StartStatePolling();
@@ -127,7 +136,11 @@ namespace Mgs4Launcher
                                        new Action(PrimeSetupIcon));
             Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
                                        new Action(WarmSettings));
-            Win.Closing += (s, e) => SavePrefs();
+            // The music comes up in that same gap: it runs a decoder, and the window should be on screen before
+            // anything that costs a third of a second is started for it.
+            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                                       new Action(ApplyMusic));
+            Win.Closing += (s, e) => { StopMusic(); SavePrefs(); };
         }
 
         // The menu WPF puts up when a text box is right-clicked is built by WPF itself and lives in a popup of its
@@ -160,6 +173,19 @@ namespace Mgs4Launcher
             _navSettings = (RadioButton)f("NavSettings");
             _navInstall = (RadioButton)f("NavInstall");
             _playView = (Grid)f("PlayView");
+            _startView = (Grid)f("StartView");
+            _startHost = (UniformGrid)f("StartCards");
+            _startAdvance = (CheckBox)f("StartAdvance");
+            _startAdvanceNote = (TextBlock)f("StartAdvanceNote");
+            _startLaunchBtn = (Button)f("StartLaunchBtn");
+            _startStopBtn = (Button)f("StartStopBtn");
+            _startShortcutBtn = (Button)f("StartShortcutBtn");
+            _viewSwitchBtn = (Button)f("ViewSwitchBtn");
+            _veil = (Border)f("Veil");
+            _veilTitle = (TextBlock)f("VeilTitle");
+            _veilBody = (TextBlock)f("VeilBody");
+            _veilOkBtn = (Button)f("VeilOkBtn");
+            _veilCancelBtn = (Button)f("VeilCancelBtn");
             _settingsView = (Grid)f("SettingsView");
             _installView = (ScrollViewer)f("InstallView");
             _installHost = (StackPanel)f("InstallHost");
@@ -232,13 +258,20 @@ namespace Mgs4Launcher
             Win.PreviewKeyDown += (s, e) =>
             {
                 bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+                // A question is up: it owns Enter and Escape, and nothing behind it hears anything.
+                if (_veil.Visibility == Visibility.Visible)
+                {
+                    if (e.Key == Key.Escape) { CloseVeil(false); e.Handled = true; }
+                    else if (e.Key == Key.Enter) { CloseVeil(true); e.Handled = true; }
+                    return;
+                }
                 if (e.Key == Key.F5)
                 {
                     if (_installView.Visibility == Visibility.Visible) ShowSetup();
                     else if (_settingsView.Visibility == Visibility.Visible) BuildSettings();
                     e.Handled = true;
                 }
-                else if (ctrl && e.Key == Key.F)
+                else if (ctrl && e.Key == Key.F && !_simplePlay)
                 {
                     _navPlay.IsChecked = true;
                     _search.Focus();
@@ -256,7 +289,8 @@ namespace Mgs4Launcher
                     _search.Clear();
                     e.Handled = true;
                 }
-                else if (e.Key == Key.Enter && _playView.Visibility == Visibility.Visible &&
+                else if (e.Key == Key.Enter &&
+                         (_playView.Visibility == Visibility.Visible || _startView.Visibility == Visibility.Visible) &&
                          _editPanel.Visibility != Visibility.Visible &&
                          !(Keyboard.FocusedElement is ButtonBase))
                 {
@@ -272,13 +306,19 @@ namespace Mgs4Launcher
             _navPlay.IsChecked = tab == "play";
             _navSettings.IsChecked = tab == "settings";
             _navInstall.IsChecked = tab == "install";
-            _playView.Visibility = tab == "play" ? Visibility.Visible : Visibility.Collapsed;
+            // Play is two views, and MGS4_PLAY_VIEW says which: the three ways to start the game, or every scene
+            // in it. Only ever one of them is up.
+            _playView.Visibility = tab == "play" && !_simplePlay ? Visibility.Visible : Visibility.Collapsed;
+            _startView.Visibility = tab == "play" && _simplePlay ? Visibility.Visible : Visibility.Collapsed;
             _settingsView.Visibility = tab == "settings" ? Visibility.Visible : Visibility.Collapsed;
             _installView.Visibility = tab == "install" ? Visibility.Visible : Visibility.Collapsed;
             _copyBtn.Visibility = _recheckBtn.Visibility = tab == "install" ? Visibility.Visible : Visibility.Collapsed;
             _reloadBtn.Visibility = _saveBtn.Visibility = tab == "settings" ? Visibility.Visible : Visibility.Collapsed;
             _launchBtn.Visibility = _stopBtn.Visibility = _shortcutBtn.Visibility =
                 tab == "play" ? Visibility.Visible : Visibility.Collapsed;
+            // The one control the bottom bar carries on Play: which of the two views is on.
+            _viewSwitchBtn.Visibility = tab == "play" ? Visibility.Visible : Visibility.Collapsed;
+            LabelViewSwitch();
 
             if (tab == "install") ShowSetup();
             else if (tab == "settings") ShowSettings();
@@ -294,8 +334,11 @@ namespace Mgs4Launcher
             bool running = _gameUp;
             bool busy = _runProc != null && !_runProc.HasExited;
 
-            _stopBtn.IsEnabled = running || busy;
-            UpdateSaveButton();     // enabled only while there is an edit to write, and the game is not running
+            _stopBtn.IsEnabled = _startStopBtn.IsEnabled = running || busy;
+            UpdateSaveButton();
+            // The game gets the speakers to itself, and gets them back when it goes. Cheap either way: this
+            // returns at once when what is playing is already what should be.
+            ApplyMusic();     // enabled only while there is an edit to write, and the game is not running
 
             if (_settingsView.Visibility == Visibility.Visible)
             {
@@ -378,6 +421,10 @@ namespace Mgs4Launcher
                 return p.TryGetValue(k, out v) && v != null ? v.ToString() : null;
             };
             if (p.ContainsKey("Advance")) _optAdvance.IsChecked = flag("Advance");
+            // The simple view's own copy of the same option, and its own default: off. Starting the game and
+            // getting out of the way is what that view is for, and a scene run's habits are not its business.
+            _startAdvance.IsChecked = flag("StartAdvance");
+            _spoilerSeen = flag("SpoilerSeen");
             _optMashX.IsChecked = flag("MashX");
             _optEnd.IsChecked = flag("EndOnGameplay");
             _optHold.IsChecked = flag("Hold");
@@ -447,6 +494,8 @@ namespace Mgs4Launcher
                 { "SceneEdits", SceneEditsForSaving() },
                 { "Collapsed", _collapsed.Where(kv => kv.Value).Select(kv => kv.Key).ToList() },
                 { "Advance", _optAdvance.IsChecked == true },
+                { "StartAdvance", _startAdvance.IsChecked == true },
+                { "SpoilerSeen", _spoilerSeen },
                 { "MashX", _optMashX.IsChecked == true },
                 { "EndOnGameplay", _optEnd.IsChecked == true },
                 { "Hold", _optHold.IsChecked == true },

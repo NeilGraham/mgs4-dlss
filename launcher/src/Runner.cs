@@ -307,8 +307,12 @@ namespace Mgs4Launcher
             if (opt.Stage == "@collection") return 0;
 
             // A menu is not a scene: no boot prompts to press through, no first 3D frame, and tapping Cross on the
-            // main menu just starts a new game. Only an explicit key sequence makes sense here.
-            if (Catalog.IsStartEntry(opt.Stage) && string.IsNullOrEmpty(opt.Keys))
+            // main menu just starts a new game. Only an explicit key sequence makes sense here. This used to say
+            // IsStartEntry, which also caught the title-screen boot - and that one is the game starting itself,
+            // with the logos and "press any button" in the way and a first 3D frame (the title over the cemetery)
+            // for the press loop to stop at. It is the one start entry the run options mean anything on, and the
+            // Play tab offers exactly that option there.
+            if (Catalog.IsMenuEntry(opt.Stage) && string.IsNullOrEmpty(opt.Keys))
             {
                 if (opt.Advance || opt.MashX || opt.EndOnGameplay)
                     say("menu entry: leaving the game alone (the run options are for scenes)");

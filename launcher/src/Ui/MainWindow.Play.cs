@@ -390,8 +390,15 @@ namespace Mgs4Launcher
                 SceneRow hit = outRows.FirstOrDefault(r => !r.IsHeader && r.Id == _pickedId);
                 if (hit != null) _sceneList.SelectedItem = hit;
             }
-            Say(list.Count + " of " + _allRows.Count + " entries" +
-                (picked.Count > 0 ? " - " + string.Join(", ", picked) : ""));
+            // How many entries there are is the list's own line, and the list is the half of the tab that is not
+            // showing when the simple view is on - which is also the half whose count nobody there asked for.
+            if (_simplePlay)
+                Say(string.IsNullOrEmpty(_gameDir)
+                    ? "no MGS4 install found - the Setup tab says what was looked for"
+                    : "MGS4 in " + _gameDir);
+            else
+                Say(list.Count + " of " + _allRows.Count + " entries" +
+                    (picked.Count > 0 ? " - " + string.Join(", ", picked) : ""));
         }
 
         void ShowPicked(Scene scene)
@@ -410,10 +417,15 @@ namespace Mgs4Launcher
             };
             _pickShotBox.Visibility = shot != null ? Visibility.Visible : Visibility.Collapsed;
 
-            // The game-start entries take none of the run options: a menu has no boot prompts to press through.
-            bool isStart = Catalog.IsStartEntry(scene.Id);
-            foreach (Control c in new Control[] { _optAdvance, _optMashX, _optEnd, _optHold, _holdSecs })
-                c.IsEnabled = !isStart;
+            // A menu entry takes none of the run options: there are no boot prompts to press through, and a press
+            // on MGS4's main menu picks an entry rather than getting past anything. The title-screen boot is a
+            // start entry too and is not a menu - it is the game starting itself, prompts and all - so it keeps
+            // the one option that means something there, which is what the runner will act on.
+            bool menu = Catalog.IsMenuEntry(scene.Id);
+            bool bootSequence = scene.Kind == "start" && !menu;
+            _optAdvance.IsEnabled = !menu;
+            foreach (Control c in new Control[] { _optMashX, _optEnd, _optHold, _holdSecs })
+                c.IsEnabled = !menu && !bootSequence;
             _pickWarn.Text = scene.Hidden ? "This id is in the known-broken list: it crashes or comes up black." : "";
             _pickWarn.Visibility = string.IsNullOrEmpty(_pickWarn.Text) ? Visibility.Collapsed : Visibility.Visible;
 
@@ -426,6 +438,11 @@ namespace Mgs4Launcher
                 _altRow.Visibility = Visibility.Visible;
             }
             else _altRow.Visibility = Visibility.Collapsed;
+
+            // The other view shows the same pick as a highlighted card and one checkbox; both are cheap, and doing
+            // them here means every route to a new pick - a card, a row, the command line, a restored preference -
+            // leaves the two views agreeing.
+            if (_simplePlay) { PaintStartTiles(); UpdateStartAdvance(); }
             UpdatePreview();
         }
 
@@ -498,6 +515,18 @@ namespace Mgs4Launcher
 
         Options CurrentOptions()
         {
+            // The simple view carries one option and no scene machinery: a hold, a resolution or a close-on-
+            // gameplay left ticked in the other view has no business riding along with "start the game".
+            if (_simplePlay)
+                return new Options
+                {
+                    Stage = _pickedId,
+                    Advance = _startAdvance.IsChecked == true,
+                    KeepRunning = false,
+                    GameDir = _gameDir,
+                    GameDirGiven = _opt.GameDirGiven,
+                };
+
             var o = new Options
             {
                 Stage = _pickedId,
@@ -537,6 +566,7 @@ namespace Mgs4Launcher
                 _runProc = Process.Start(new ProcessStartInfo(
                     System.Reflection.Assembly.GetExecutingAssembly().Location, string.Join(" ", cli))
                 { UseShellExecute = false, CreateNoWindow = true });
+                StopMusic();        // the game is about to have the speakers; do not wait for the next poll
                 Say("launching: " + Options.Preview(CurrentOptions().ToCli()));
             }
             catch (Exception e) { Say("could not launch: " + e.Message); }

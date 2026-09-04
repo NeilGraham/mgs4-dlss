@@ -261,6 +261,15 @@ namespace Mgs4Launcher
             return null;
         }
 
+        // The entries that put a menu on screen: MGS4's own main menu and the Master Collection's front-end. There
+        // is nothing to press through on either, and a press on MGS4's menu picks NEW GAME - so the run options
+        // are refused here, and only here. The title-screen boot is a start entry too and is not one of these: it
+        // is the game starting itself, logos and "press any button" and all.
+        public static bool IsMenuEntry(string id)
+        {
+            return string.IsNullOrEmpty(id) || id.StartsWith("@");
+        }
+
         // Entries that start the game rather than a scene: the run options do not apply to them.
         public static bool IsStartEntry(string id)
         {

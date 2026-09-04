@@ -23,6 +23,9 @@ namespace Mgs4Launcher
         public IniSource Source;
         public string TrueWord, FalseWord;      // the game writes true/false where the add-on writes 1/0
         public string Section;                  // the [Section] inside its file, when the file has any
+        // What the app does when the file says nothing. Without it a key nobody has written yet shows as an empty
+        // row, which reads as "off" or "none" rather than as the default it actually behaves like.
+        public string Fallback;
         public IniKey(string group, string key, string type, string label, string help,
                       string[] choices = null, string[] choiceLabels = null,
                       IniSource source = IniSource.Addon, string trueWord = "1", string falseWord = "0")
@@ -38,6 +41,26 @@ namespace Mgs4Launcher
     {
         public static readonly List<IniKey> Spec = new List<IniKey>
         {
+            // The window's own, in config.ini beside the paths. Which half of the Play tab is on: the three ways
+            // to start the game, or every scene in it. Simple is the default and what a release opens on - the
+            // scene list names every cutscene in story order and shows a frame of each, which is MGS4's story
+            // handed to someone who has not played it.
+            new IniKey("Launcher", "MGS4_PLAY_VIEW", "choice", "Play tab",
+                "which half of the Play tab is on. All scenes is the working view - 400-odd entries, named and pictured, in story order",
+                new[] { "simple", "all" },
+                new[] { "Just the ways to start the game", "All scenes  -  spoilers" },
+                IniSource.Launcher, "true", "false") { Fallback = "simple" },
+
+            // The game's own soundtrack, played in the window. The choices are not written here - they are the
+            // banks in the install, filled in by MusicChoices below when the form is built, because which tracks
+            // exist is a fact about that machine rather than about this app.
+            new IniKey("Launcher", "MGS4_MUSIC", "choice", "Menu music",
+                "a track out of the game's own soundtrack, played while the window is open and stopped while the game is running",
+                new[] { Music.Off }, new[] { "None" },
+                IniSource.Launcher, "true", "false") { Fallback = Music.Off },
+            new IniKey("Launcher", "MGS4_MUSIC_VOLUME", "int", "Music volume",
+                "0 to 100", null, null, IniSource.Launcher, "true", "false") { Fallback = "35" },
+
             // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
             // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
             // tab has a button for exactly those four; the rest are here because this is where settings live.
@@ -162,6 +185,26 @@ namespace Mgs4Launcher
 
         };
 
+        // The menu-music list, from the banks the install actually has: None, Random, then every named track. Done
+        // here rather than in the spec because a spec is written once and this answer belongs to the machine - a
+        // person with no game found gets None alone, which is exactly what they can have.
+        public static void MusicChoices(string gameDir)
+        {
+            IniKey spec = Find("MGS4_MUSIC");
+            if (spec == null) return;
+            var ids = new List<string> { Music.Off };
+            var labels = new List<string> { "None" };
+            List<string> tracks = Music.Tracks(gameDir);
+            if (tracks.Count > 0)
+            {
+                ids.Add(Music.Random);
+                labels.Add("Random - a different one each time");
+                foreach (string t in tracks) { ids.Add(t); labels.Add(Music.Pretty(t)); }
+            }
+            spec.Choices = ids.ToArray();
+            spec.ChoiceLabels = labels.ToArray();
+        }
+
         public static string IniPath(string gameDir) { return Paths.Join(gameDir, "mgs4_dlss.ini"); }
 
         // The file a key is written to. The game's is found by searching the save folder, so it is resolved once
@@ -186,6 +229,9 @@ namespace Mgs4Launcher
         // diagnostics that cost frames. "Diagnostics" is the add-on's, so it carries both.
         public static string[] BadgesFor(IniKey spec)
         {
+            // The Launcher group is about the window itself, not about the game it starts - the other config.ini
+            // keys there (resolution, window mode) are the game's settings kept in our file, and wear its badge.
+            if (spec.Group == "Launcher") return new[] { "Launcher" };
             if (spec.Source == IniSource.Game || spec.Source == IniSource.Launcher) return new[] { "Game" };
             if (spec.Source == IniSource.Renodx) return new[] { "RenoDX" };
             if (spec.Group == "Diagnostics") return new[] { "Debug", "MGS4 DLSS" };
@@ -199,7 +245,8 @@ namespace Mgs4Launcher
                         : spec.Source == IniSource.Launcher ? Paths.ConfigPath
                         : spec.Source == IniSource.Renodx ? Paths.Join(GameDirOf(addonIni), "ReShade.ini")
                         : gameIni;
-            return string.IsNullOrEmpty(file) ? null : Checks.IniValue(file, spec.Key);
+            string v = string.IsNullOrEmpty(file) ? null : Checks.IniValue(file, spec.Key);
+            return string.IsNullOrEmpty(v) && spec.Fallback != null ? spec.Fallback : v;
         }
 
         // The resolution a scene boot uses when nothing was asked for on the command line: MGS4_RES from the
