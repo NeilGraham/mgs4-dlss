@@ -275,3 +275,29 @@ the overlay mid-run to test):
   first catches another-instance pairings (hundreds of px, smooth), the second the same-mesh-other-projection pairings
   (wild across the surface). The separate object-vector texture, its clear and the merge compute pass are gone again:
   GPU work equals 9d87c29.
+
+## Mission briefing layouts (2026-09-04)
+
+Measured on `s10a20l_D2` (Act 2 briefing, interactive part) with a per-frame layout dump in the add-on:
+
+- The main view is rendered into the geometry target at a window of the frame - `(0,0 2562x1440)` for most of the
+  briefing, `(0,0 2284x2160)` for the video-call layout, 3168x1782, 2028x1140 and others - and the port's dynamic
+  resolution scales that window uniformly on top (2562x1440 -> 2220x1248 -> 1942x1092: k = 0.867, 0.758). The
+  camera window (`F CAM/NOMAD 2F`) renders into its own target at `(2562,0 1278x900)`, and under the port's scale
+  keeps its position and scales its size (`(2562,0 968x682)` at k = 0.758).
+- The game's upscale into the final texture (vs `f00558961c7929e2` / ps `df5da826738a5139`) is one full-viewport
+  3-vertex draw per 3D view, scissored to that view's rectangle in the final image - `(0,0 2562,1440)` for the main
+  view at every k, `(2562,0 3840,900)` for the camera window - and the camera window's draw comes before the main
+  view's 3D draws. Its root[2] constants: `c[0].xy` = 3840, 2160 (target size), `c[1].zw` = the source extent in UV
+  (0.6671, 0.6664 = 2562/3840, 1440/2160 at k = 1; 0.5223, 0.5220 at k = 0.783), `c[2].x` = k itself (1.000, 0.8667,
+  0.7583, 0.7833). In one full-frame cutscene write `c[2].x` read 0.265 with the scissor and viewport at the full
+  frame, so the scissor is the value the add-on relies on and the constant is logged as a cross-check.
+- The scene viewport alone cannot separate a 1:1 window from an upscaled sub-rect (2562x1440 is 16:9 like the frame,
+  and 2006x1128 is both "the window at k = 0.783" and "the frame at k = 0.522"); the CoC pass viewport and the
+  half-resolution targets the game creates at runtime (971x546, 1003x564, 1281x720) follow the render size, not the
+  layout, so they do not help either.
+- Below half the frame the main view (`(0,0 1878x1056)`, `(0,0 1452x816)`) used to be filed as a 3D window and DLSS
+  moved to the window insertion on the geometry target, with a history reset at each flip. The briefings also draw
+  ~350 depth-bound panel quads into the final texture per frame, 59 of them at the full viewport, before the main
+  view, and the final texture could take the frame's 3D-target slot. Both are handled in the add-on (see
+  dlss-pipeline.md, "Layout windows").

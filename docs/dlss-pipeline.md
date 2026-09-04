@@ -197,6 +197,43 @@ exactly (1680,296) 1864x1024 - the caller's box on screen - 99 % filled with non
 DLSS and NR evaluate on every frame of the call. In gameplay the insertion never fires (a full-frame 3D viewport is
 present), and the pause menu keeps the normal path for the same reason.
 
+## Layout windows: the mission briefings (always on)
+
+The mission briefings (`s10a20l_D2` and the other interludes on the Nomad) show several 3D views at once: the main
+view in a window of the frame - 2562x1440 at the top-left for most of the Act 2 briefing, 2284x2160 for the
+video-call layout, 3168x1782 and others - with a camera window (`F CAM/NOMAD 2F`, 1278x900 at 2562,0) and the text
+panels around it. The main view is the frame's scene like anywhere else (it goes through the geometry target, the
+game's upscale and the pre-HUD insertion on the final texture); the port's dynamic resolution then scales that window
+like it scales the full frame (2562x1440 -> 2220x1248 -> 2006x1128 as the GPU loads up), and the camera window is
+rendered into its own target and blitted in afterwards. Its scene viewport therefore looks exactly like a
+dynamic-resolution sub-rect of the full frame, which is what v1.3.0 took it for: depth, camera vectors and object
+vectors were stretched by 1/k over the whole image - a 1.5x Snake silhouette in the vector view, spilling out of the
+main window across the panels - and the jitter was reported at the wrong scale.
+
+The game's upscale pass tells the two apart. It is one full-viewport 3-vertex draw per 3D view into the final
+texture, **scissored to the rectangle that view occupies in the final image** (`(0,0 2562,1440)` for the main view
+whatever the port's scale; the whole texture in a normal scene), and its vertex constants carry the scale itself
+(`c[0].xy` target size, `c[1].zw` the source extent in UV, `c[2].x` the port's scale k). The add-on reads the scissor
+at that draw - the one whose rectangle the frame's scene viewport fits, same origin and aspect (the camera window's
+pass comes first and has its own scissor) - and the scene viewport divided by it is k, exactly (log: `LAYOUT f…: 3D
+scene in a window (0,0 2562x1440) …; scene viewport 2220x1248 -> scale 0.866 (the upscale pass says 0.867)`). With
+the rectangle known, everything is expressed in the window: the depth is stretched by k into the window (far plane
+outside it), the camera vectors are computed relative to it and zero outside, the object vectors are rasterized into
+it, the jitter is sized to it, and PostDof leaves the game's own depth of field alone (its passes work in the window's
+scale, the re-apply in the frame's). The rectangle is kept for the next frame's scene draws, since the jitter is
+applied before the frame's scene write reveals it.
+
+Two more things the layouts needed. When the port's scale takes the main view below half the frame (k < 0.75) the
+plain size test filed it as a 3D window, so DLSS flapped between the window insertion on the geometry target and the
+final texture with a history reset at every flip; a viewport at the layout window's origin, no larger than it and
+with its aspect is now the scene whatever its size (the frame itself is the window until one is known). And the
+briefings draw hundreds of depth-bound panel quads into the final texture, dozens at the full viewport, before the
+main view: the final texture could take the frame's 3D-target slot, which again filed the main view as a window.
+The pick now counts scene-class draws per target and moves to a target with clearly more of them
+(`3D target re-picked in N frames` in the stats line). The camera window keeps the game's own rendering (it is not
+evaluated); `DebugMode=9` over `s10a20l_D2` shows the field and the character silhouettes inside the main window
+only, at every scale.
+
 ## Frozen screens: the pause menu and Codec backgrounds (`FrozenBackground`, on by default)
 
 Behind the pause menu and the Codec the game shows a **still image of the world**, and until v1.1 that image was

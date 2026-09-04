@@ -15,6 +15,8 @@ cbuffer CB : register(b0)
     float2 depthScale;           // dynamic resolution: the scene depth occupies the top-left (scale x size) of its texture
     float  pad;
     float4 rect;                 // the 3D scene's rectangle in the frame (x, y, w, h): the camera's NDC maps to it; outside it the screen is static
+    float2 depthOrigin;          // full-grid pixel p samples the scene depth at p * depthScale + depthOrigin (a scaled layout window keeps its position)
+    float2 pad2;
 };
 Texture2D<float>    depthTex : register(t0);
 Texture2D<float>    dynDepth : register(t1);
@@ -25,7 +27,7 @@ RWTexture2D<float>  maskTex  : register(u1);
 void main(uint3 id : SV_DispatchThreadID)
 {
     if (id.x >= (uint)size.x || id.y >= (uint)size.y) return;
-    int2 sp = int2(floor((float2(id.xy) + 0.5) * depthScale));   // full-grid pixel -> sub-res depth sample
+    int2 sp = int2(floor((float2(id.xy) + 0.5) * depthScale + depthOrigin));   // full-grid pixel -> sub-res depth sample
     float d = depthTex.Load(int3(sp, 0));
     float dd = dynDepth.Load(int3(sp, 0));
     // dynamic if the replayed draws wrote depth here and it is (about) the visible surface

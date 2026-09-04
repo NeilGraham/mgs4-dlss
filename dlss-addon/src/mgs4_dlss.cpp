@@ -529,12 +529,48 @@ static bool g_sceneVpValid = false;
 static viewport g_sceneVpFrame = {}; static bool g_sceneVpFrameValid = false;   // most common viewport of this frame's depth draws into the scene target
 static viewport g_winVpFrame = {}; static bool g_winVpFrameValid = false;       // the same for 'window' viewports (smaller than half the frame or at an offset): Codec / pause 3D windows
 static std::unordered_map<uint64_t, std::pair<uint32_t, viewport>> g_winVpHist;
+// Layout windows (mission briefings). The frame's 3D scene does not always fill the image: the Act 2 briefing renders
+// its main view into a 2562x1440 window at the top-left of the frame (other layouts: 2284x2160, 3168x1782, ...) with the
+// camera windows and text panels around it, and the port's dynamic resolution scales that window on top (2562x1440 ->
+// 2006x1128 at k = 0.78). The scene viewport alone cannot tell a 1:1 window from an upscaled sub-rect; treating the
+// window as a sub-rect stretched the depth and every motion vector by 1/k over the whole frame. The game's upscale pass
+// into the final texture (a full-viewport 3-vertex draw sampling the scene texture) is scissored to exactly the
+// rectangle the scene occupies in the final image, in full-grid pixels - the whole texture normally - and its vertex
+// constants carry the scale itself (c[0].xy target size, c[1].zw the source extent in UV, c[2].x = k). The scissor is
+// read at that draw; the scene viewport divided by it is the port's scale, exactly, and with it depth, camera vectors,
+// object vectors and the jitter are expressed in the window's own pixels. The rectangle is kept for the next frame's
+// scene draws (the jitter is applied before the frame's scene write reveals it).
+static viewport g_layoutRect = {}; static uint32_t g_layoutFrame = 0; static bool g_layoutValid = false;   // this frame's (from its scene write)
+static viewport g_layoutLast = {}; static bool g_layoutLastValid = false;                                     // the most recent frame's
+static float g_layoutK = 1.0f;   // the scale the upscale pass was given (c[2].x), for the log / overlay
+static uint32_t g_layoutFrames = 0;   // evaluations inside a layout window (stats)
+static uint32_t g_layoutDumpFrames = 0, g_layoutDumps = 0;   // diagnostics: dump the scene writes and viewports of the frames after a layout change
+static std::unordered_map<uint64_t, uint32_t> g_sceneClassDrawsPerRt;   // per RT: depth-bound draws at a scene-class viewport (full frame / layout window)
+static uint32_t g_geoRepicks = 0;   // frames whose 3D target moved to a target with clearly more scene-class draws (stats)
+static const viewport* layout_now() { if (g_layoutValid && g_layoutFrame == g_frame) return &g_layoutRect; if (g_layoutLastValid) return &g_layoutLast; return nullptr; }
+static bool layout_is_window(const viewport& l) { return g_internalW && g_internalH && (l.width < float(g_internalW) - 1.0f || l.height < float(g_internalH) - 1.0f || l.x > 0.5f || l.y > 0.5f); }
+static const viewport* layout_window() { const viewport* l = layout_now(); return (l && layout_is_window(*l)) ? l : nullptr; }
+// A viewport that is the layout window scaled by the port's dynamic resolution: same origin (the scaled scene keeps the
+// window's position), no larger than the window, the window's aspect ratio.
+static bool vp_in_layout(const viewport& v, const viewport& L)
+{
+    if (L.width <= 0 || L.height <= 0 || v.width <= 0 || v.height <= 0) return false;
+    if (fabsf(v.x - L.x) > 1.5f || fabsf(v.y - L.y) > 1.5f) return false;
+    if (v.width > L.width + 1.5f || v.height > L.height + 1.5f || v.width < L.width * 0.2f) return false;
+    const float a = v.width / v.height, la = L.width / L.height;
+    return fabsf(a - la) <= la * 0.03f;
+}
+// The main 3D view of a layout window, whatever the port's scale (below half the frame the plain size test files it as
+// a 3D window, and DLSS then flapped between the window insertion and the final texture with a history reset each time).
+// Until a layout is known the frame itself is the window, so a scaled main view at the origin counts as the scene too.
+static bool vp_is_layout_scene(const viewport& v) { const viewport* l = layout_now(); const viewport full = { 0.0f, 0.0f, float(g_internalW), float(g_internalH), 0.0f, 1.0f }; return g_internalW && vp_in_layout(v, l ? *l : full); }
 static uint64_t g_winGeoRt = 0, g_winGeoRtLast = 0; static uint32_t g_winGeoDraws = 0;   // RT receiving depth-tested draws at a window viewport (Codec caller scene)
 static std::unordered_map<uint64_t, uint32_t> g_winGeoDrawsPerRt;
 static uint32_t g_depthOnDrawsThisFrame = 0, g_depthOnDrawsLast = 0;      // depth-tested draws with a depth buffer (0 = no 3D scene: Codec)
 static bool g_windowMode = false; static viewport g_windowVp = {};            // this frame's DLSS pass: the 3D scene is a window of a frozen screen
-static float jitter_ref_w() { if (!g_sceneVpFrameValid && g_winVpFrameValid && g_winVpFrame.width > 0) return g_winVpFrame.width; const uint32_t w = g_scaling ? g_renderW : g_internalW; return float(w); }
-static float jitter_ref_h() { if (!g_sceneVpFrameValid && g_winVpFrameValid && g_winVpFrame.height > 0) return g_winVpFrame.height; const uint32_t h = g_scaling ? g_renderH : g_internalH; return float(h); }
+static const viewport* layout_window();
+static float jitter_ref_w() { if (!g_sceneVpFrameValid && g_winVpFrameValid && g_winVpFrame.width > 0) return g_winVpFrame.width; if (const viewport* l = layout_window()) if (l->width > 0) return l->width; const uint32_t w = g_scaling ? g_renderW : g_internalW; return float(w); }
+static float jitter_ref_h() { if (!g_sceneVpFrameValid && g_winVpFrameValid && g_winVpFrame.height > 0) return g_winVpFrame.height; if (const viewport* l = layout_window()) if (l->height > 0) return l->height; const uint32_t h = g_scaling ? g_renderH : g_internalH; return float(h); }
 // The scene viewport of the frame being rendered (the game changes it every second under load); the hysteresis copy
 // g_sceneVp is only a fallback before this frame's first scene draw.
 static const viewport& scene_vp_now() { return g_sceneVpFrameValid ? g_sceneVpFrame : g_sceneVp; }
@@ -734,7 +770,7 @@ static uint32_t g_mvDispatches = 0, g_mvResets = 0;
 static float g_camDeltaRot = 0, g_camDeltaPos = 0, g_camDeltaRotMax = 0, g_camDeltaPosMax = 0;
 static uint32_t g_vpChanges = 0;   // frames (in the logging window) whose VP differed from the previous frame's
 struct VisCB { float inSize[2]; float outSize[2]; float scale; float blend; float pad[2]; };
-struct MvCB { float invVP[16]; float prevVP[16]; float size[2]; float nearZ; float reset; float dynZeroMV; float depthScale[2]; float pad; float rect[4]; };
+struct MvCB { float invVP[16]; float prevVP[16]; float size[2]; float nearZ; float reset; float dynZeroMV; float depthScale[2]; float pad; float rect[4]; float depthOrigin[2]; float pad2[2]; };
 
 static bool invert4x4(const float* m, float* out)
 {
@@ -835,7 +871,7 @@ static bool mv_init()
 // Writes camera-only motion vectors into g_mv (depth must be in a shader-readable state). Returns the reset flag used.
 static uint32_t g_vpMissStreak = 0, g_vpMissesCovered = 0;
 
-static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t w, uint32_t h, float depthScaleX, float depthScaleY, const float* rect)
+static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t w, uint32_t h, float depthScaleX, float depthScaleY, const float* depthOrigin, const float* rect)
 {
     if (!mv_init()) return 1;
     int reset = 0;
@@ -888,6 +924,7 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
     }
     cb.size[0] = float(w); cb.size[1] = float(h); if (rect) memcpy(cb.rect, rect, sizeof(cb.rect)); else { cb.rect[0] = 0; cb.rect[1] = 0; cb.rect[2] = float(w); cb.rect[3] = float(h); } cb.depthScale[0] = depthScaleX > 0 ? depthScaleX : 1.0f; cb.depthScale[1] = depthScaleY > 0 ? depthScaleY : 1.0f; cb.nearZ = curVP[11] != 0 ? curVP[11] : 1.0f; cb.reset = reset ? 1.0f : 0.0f;
     cb.dynZeroMV = (g_cfgDynMask && g_cfgDynZeroMV) ? 1.0f : 0.0f;
+    if (depthOrigin) { cb.depthOrigin[0] = depthOrigin[0]; cb.depthOrigin[1] = depthOrigin[1]; }
     const uint32_t slot = g_mvSlot++ % 4;
     memcpy(g_mvCbPtr + slot * 256, &cb, sizeof(cb));
 
@@ -934,7 +971,7 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
 
 
 // Dynamic resolution: nearest-neighbor stretch of the sub-rect scene depth into the full-size R32 copy (g_depthFull).
-static void depth_stretch_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t fullW, uint32_t fullH, float kx, float ky)
+static void depth_stretch_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t fullW, uint32_t fullH, float kx, float ky, const float* origin, const float* rect)
 {
     if (!g_mvReady || !g_stretchPso || !g_depthFull.handle) return;
     static ID3D12Resource* cbRes = nullptr; static uint8_t* cbPtr = nullptr; static uint32_t cbSlot = 0;
@@ -946,7 +983,8 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
         if (!cbPtr) return;
     }
     const uint32_t slot = 20 + (cbSlot % 4);
-    float cb[4] = { float(fullW), float(fullH), kx, ky };
+    float cb[12] = { float(fullW), float(fullH), kx, ky, origin ? origin[0] : 0.0f, origin ? origin[1] : 0.0f, 0.0f, 0.0f,
+                     rect ? rect[0] : 0.0f, rect ? rect[1] : 0.0f, rect ? rect[2] : float(fullW), rect ? rect[3] : float(fullH) };
     memcpy(cbPtr + (cbSlot % 4) * 256, cb, sizeof(cb));
     const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 4 * inc;
@@ -1714,17 +1752,33 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     }
     // Dynamic resolution: the scene occupies a sub-rect of the texture; DLSS evaluates that sub-rect.
     uint32_t subW = cd.texture.width, subH = cd.texture.height; bool drsActive = false;
+    // Layout window (mission briefings): the rectangle the scene occupies in the final image, in the texture's pixels;
+    // the whole texture otherwise. The scene viewport divided by it is the port's dynamic-resolution scale.
+    viewport lay = { 0.0f, 0.0f, float(cd.texture.width), float(cd.texture.height), 0.0f, 1.0f }; bool layoutWin = false;
+    float depthOrigin[2] = { 0.0f, 0.0f };   // full-grid pixel p samples the scene depth at p * k + depthOrigin
     {
-        const viewport& svp = g_sceneVpFrameValid ? g_sceneVpFrame : g_sceneVp;
-        if (g_cfgDRS && (g_sceneVpFrameValid || g_sceneVpValid) && g_internalW && svp.width > 0 && (svp.width < g_internalW - 1 || svp.height < g_internalH - 1)) {
-            float fx = svp.width / float(g_internalW), fy = svp.height / float(g_internalH);
-            if (fx > 1.0f) fx = 1.0f; if (fy > 1.0f) fy = 1.0f; if (fx < 0.2f) fx = 0.2f; if (fy < 0.2f) fy = 0.2f;
-            subW = (uint32_t)(cd.texture.width * fx + 0.5f); subH = (uint32_t)(cd.texture.height * fy + 0.5f);
-            if (g_cfgDRS == 2) { if (g_drsMinW && subW < g_drsMinW) subW = g_drsMinW; if (g_drsMinH && subH < g_drsMinH) subH = g_drsMinH; }
-            if (subW > cd.texture.width) subW = cd.texture.width; if (subH > cd.texture.height) subH = cd.texture.height;
-            drsActive = subW < cd.texture.width || subH < cd.texture.height;
-            if (drsActive) { g_drsFrames++; static bool once = false; if (!once) { once = true; logmsg("DRS: scene viewport %.0fx%.0f of %ux%u -> DLSS sub-rect %ux%u (min %ux%u)", svp.width, svp.height, cd.texture.width, cd.texture.height, subW, subH, g_drsMinW, g_drsMinH); } }
+        const viewport* lw = layout_window();
+        if (lw && lw->width > 0 && lw->height > 0 && g_internalW && g_internalH) {
+            const float tx = float(cd.texture.width) / float(g_internalW), ty = float(cd.texture.height) / float(g_internalH);
+            lay = viewport{ lw->x * tx, lw->y * ty, lw->width * tx, lw->height * ty, 0.0f, 1.0f }; layoutWin = true;
         }
+        const viewport& svp = g_sceneVpFrameValid ? g_sceneVpFrame : g_sceneVp;
+        if (g_cfgDRS && (g_sceneVpFrameValid || g_sceneVpValid) && g_internalW && svp.width > 0) {
+            const float layW = lw ? lw->width : float(g_internalW), layH = lw ? lw->height : float(g_internalH);
+            float fx = svp.width / layW, fy = svp.height / layH;
+            if (fx > 1.0f) fx = 1.0f; if (fy > 1.0f) fy = 1.0f; if (fx < 0.2f) fx = 0.2f; if (fy < 0.2f) fy = 0.2f;
+            if (fx < 0.995f || fy < 0.995f) {
+                subW = (uint32_t)(cd.texture.width * fx + 0.5f); subH = (uint32_t)(cd.texture.height * fy + 0.5f);
+                if (g_cfgDRS == 2) { if (g_drsMinW && subW < g_drsMinW) subW = g_drsMinW; if (g_drsMinH && subH < g_drsMinH) subH = g_drsMinH; }
+                if (subW > cd.texture.width) subW = cd.texture.width; if (subH > cd.texture.height) subH = cd.texture.height;
+                drsActive = subW < cd.texture.width || subH < cd.texture.height;
+                // the scaled scene keeps the window's position and scales its size (observed on the briefing's camera windows)
+                if (lw) { const float lx = lw->x * float(cd.texture.width) / float(g_internalW), ly = lw->y * float(cd.texture.height) / float(g_internalH); depthOrigin[0] = svp.x * float(cd.texture.width) / float(g_internalW) - lx * fx; depthOrigin[1] = svp.y * float(cd.texture.height) / float(g_internalH) - ly * fy; }
+                if (drsActive) { g_drsFrames++; static bool once = false; if (!once) { once = true; logmsg("DRS: scene viewport %.0fx%.0f of %ux%u -> DLSS sub-rect %ux%u (min %ux%u)", svp.width, svp.height, cd.texture.width, cd.texture.height, subW, subH, g_drsMinW, g_drsMinH); } }
+            }
+        }
+        if (layoutWin) g_layoutFrames++;
+        { static bool was = false; static float lw2 = 0, lh2 = 0; if (layoutWin != was || (layoutWin && (fabsf(lay.width - lw2) > 1.0f || fabsf(lay.height - lh2) > 1.0f))) { was = layoutWin; lw2 = lay.width; lh2 = lay.height; static uint32_t n = 0; if (n++ < 100) logmsg("LAYOUT f%u: 3D scene in a window %s(%.0f,%.0f %.0fx%.0f) of the %ux%u image; scene viewport %.0fx%.0f -> scale %.3f (the upscale pass says %.3f)", g_frame, layoutWin ? "" : "OFF ", lay.x, lay.y, lay.width, lay.height, cd.texture.width, cd.texture.height, svp.width, svp.height, drsActive ? subW / float(cd.texture.width) : 1.0f, g_layoutK); if (g_layoutDumps++ < 40) g_layoutDumpFrames = 2; } }
     }
     g_drsActiveLast = drsActive; g_drsSubW = subW; g_drsSubH = subH;
     // The port renders the 3D scene into the top-left sub-rect and its post chain upscales it to the full final image
@@ -1738,12 +1792,18 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     g_windowMode = fullGrid && !g_sceneVpFrameValid && g_winVpFrameValid && !drsActive;
     g_windowVp = g_windowMode ? g_winVpFrame : viewport{ 0, 0, float(cd.texture.width), float(cd.texture.height), 0, 1 };
     if (tracing()) logmsg("f%u DLSS: fullVp valid %d (%.0fx%.0f) winVp valid %d (%.0f,%.0f %.0fx%.0f) window mode %d drs %d", g_frame, (int)g_sceneVpFrameValid, g_sceneVpFrame.width, g_sceneVpFrame.height, (int)g_winVpFrameValid, g_winVpFrame.x, g_winVpFrame.y, g_winVpFrame.width, g_winVpFrame.height, (int)g_windowMode, (int)drsActive);
-    { static bool wasWin = false; if (g_windowMode != wasWin) { wasWin = g_windowMode; logmsg("scene window: %s (%.0f,%.0f %.0fx%.0f)", g_windowMode ? "on" : "off", g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height); } }
+    { static bool wasWin = false; if (g_windowMode != wasWin) { wasWin = g_windowMode; logmsg("scene window: %s (%.0f,%.0f %.0fx%.0f)", g_windowMode ? "on" : "off", g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height);
+        // what the frame's depth-tested draws looked like at the flip: the scene-viewport candidates, the window ones, the 3D target
+        static uint32_t nd = 0; if (nd++ < 60) { std::string t; char b[96]; const viewport* lw = layout_now();
+            for (auto& kv : g_vpHist) { snprintf(b, sizeof b, " scene(%.0f,%.0f %.0fx%.0f)x%u", kv.second.second.x, kv.second.second.y, kv.second.second.width, kv.second.second.height, kv.second.first); t += b; }
+            for (auto& kv : g_winVpHist) { snprintf(b, sizeof b, " win(%.0f,%.0f %.0fx%.0f)x%u", kv.second.second.x, kv.second.second.y, kv.second.second.width, kv.second.second.height, kv.second.first); t += b; }
+            logmsg("   f%u candidates:%s; 3D target %p (%u draws, last peak %u), layout %s(%.0f,%.0f %.0fx%.0f)", g_frame, t.c_str(), (void*)g_curGeoRt, g_winGeoDraws, g_geoDrawsLast, lw ? "" : "none ", lw ? lw->x : 0.0f, lw ? lw->y : 0.0f, lw ? lw->width : 0.0f, lw ? lw->height : 0.0f); } } }
     const uint32_t mvW = fullGrid ? cd.texture.width : subW, mvH = fullGrid ? cd.texture.height : subH;
     const float kx = (fullGrid && drsActive) ? subW / float(cd.texture.width) : 1.0f, ky = (fullGrid && drsActive) ? subH / float(cd.texture.height) : 1.0f;
     resource dlssDepth = depth; bool depthStretched = false;
     if (fullGrid && drsActive && g_depthFull.handle && g_stretchPso) {
-        depth_stretch_dispatch(cmd, depth, dd.texture.format, cd.texture.width, cd.texture.height, kx, ky);
+        const float layRect[4] = { lay.x, lay.y, lay.width, lay.height };
+        depth_stretch_dispatch(cmd, depth, dd.texture.format, cd.texture.width, cd.texture.height, kx, ky, depthOrigin, layRect);
         dlssDepth = g_depthFull; depthStretched = true;
     }
     // Camera-only motion vectors from this frame's depth (VP = majority block of this frame's scene draws).
@@ -1776,8 +1836,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         resumeKept = true; memcpy(g_prevVP, g_liveVP, 64); g_havePrevVP = true;   // motion relative to the last live frame, not to the pause menu's model camera
         g_resumesKept++; if (g_resumesKept <= 50) logmsg("RESUME f%u: same camera as before the freeze -> DLSS history kept%s", g_frame, g_lastWinRectValid ? " (the 3D window's rectangle excluded for this frame)" : "");
     }
-    const float mvRect[4] = { g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height };
-    const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, mvW, mvH, kx, ky, mvRect);
+    // the rectangle the camera's NDC maps to: the 3D window (Codec caller), the layout window (briefings) or the frame
+    const viewport& mvVp = g_windowMode ? g_windowVp : lay;
+    const float mvRect[4] = { mvVp.x, mvVp.y, mvVp.width, mvVp.height };
+    const int mvReset = mv_dispatch(cmd, depth, dd.texture.format, mvW, mvH, kx, ky, depthOrigin, mvRect);
 
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     // Per-object motion: rasterize the stream-out captures over the camera vectors (depth-tested against the scene depth).
@@ -1793,7 +1855,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
             // the (upscaled) image shows it; legacy sub-rect mode rasterizes into the scene viewport
             D3D12_VIEWPORT svp = (!fullGrid && scene_vp_now_valid()) ? D3D12_VIEWPORT{ sv.x * k, sv.y * ky2, sv.width * k, sv.height * ky2, sv.min_depth, sv.max_depth }
                                : g_windowMode ? D3D12_VIEWPORT{ g_windowVp.x, g_windowVp.y, g_windowVp.width, g_windowVp.height, 0, 1 }
-                               : D3D12_VIEWPORT{ 0, 0, float(cd.texture.width), float(cd.texture.height), 0, 1 };
+                               : D3D12_VIEWPORT{ lay.x, lay.y, lay.width, lay.height, 0, 1 };   // the layout window (the whole image normally)
             float jitCur[2]; jitter_ndc(jitCur);
             const float prevSz[2] = { svp.Width, svp.Height };
             objmv::velocity(native, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)g_mvRtv.handle }, haveDsv ? D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)itv->second.handle } : D3D12_CPU_DESCRIPTOR_HANDLE{ 0 }, cd.texture.width, cd.texture.height, svp, jitCur, g_prevJitNdc, prevSz,
@@ -2523,6 +2585,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         // falls back to the game's DoF.
                         bool mismatch = !kStep && g_sceneVpFrameValid && s.vp_valid && (fabsf(g_sceneVpFrame.width - kx * float(s.rt_w)) > 2.0f || fabsf(g_sceneVpFrame.height - ky * float(s.rt_h)) > 2.0f);
                         if (mismatch) { static uint32_t nm = 0; if (nm++ < 20) logmsg("PostDof: f%u scene viewport %.0fx%.0f disagrees with the post chain (k %.3f -> %.0fx%.0f) - the game's DoF for this frame", g_frame, g_sceneVpFrame.width, g_sceneVpFrame.height, kx, kx * float(s.rt_w), ky * float(s.rt_h)); }
+                        if (const viewport* lw = layout_window()) { mismatch = true; static uint32_t nl = 0; if (nl++ < 5) logmsg("PostDof: f%u the scene is a layout window (%.0f,%.0f %.0fx%.0f) - the game's DoF stays", g_frame, lw->x, lw->y, lw->width, lw->height); }
                         g_dofSkipFrame = s.vp_valid && !kStep && !mismatch && (!subRect || g_cfgDofSubRect != 0);
                         g_frameKStep = kStep || mismatch;
                         if (kStep) { static uint32_t nk = 0; if (nk++ < 20) logmsg("PostDof: f%u resolution step (k %.3f x %.3f) - the game's DoF for this frame", g_frame, kx, ky); }
@@ -2616,8 +2679,8 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 if (s.dsv.handle) g_dsvForDs[s.ds.handle] = s.dsv;
                 if (depthTested && s.vp_valid && s.rt_w >= 640 && s.vp.width <= s.rt_w && (g_dlssW == 0 || s.rt_w == g_dlssW)
                     && (g_curGeoRt == 0 || s.rt.handle == g_curGeoRt)          // only the scene target, not shadow/reflection passes
-                    && s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f   // a plausible full-frame viewport
-                    && s.vp.x <= 1.0f && s.vp.y <= 1.0f) {
+                    && ((s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f)   // a plausible full-frame viewport
+                        || vp_is_layout_scene(s.vp))) {                                                                      // or the main view of a layout window (briefings)
                     // the 3D scene's viewport = the one most depth-tested draws use (a few full-size depth-tested quads exist too)
                     auto& e = g_vpHist[(uint64_t)(uint32_t)(s.vp.width + 0.5f) << 32 | (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) e.second = s.vp;
@@ -2654,7 +2717,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     objmv::DrawArgs oda = { da.indexed, da.count, da.instances, da.first, da.vertex_offset, da.first_instance };
                     const bool jittered = g_cfgJitter && (cls == 0 || cls == 1);   // its clip matrix was patched in place this frame
                     // a 3D window (pause-menu model, Codec caller): the draw's own viewport, not the frame's scene viewport
-                    const bool fullClass = !s.vp_valid || (s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f);
+                    const bool fullClass = !s.vp_valid || (s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f) || vp_is_layout_scene(s.vp);
                     const D3D12_VIEWPORT own = { s.vp.x, s.vp.y, s.vp.width, s.vp.height, s.vp.min_depth, s.vp.max_depth };
                     objmv::capture(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native()), key, s.pso, s.topology, oda, jittered, fullClass ? nullptr : &own, anchor, anchorN);
                 }
@@ -2680,8 +2743,18 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 // in-frame detection of the 3D target: the first depth-bound RT that reaches 40% of last frame's peak,
                 // drawn with a plausible full-frame viewport - a picture-in-picture pass (the Mk. II's monitor: 1024x1024
                 // in a corner of the scene target, hundreds of draws) must not take the slot from the scene itself
-                const bool fullFrameVp = !s.vp_valid || (s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f);
-                if (!g_curGeoRt && n >= 20 && n * 10 >= g_geoDrawsLast * 4 && fullFrameVp) g_curGeoRt = s.rt.handle;
+                const bool fullFrameVp = !s.vp_valid || (s.vp.width >= s.rt_w * 0.5f && s.vp.height >= s.rt_h * 0.5f && s.vp.x <= 1.0f && s.vp.y <= 1.0f) || vp_is_layout_scene(s.vp);
+                // counted per target: the briefing's camera window (hundreds of draws at its own viewport, plus a few
+                // full-viewport quads, rendered before the main view) must not take the slot from the main view either
+                const uint32_t ns = fullFrameVp ? ++g_sceneClassDrawsPerRt[s.rt.handle] : g_sceneClassDrawsPerRt[s.rt.handle];
+                // a final texture qualifies on its scene-class draws alone: the briefings' ~350 depth-bound panel quads
+                // per frame (59 at the full viewport) reach 40% of the peak long before the main view is drawn
+                const bool isFinal = s.rt.handle == g_finalRt[0] || s.rt.handle == g_finalRt[1];
+                if (!g_curGeoRt && ns >= 20 && (isFinal ? ns : n) * 10 >= g_geoDrawsLast * 4) g_curGeoRt = s.rt.handle;
+                // The briefings draw hundreds of depth-bound panel quads into the final texture (dozens at the full
+                // viewport) before the main view, so the final texture can take the slot first; a target that then
+                // gathers clearly more scene-class draws is the scene and takes it over.
+                else if (g_curGeoRt && s.rt.handle != g_curGeoRt && fullFrameVp && ns >= 20 && ns > g_sceneClassDrawsPerRt[g_curGeoRt] * 5 / 4) { g_curGeoRt = s.rt.handle; g_geoRepicks++; }
             }
             g_geoRt = g_curGeoRt;
             // Frame generation, composite mode: replay HUD draws into the UI layer. HUD draws = depth-off draws into the
@@ -2796,6 +2869,23 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // 6-vertex quads and 2-vertex lines); quads whose primary input is a scene-sized texture (the port's
                     // motion feedback quad, drawn into the other final texture).
                     bool post = !fullVp || da.count == 3 || da.count == 4 || (da.count >= 6 && slot0big);
+                    if (post && slot0big && fullVp && da.count <= 4) {
+                        // The game's upscale of a scene into the final texture, one per 3D window (the briefing's camera
+                        // window has its own, before the main view's): its scissor is the rectangle that window occupies in
+                        // the final image (see g_layoutRect), the whole texture unless the scene is a layout window. The
+                        // main view's is the one the frame's scene viewport fits - same origin, the window's aspect - and
+                        // the tightest if several do.
+                        const viewport R = (s.sc_valid && s.sc.right > s.sc.left && s.sc.bottom > s.sc.top) ? viewport{ float(s.sc.left), float(s.sc.top), float(s.sc.right - s.sc.left), float(s.sc.bottom - s.sc.top), 0.0f, 1.0f }
+                                                                                                             : viewport{ 0.0f, 0.0f, float(s.rt_w), float(s.rt_h), 0.0f, 1.0f };
+                        // this frame's scene viewport only: the camera window's upscale runs before the main view is even
+                        // drawn, and matching it against the window viewport of the frame adopted the camera window's rectangle
+                        const bool fits = g_sceneVpFrameValid && vp_in_layout(g_sceneVpFrame, R);
+                        if (fits && (!g_layoutValid || g_layoutFrame != g_frame || R.width * R.height < g_layoutRect.width * g_layoutRect.height)) {
+                            g_layoutRect = R; g_layoutValid = true; g_layoutFrame = g_frame;
+                            float c[12]; if (s.cbv_set[2] && read_cbv(s, 2, c, 12)) g_layoutK = c[8];
+                        }
+                        if (g_layoutDumpFrames) logmsg("   f%u scene write into %p: scissor (%d,%d %d,%d) vp=(%.0f,%.0f %.0fx%.0f) %u verts, samples %p (%s); scene vp %d (%.0f,%.0f %.0fx%.0f) -> %s", g_frame, (void*)s.rt.handle, s.sc_valid ? (int)s.sc.left : -1, s.sc_valid ? (int)s.sc.top : -1, s.sc_valid ? (int)s.sc.right : -1, s.sc_valid ? (int)s.sc.bottom : -1, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (void*)slot0, desc_str(dev, resource{ slot0 }).c_str(), (int)g_sceneVpFrameValid, g_sceneVpFrame.x, g_sceneVpFrame.y, g_sceneVpFrame.width, g_sceneVpFrame.height, fits ? "fits" : "no");
+                    }
                     // The final texture receives the scene (the fullscreen pass at the full viewport that samples a
                     // scene-sized input, i.e. the game's upscale/tonemap) before the HUD; remember which texture, since
                     // the final image is double-buffered and the other one takes scene-space effect draws this frame.
@@ -3159,6 +3249,16 @@ static void frame_rollover()
             g_sceneVp = pending; g_sceneVpValid = true;
         } else if (!g_sceneVpValid && stable >= 20) { g_sceneVp = pending; g_sceneVpValid = true; }
     }
+    // the layout rectangle seen at this frame's scene write serves the next frame's scene draws (jitter) until its own
+    if (g_layoutValid && g_layoutFrame == g_frame - 1) { g_layoutLast = g_layoutRect; g_layoutLastValid = true; }
+    if (g_layoutDumpFrames) {   // diagnostics after a layout change: the frame's viewport candidates and targets
+        g_layoutDumpFrames--; std::string t; char b[128];
+        for (auto& kv : g_vpHist) { snprintf(b, sizeof b, " scene(%.0f,%.0f %.0fx%.0f)x%u", kv.second.second.x, kv.second.second.y, kv.second.second.width, kv.second.second.height, kv.second.first); t += b; }
+        for (auto& kv : g_winVpHist) { snprintf(b, sizeof b, " win(%.0f,%.0f %.0fx%.0f)x%u", kv.second.second.x, kv.second.second.y, kv.second.second.width, kv.second.second.height, kv.second.first); t += b; }
+        for (auto& kv : g_sceneClassDrawsPerRt) { snprintf(b, sizeof b, " rt %p: %u scene-class", (void*)kv.first, kv.second); t += b; }
+        logmsg("   f%u viewports:%s; 3D target %p, window target %p (%u), layout %d (%.0f,%.0f %.0fx%.0f)", g_frame - 1, t.c_str(), (void*)g_curGeoRt, (void*)g_winGeoRt, g_winGeoDraws, (int)(g_layoutValid && g_layoutFrame == g_frame - 1), g_layoutRect.x, g_layoutRect.y, g_layoutRect.width, g_layoutRect.height);
+    }
+    g_sceneClassDrawsPerRt.clear();
     g_prevFrameHadScene = g_sceneVpFrameValid;
     g_sceneVpFrameValid = false; g_vpHist.clear(); g_winVpFrameValid = false; g_winVpHist.clear();
     g_winGeoRtLast = g_winGeoRt; g_winGeoRt = 0; g_winGeoDraws = 0; g_winGeoDrawsPerRt.clear();
@@ -3177,6 +3277,7 @@ static void frame_rollover()
                g_jitStat[0], g_jitStat[1], g_jitStat[2], g_jitStat[3], g_jitStat[4], g_jitStat[6], g_jitStat[5], (int)g_haveFrameVP, g_vpVotes.size(), g_mvDispatches, g_mvResets, g_camDeltaRot, g_camDeltaPos, g_camDeltaRotMax, g_camDeltaPosMax, g_vpChanges, g_prePostInjections, g_finalPreHudInjections, g_compositeInjections);
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
+        if (const viewport* lw = layout_window()) logmsg("   layout window: the scene occupies (%.0f,%.0f %.0fx%.0f) of the image (mission briefing); %u evaluations in a window so far, 3D target re-picked in %u frames", lw->x, lw->y, lw->width, lw->height, g_layoutFrames, g_geoRepicks);
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
@@ -3326,6 +3427,7 @@ static void draw_overlay(effect_runtime*)
             else ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Game dynamic resolution: scene viewport %.0fx%.0f (%.0f%%) -> NOT handled (DRS=0): expect smearing while the game changes resolution (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_drsFrames);
         }
         else ImGui::Text("Game dynamic resolution: scene viewport at full size (%.0fx%.0f)", g_sceneVp.width, g_sceneVp.height);
+        if (const viewport* lw = layout_window()) ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Layout window: the 3D scene occupies (%.0f,%.0f %.0fx%.0f) of the image (mission briefing); depth, vectors and jitter are expressed in that window", lw->x, lw->y, lw->width, lw->height);
     }
     bool jit = g_cfgJitter != 0;
     if (ImGui::Checkbox("Camera jitter (Halton, patched into draw constants)", &jit)) { g_cfgJitter = jit ? 1 : 0; write_ini_int("Jitter", g_cfgJitter); }

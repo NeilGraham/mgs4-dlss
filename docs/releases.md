@@ -6,6 +6,27 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
+## v1.3.1 (2026-09-04)
+
+The mission briefings get their vectors back in the window.
+
+- **Layout windows.** The briefings (`s10a20l_D2` and the other interludes on the Nomad) render the main view in a
+  window of the frame - 2562x1440 at the top-left, 2284x2160 for the video call - with the camera window and the
+  text panels around it, and the port's dynamic resolution scales that window on top. The add-on took the window for
+  a dynamic-resolution sub-rect of the full frame and stretched depth, camera vectors and object vectors by up to
+  1.5x over the whole image: in the vector view a giant Snake silhouette spilled out of the main window across the
+  panels, and DLSS reprojected the window with vectors of the wrong scale. The game's upscale pass is scissored to
+  exactly the rectangle the view occupies, so the add-on reads it there, derives the port's scale from it, and
+  expresses depth, vectors, object vectors and the jitter in the window. Details in
+  [dlss-pipeline.md](dlss-pipeline.md#layout-windows-the-mission-briefings-always-on).
+- **No more flapping in the briefings.** When the port's scale took the main view below half the frame it was filed
+  as a 3D window, and the final texture with its hundreds of depth-bound panel quads could be taken for the frame's
+  3D target; either moved DLSS to the window insertion for seconds at a time with a history reset at every flip. The
+  main view of a known layout window is the scene whatever its size, and the 3D-target pick moves to a target with
+  clearly more scene-class draws.
+- The overlay and the 10-second stats line show the layout window in use; the log has `LAYOUT` lines on every change
+  with the scale read from the viewports and from the upscale pass.
+
 ## v1.3.0 (2026-09-01)
 
 The launcher is one file, and it is the release.
