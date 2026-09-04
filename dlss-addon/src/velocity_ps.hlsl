@@ -20,8 +20,11 @@ float2 main(VSOut i) : SV_Target
     // vector and its screen-space gradients first: derivatives must be taken before any lane of the quad discards
     float2 cn = i.cur.xy / i.cur.w - ((flags & 1u) ? jitCur : 0.0.xx);
     float2 pn = i.prv.xy / i.prv.w - ((flags & 2u) ? jitPrev : 0.0.xx);
-    float2 cp = float2((cn.x * 0.5 + 0.5) * size.x, (0.5 - cn.y * 0.5) * size.y);
-    float2 pp = float2((pn.x * 0.5 + 0.5) * prevSize.x, (0.5 - pn.y * 0.5) * prevSize.y);   // previous frame's render scale (dynamic resolution)
+    // an object of a 3D window (flag 8) maps its NDC to that window's rectangle, carried per draw (pad0/pad1), not the pass viewport
+    const float2 sz = (flags & 8u) ? float2(asfloat(pad0), asfloat(pad1)) : size;
+    const float2 psz = (flags & 8u) ? sz : prevSize;
+    float2 cp = float2((cn.x * 0.5 + 0.5) * sz.x, (0.5 - cn.y * 0.5) * sz.y);
+    float2 pp = float2((pn.x * 0.5 + 0.5) * psz.x, (0.5 - pn.y * 0.5) * psz.y);   // previous frame's render scale (dynamic resolution)
     float2 mv = pp - cp;
     const float2 gx = ddx(mv), gy = ddy(mv);
     const float grad = max(abs(gx.x) + abs(gx.y), abs(gy.x) + abs(gy.y));   // pixels of motion per pixel of screen

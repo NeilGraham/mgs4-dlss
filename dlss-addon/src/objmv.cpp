@@ -633,7 +633,8 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
             const uint64_t want = manual ? e.psoKeyManual : e.psoKey;
             if (want != boundKey) { boundKey = want; cur = nullptr; for (const VelPso& v : g_velPsos) if (v.key == want) { cur = v.pso; break; } if (cur) cl->SetPipelineState(cur); }
             if (!cur) continue;
-            const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags | (manual ? 4u : 0u), 0, 0, 0 };
+            uint32_t vw = 0, vh = 0; if (e.ownVp) { memcpy(&vw, &e.vp.Width, 4); memcpy(&vh, &e.vp.Height, 4); }   // the window's size for the pixel mapping (flag 8)
+            const uint32_t consts[8] = { e.curOff, e.prevOff, e.curCtr, e.prevCtr, e.flags | (manual ? 4u : 0u) | (e.ownVp ? 8u : 0u), vw, vh, 0 };
             cl->SetGraphicsRoot32BitConstants(1, 8, consts, 0);
             cl->DrawInstanced(e.bound, 1, 0, 0);
         }

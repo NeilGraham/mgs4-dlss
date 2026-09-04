@@ -296,6 +296,12 @@ Measured on `s10a20l_D2` (Act 2 briefing, interactive part) with a per-frame lay
   and 2006x1128 is both "the window at k = 0.783" and "the frame at k = 0.522"); the CoC pass viewport and the
   half-resolution targets the game creates at runtime (971x546, 1003x564, 1281x720) follow the render size, not the
   layout, so they do not help either.
+- The video call (Naomi's message about three minutes into the interactive part, Campbell later) adds a third 3D view:
+  the caller rendered into a `(0,0 2284x2160)` viewport of its own target (~200 draws, scaled by k like the rest),
+  written into the final texture with scissor `(0,0 2284,2160)` *before* the camera window's and the main view's
+  writes, which cover it; the caller reaches the screen only through the monitor object in the Nomad view. All three
+  views share the one 3840x2160 depth texture (each at its own viewport). Per frame the order is caller, camera
+  window, main view, and the same post-chain output texture is the source of all three upscale draws.
 - Below half the frame the main view (`(0,0 1878x1056)`, `(0,0 1452x816)`) used to be filed as a 3D window and DLSS
   moved to the window insertion on the geometry target, with a history reset at each flip. The briefings also draw
   ~350 depth-bound panel quads into the final texture per frame, 59 of them at the full viewport, before the main

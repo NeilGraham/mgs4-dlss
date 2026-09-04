@@ -24,6 +24,14 @@ The mission briefings get their vectors back in the window.
   3D target; either moved DLSS to the window insertion for seconds at a time with a history reset at every flip. The
   main view of a known layout window is the scene whatever its size, and the 3D-target pick moves to a target with
   clearly more scene-class draws.
+- **The video call, and the camera window.** Naomi's message (and Campbell's, later) is a third 3D view rendered
+  into a 2284x2160 rectangle that only ever reaches the screen through the Nomad's monitor; it was taken for the
+  frame's scene whenever it out-drew the Nomad, which put her vectors on screen (with the monitor off screen too)
+  and squeezed Snake's and Otacon's into her rectangle. Every object capture is now filed by view - the main view,
+  the camera window, or neither - so the caller's draws are not captured, the camera window's characters rasterize
+  into the window's on-screen rectangle at every scale (they were shrunk to the game's scaled viewport under load),
+  and the window's own depth occludes them (the views share one depth texture, and its region is now brought to the
+  full grid too).
 - The overlay and the 10-second stats line show the layout window in use; the log has `LAYOUT` lines on every change
   with the scale read from the viewports and from the upscale pass.
 

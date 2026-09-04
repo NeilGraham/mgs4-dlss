@@ -230,9 +230,24 @@ with its aspect is now the scene whatever its size (the frame itself is the wind
 briefings draw hundreds of depth-bound panel quads into the final texture, dozens at the full viewport, before the
 main view: the final texture could take the frame's 3D-target slot, which again filed the main view as a window.
 The pick now counts scene-class draws per target and moves to a target with clearly more of them
-(`3D target re-picked in N frames` in the stats line). The camera window keeps the game's own rendering (it is not
-evaluated); `DebugMode=9` over `s10a20l_D2` shows the field and the character silhouettes inside the main window
-only, at every scale.
+(`3D target re-picked in N frames` in the stats line).
+
+**Three views per frame, one depth.** During the video call (Naomi's message, Campbell later) the frame renders three
+3D views into one shared depth texture, in this order: the caller at `(0,0 2284x2160)` - only ever seen on the
+Nomad's monitor, its upscale into the final texture is drawn under the main view's - then the camera window at
+`(2562,0 1278x900)`, then the main view. Two consequences had to be handled. A "plausible full-frame viewport" now has
+to have the frame's aspect as well as the size, otherwise the caller's view, rendered first, took the 3D-target slot
+and the layout whenever it out-drew the Nomad, and her silhouette was rasterized into the main window (with the
+monitor off screen too) while Snake and Otacon were rasterized into her 2284x2160 rectangle, squeezed to the left.
+And every object capture is filed by view: the main view's draws rasterize with the pass viewport; a draw whose
+viewport is the camera window's (scaled by the port) rasterizes into the window's on-screen rectangle - the scene
+write whose scissor fits a window viewport without overlapping the main view's rectangle - with its pixel mapping
+carried per draw, so the vectors are no longer shrunk to the scaled viewport under load; the window's depth is
+brought to the full grid at that rectangle as well (the views share the depth texture), so the window's own walls
+occlude its characters; and a draw that belongs to neither view (the caller feed) is not captured at all
+(`object captures skipped (other views)` in the stats line). The camera window keeps the game's own rendering (it is
+not evaluated by DLSS); `DebugMode=9` over `s10a20l_D2` shows the field and the character silhouettes inside the main
+window and the camera window only, at every scale.
 
 ## Frozen screens: the pause menu and Codec backgrounds (`FrozenBackground`, on by default)
 
