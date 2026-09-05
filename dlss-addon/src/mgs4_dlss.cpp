@@ -622,6 +622,17 @@ static uint32_t g_feedFrames = 0, g_monitorFrames = 0; static int g_cfgMonitorFl
 static int g_cfgMonitorProject = 0;
 static std::unordered_map<uint64_t, std::pair<uint32_t, std::pair<uint64_t, resource_desc>>> g_dumpTexHist;   // diagnostics: textures the main view's draws sample
 static std::unordered_set<uint64_t> g_dumpRtSet;   // diagnostics: every target drawn into this frame
+static std::unordered_map<uint64_t, uint32_t> g_rtSeen;   // target -> last frame drawn into (the flashback video is a 30 fps clip: written every other frame)
+// Flashback footage (mash X at a flashback prompt). The game's post chain gains a pass while a flashback is up: a
+// 6-vertex full-viewport quad into a frame-sized target that reads the scene texture, the 512x256 video the game
+// uploads (never a render target) and its noise textures, and writes the two composited - before its upscale into the
+// final texture. Not an overlay draw: it cannot be lifted out of the chain and drawn after DLSS (that loses the grading
+// and the scene under the footage), and left alone DLSS reprojected the footage with the scene's vectors: the scene
+// smeared across it (skipping exactly this pass makes the flashback vanish; the 1024x256-strip quad that runs every
+// frame in the same place is the film grain). So while the pass is in the frame DLSS takes the current frame for the
+// whole picture (the HUD mask's bias-current-color and zero motion everywhere, as for a frame without 3D), like the HUD.
+static uint32_t g_flashFrame = 0, g_flashFrames = 0;   // frame the footage pass was last seen in; frames handled (stats)
+static bool g_preHudLast = false;                       // last frame ran the pre-HUD insertion on the final texture (the only path with the mask)
 static uint64_t g_winGeoRt = 0, g_winGeoRtLast = 0; static uint32_t g_winGeoDraws = 0;   // RT receiving depth-tested draws at a window viewport (Codec caller scene)
 static std::unordered_map<uint64_t, uint32_t> g_winGeoDrawsPerRt;
 static uint32_t g_depthOnDrawsThisFrame = 0, g_depthOnDrawsLast = 0;      // depth-tested draws with a depth buffer (0 = no 3D scene: Codec)
@@ -1105,7 +1116,7 @@ static void uimask_dispatch(command_list* cmd, uint32_t w, uint32_t h, bool forc
         if (!cbPtr) return;
     }
     const uint32_t slot = 4 + (cbSlot % 4);
-    float cb[4] = { float(w), float(h), forceAll ? 1.0f : 0.0f, 0 };
+    float cb[4] = { float(w), float(h), forceAll ? 1.0f : 0.0f, 0.0f };
     memcpy(cbPtr + (cbSlot % 4) * 256, cb, sizeof(cb));
     const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = g_mvHeap->GetCPUDescriptorHandleForHeapStart(); cpu.ptr += SIZE_T(slot) * 4 * inc;
@@ -1975,7 +1986,9 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // no ghosting or smearing anywhere, while the NR add-on still processes the frame.
     const bool no3d = g_depthOnDrawsThisFrame == 0 && !upscale && g_cfgDRS != 2 && g_ui.handle && g_mask.handle && g_uimaskPso;
     { static bool was = false; if (no3d != was) { was = no3d; logmsg("no 3D scene this frame (%s): %s", no3d ? "e.g. Codec" : "3D scene back", no3d ? "whole frame bias-current-color, zero motion" : "normal reconstruction"); } }
-    if (no3d) { uimask_dispatch(cmd, cd.texture.width, cd.texture.height, true); uiMasked = true; }
+    const bool flashUp = g_flashFrame == g_frame && g_ui.handle && g_mask.handle && g_uimaskPso && !upscale && g_cfgDRS != 2;
+    if (flashUp) { g_flashFrames++; uiMasked = true; }
+    if (no3d || flashUp) { uimask_dispatch(cmd, cd.texture.width, cd.texture.height, true); uiMasked = true; }
     else if (uiMasked) uimask_dispatch(cmd, cd.texture.width, cd.texture.height, false);
     if (resumeKept && g_lastWinRectValid && g_mask.handle && g_mvHeap && g_lastWinRect.width > 0) {
         // the pause-menu model was evaluated in this rectangle: its history is not the world's - current color there
@@ -2459,7 +2472,6 @@ static void remember_internal_res(uint32_t w, uint32_t h)
     if (!g_scaling) { g_internalW = w; g_internalH = h; }
 }
 
-struct draw_args { bool indexed; uint32_t count, instances, first, first_instance; int32_t vertex_offset; };
 
 static bool probe_init(device* dev)
 {
@@ -2635,6 +2647,7 @@ static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
     restore_state(dev, cmd, s);
 }
 
+struct draw_args { bool indexed; uint32_t count, instances, first, first_instance; int32_t vertex_offset; };
 static void handle_draw(command_list* cmd, const draw_args& da)
 {
     if (t_reentrant) return;   // our replayed draw
@@ -2744,6 +2757,19 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
             }
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
+            if (!depthTested && da.count == 6 && s.rt_w == g_dlssW && s.rt_h == g_dlssH && g_dlssW && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]
+                && g_depthOnDrawsThisFrame >= 20 && !g_injectedThisFrame && s.table_set[1] && g_preHudLast && g_cfgEnabled && !g_cfgPrePost && !g_scaling && g_cfgDebugMode != 2 && g_flashFrame != g_frame
+                && s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp))) {
+                resource r0 = resolve_descriptor(dev, s.tables[1], 0);   // the flashback footage pass: the video in slot 0 (see g_flashFrame)
+                auto itSeen = r0.handle ? g_rtSeen.find(r0.handle) : g_rtSeen.end();
+                if (r0.handle && is_live(r0.handle) && (itSeen == g_rtSeen.end() || g_frame - itSeen->second > 600)) {
+                    const resource_desc d0 = dev->get_resource_desc(r0);
+                    if (d0.type == resource_type::texture_2d && d0.texture.width == 512 && d0.texture.height == 256 && d0.texture.format == format::r8g8b8a8_unorm) {
+                        g_flashFrame = g_frame;
+                        static uint32_t nlog = 0; if (nlog++ < 4) logmsg("flashback: f%u footage pass (%ux%u video into %s) - DLSS takes the current frame for the whole picture", g_frame, d0.texture.width, d0.texture.height, desc_str(dev, s.rt).c_str());
+                    }
+                }
+            }
         dof_not_skipped:
             if (g_cfgPostDof && g_dofSkipFrame && !g_dofCombineSeen && da.count <= 4 && s.rt_w == g_dlssW && objmv::pso_ps_hash(s.pso) == PS_DOF_COMBINE) g_dofCombineSeen = true;   // the DoF combine (3-vertex pass): overlays come after it
             if (g_cfgPostDof && g_cfgDofMask && g_dofSkipFrame && g_dofCombineSeen && !g_injectedThisFrame && !depthTested && (s.topology == 4 || s.topology == 5) && da.count >= 5 && da.count <= 8 && s.rt_w == g_dlssW && s.rt_h == g_dlssH
@@ -3104,6 +3130,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
             }
             if (g_layoutDumpFrames && s.rt.handle) g_dumpRtSet.insert(s.rt.handle);   // diagnostics: every target drawn into this frame
+            if (s.rt.handle) g_rtSeen[s.rt.handle] = g_frame;   // every target drawn into: the flashback video is a plain texture, never one of these
             if (tracing()) {   // where does the 3D target go? log RT switches and every draw referencing it
                 static uint64_t lastRt = 0; static uint32_t drawsSince = 0;
                 std::string refs;
@@ -3447,6 +3474,7 @@ static void frame_rollover()
     g_viewEvents = 0; g_copyEvents = 0;
     if (g_cfgPrePost && !g_scaling && g_injectedThisFrame && g_prevBusiestRt) { static uint32_t lastPP = 0; if (g_prePostInjections == lastPP) g_ppMissFrames++; lastPP = g_prePostInjections; }
     g_dofPrevOk = g_finalPreHudThisFrame && !g_windowInjectedThisFrame && g_cfgDebugMode != 5 && g_cfgDebugMode != 6 && g_cfgDebugMode != 7 && g_cfgDebugMode != 9;
+    g_preHudLast = g_finalPreHudThisFrame;   // (before the reset: the flashback rule needs to know the insertion runs)
     g_injectedThisFrame = false; g_finalPreHudThisFrame = false; g_windowInjectedThisFrame = false; g_winPostRt = 0; g_featureCreatedThisFrame = false; g_fgScalePending = false;
     g_sceneDrawsLast = g_sceneDrawsThisFrame; g_sceneDrawsThisFrame = 0;
     g_dynDrawsLastFrame = g_dynDrawsThisFrame; g_dynDrawsThisFrame = 0; g_dynClearedThisFrame = false;
@@ -3500,6 +3528,7 @@ static void frame_rollover()
         logmsg("   f%u textures (512+) sampled by the main view's draws:%s", g_frame - 1, t.c_str());
     }
     g_dumpTexHist.clear(); if (!g_layoutDumpFrames) g_dumpRtSet.clear();
+    if (g_rtSeen.size() > 4096) { for (auto it = g_rtSeen.begin(); it != g_rtSeen.end();) { if (g_frame - it->second > 600) it = g_rtSeen.erase(it); else ++it; } }
     g_dumpVpHist.clear();
     if (layout_window() && g_frame % 900 == 0 && g_layoutDumps < 40) { g_layoutDumps++; g_layoutDumpFrames = 1; }   // a periodic dump while a layout window is up
     g_sceneClassDrawsPerRt.clear();
@@ -3525,7 +3554,7 @@ static void frame_rollover()
         { const viewport* wvp = nullptr; const viewport* wl = win_layout_now(&wvp); if (wl && wvp) logmsg("   camera window: (%.0f,%.0f %.0fx%.0f) of the image, drawn at (%.0f,%.0f %.0fx%.0f); depth copied at its first reader in %u frames; camera cuts %u", wl->x, wl->y, wl->width, wl->height, wvp->x, wvp->y, wvp->width, wvp->height, g_winDepthCopies, g_winCuts); }
         { const viewport* fvp = nullptr; const viewport* fl = feed_layout_now(&fvp); const objmv::Stats& os = objmv::stats(); if (fl && fvp) logmsg("   caller feed: (%.0f,%.0f %.0fx%.0f) of the image, drawn at (%.0f,%.0f %.0fx%.0f) into %p; depth copies %u, feed frames %u, frames with a monitor capture %u, monitor draws projected %u (last frame: feed captures %u, monitor captures %u); %s", fl->x, fl->y, fl->width, fl->height, fvp->x, fvp->y, fvp->width, fvp->height, (void*)g_feedGeoRt, g_feedDepthCopies, g_feedFrames, g_monitorFrames, os.monitorDrawn, os.feedCaptured, os.monitorCaptured, os.monitorInfo); }
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
-        logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
+        logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model); flashback frames (footage pass up: DLSS took the current frame) %u", g_windowInjections, g_flashFrames);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
         if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, input fallbacks to the game's DoF %u, sub-rect frames handled %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofFallbacks, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none");
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, re-paired by signature %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.reorderedLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }

@@ -37,6 +37,12 @@ The mission briefings get their vectors back in the window.
   too. The window's region is copied to the full grid at its first reader, before the clears. And the feed cycles its
   cameras every ten seconds: each switch is a cut inside the window, and its object vectors are dropped for that frame
   (they drew as exploded triangles).
+- **Flashbacks come out clean.** Mashing Cross at a flashback prompt plays the footage through a pass in the game's
+  post chain that composites the video over the scene, so DLSS reprojected it with the scene's vectors: the scene
+  smeared across the picture and the static came out as a bright wavy hash. The pass is now recognized (a
+  full-viewport quad reading a 512x256 video), and for those frames DLSS takes the current frame for the whole
+  picture, as it does for frames without a 3D scene. Details in
+  [dlss-pipeline.md](dlss-pipeline.md#flashbacks-the-footage-pass-always-on).
 - **The main view's camera wins the vote.** The camera window's room and the caller's view have hundreds of
   identity-matrix draws of their own; when one of them won the view-projection vote the main view's camera vectors
   came out for a still camera - pans with a motionless background while every character moved, half the time. The

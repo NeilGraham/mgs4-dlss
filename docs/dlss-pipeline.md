@@ -174,6 +174,24 @@ and the quad's scene copy faded into the UI layer whenever the camera moved.)
 DLSS's bias-current-color mask is set and the motion vector zeroed. It has no effect while the pre-HUD insertion
 is active (the HUD is not in DLSS's input there).
 
+### Flashbacks: the footage pass (always on)
+
+Mashing Cross at a flashback prompt in a cutscene (`--mash-x` in the launcher) plays a grainy video over the scene.
+The game does not draw it as an overlay: while a flashback is up its post chain gains a pass - a 6-vertex quad at the
+full viewport into a frame-sized target, before the upscale into the final texture - whose shader reads the scene
+texture, the 512x256 video the game uploads every other frame (never a render target) and its noise textures, and
+writes the two composited. That put the footage inside the image DLSS reprojected with the scene's vectors: the scene
+smeared across the picture and the static came out as a bright, wavy hash. The pass cannot be held back and drawn
+after DLSS either - re-issuing it onto the DLSS output replaces the graded scene under the footage with the raw scene
+texture the shader samples (tried). So the add-on recognizes the pass by its shape and inputs (a depth-off 6-vertex
+quad at the full viewport into a frame-sized non-final target after the geometry, a 512x256 RGBA8 plain texture in
+its first slot) and, for that frame, DLSS takes the current frame for the whole picture: the HUD mask's
+bias-current-color and zero motion everywhere, as for a frame without a 3D scene. The scene faintly visible under
+the static loses its temporal anti-aliasing for the flashback's duration; the footage is clean, with its scanlines
+and grain. The 1024x256-strip quad that runs every frame in the same place is the film grain and is left alone. Only
+the pre-HUD insertion has the mask at hand, so the rule waits for a frame after the first insertion. The stats line
+counts `flashback frames`. Verified on the cemetery (`s00a00l`, first flashback about 17 s in).
+
 ## 3D windows: the Codec caller (`WindowScene`, on by default)
 
 A Codec call renders no world at all - the previous frame simply stays in the final texture - and the caller's scene
