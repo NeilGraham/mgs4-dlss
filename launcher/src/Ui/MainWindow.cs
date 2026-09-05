@@ -60,11 +60,13 @@ namespace Mgs4Launcher
         System.Windows.Shapes.Rectangle _heroArt;
         RadioButton _navPlay, _navSettings, _navInstall;
         Grid _playView, _artBand;
-        ScrollViewer _installView;
+        Grid _installView, _installRailSlot, _settingsRailSlot;
+        ScrollViewer _installScroll, _settingsScroll;
         Grid _settingsView;
         // The Play tab's other half: the three ways to start the game, and the panel their cards live in.
         Grid _startView;
         UniformGrid _startHost;
+        ScrollViewer _startScroll;
         Border _veil;
         StackPanel _installHost, _settingsHost;
         WrapPanel _filters;              // the filter chips wrap onto a second line when the window is narrow
@@ -111,6 +113,8 @@ namespace Mgs4Launcher
             Art.ApplyHeader(Win, _logoArt, _titleText, _navTabs, _heroArt, _headerBar, _artBand);
             TitleBar.Buttons(Win, _minBtn, _maxBtn, _closeBtn, _headerBar);
             SmoothScroll.Attach(Win);
+            ScrollThumb.Attach();
+            Widgets.FoldChanged = SavePrefs;
 
             _sceneList.ItemTemplate = (DataTemplate)XamlReader.Parse(Resource("SceneRow.xaml"));
 
@@ -121,14 +125,19 @@ namespace Mgs4Launcher
             WireStart();
             WireSettings();
             WireSetup();
+            WireMusic();
 
             RestorePrefs();
             // Which half of the Play tab is on is decided before the selection is restored: in the simple view a
             // scene picked last time is not one of the three, and is replaced rather than launched by mistake.
             ApplyPlayView(false);
             RestoreSelection();
+            // With the Setup tab hidden there is no opening on it, whatever a first run or --setup would do.
+            ApplySetupTab();
+            if (startTab == "install" && SetupHidden()) startTab = "play";
             ShowTab(startTab);
             StartStatePolling();
+            WirePad();
 
             // Two things that used to be paid for on the way up, moved to the gap after it. ApplicationIdle is
             // below input, so a click that arrives first is still served first; these fill the pause instead.
@@ -187,7 +196,11 @@ namespace Mgs4Launcher
             _veilOkBtn = (Button)f("VeilOkBtn");
             _veilCancelBtn = (Button)f("VeilCancelBtn");
             _settingsView = (Grid)f("SettingsView");
-            _installView = (ScrollViewer)f("InstallView");
+            _settingsRailSlot = (Grid)f("SettingsRail");
+            _settingsScroll = (ScrollViewer)f("SettingsScroll");
+            _installView = (Grid)f("InstallView");
+            _installRailSlot = (Grid)f("InstallRail");
+            _installScroll = (ScrollViewer)f("InstallScroll");
             _installHost = (StackPanel)f("InstallHost");
             _settingsHost = (StackPanel)f("SettingsHost");
             _copyBtn = (Button)f("CopyBtn");
@@ -206,11 +219,34 @@ namespace Mgs4Launcher
             // The picture box is as wide as the panel and 16:9, so the whole frame shows; the crop belongs to
             // the row banner. Both it and the list's card are clipped to their rounded corners - a Border's
             // CornerRadius shapes its own background and stroke only, and what it holds overflows the curve.
-            _pickShotBox.SizeChanged += (o, e) =>
+            // ...except on a short window, where a 16:9 frame the panel's full width left no room under it for
+            // the options and pushed Launch off the bottom of the card. Past a third of the tab's height the box
+            // stops growing and the frame is cropped to fit it instead - evenly, top and bottom.
+            //
+            // Not while the tab is hidden, though. Switching to the simple view collapses this whole grid, and a
+            // collapsed grid reads as 0 tall - the box was being fitted against that, clamped to its floor, and
+            // came back with the scene list as a strip. The grid's own SizeChanged says nothing about any of
+            // this (it fires neither on the collapse nor on the return), so the return is caught below through
+            // IsVisibleChanged and the fit run again once the tab has been laid out.
+            SizeChangedEventHandler fitShot = (o, e) =>
             {
                 double w = _pickShotBox.ActualWidth;
-                if (w > 0 && (double.IsNaN(_pickShotBox.Height) || Math.Abs(_pickShotBox.Height - w * 9 / 16) > 0.5)) _pickShotBox.Height = w * 9 / 16;
+                if (w <= 0 || !_playView.IsVisible || _playView.ActualHeight <= 0) return;
+                double want = w * 9 / 16, most = Math.Max(90, _playView.ActualHeight * 0.34);
+                bool cropped = want > most;
+                if (cropped) want = most;
+                if (double.IsNaN(_pickShotBox.Height) || Math.Abs(_pickShotBox.Height - want) > 0.5) _pickShotBox.Height = want;
+                var brush = _pickShot.Fill as ImageBrush;
+                if (brush != null) brush.Stretch = cropped ? Stretch.UniformToFill : Stretch.Uniform;
                 RoundClip(_pickShotBox, 10, true);
+            };
+            _pickShotBox.SizeChanged += fitShot;
+            _playView.SizeChanged += fitShot;
+            _playView.IsVisibleChanged += (o, e) =>
+            {
+                if (!_playView.IsVisible) return;
+                Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
+                                           new Action(() => fitShot(null, null)));
             };
             var sceneCardBody = (FrameworkElement)f("SceneCardBody");
             sceneCardBody.SizeChanged += (o, e) => RoundClip(sceneCardBody, 10, false);
@@ -237,6 +273,9 @@ namespace Mgs4Launcher
             _stopBtn = (Button)f("StopBtn");
             _shortcutBtn = (Button)f("ShortcutBtn");
             _status = (TextBlock)f("Status");
+            _padGuide = (WrapPanel)f("PadGuide");
+            _pickScroll = (ScrollViewer)f("PickScroll");
+            _startScroll = (ScrollViewer)f("StartScroll");
             _lockBanner = (Border)f("LockBanner");
             _lockText = (TextBlock)f("LockText");
         }
@@ -258,6 +297,12 @@ namespace Mgs4Launcher
             Win.PreviewKeyDown += (s, e) =>
             {
                 bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
+                // The playlist editor is up: it takes its own keys, and Enter must not reach Launch.
+                if (PlaylistOpen)
+                {
+                    if (PlaylistKey(e.Key)) e.Handled = true;
+                    return;
+                }
                 // A question is up: it owns Enter and Escape, and nothing behind it hears anything.
                 if (_veil.Visibility == Visibility.Visible)
                 {
@@ -271,11 +316,14 @@ namespace Mgs4Launcher
                     else if (_settingsView.Visibility == Visibility.Visible) BuildSettings();
                     e.Handled = true;
                 }
-                else if (ctrl && e.Key == Key.F && !_simplePlay)
+                // Ctrl+F is the search on whichever tab is up: the rail's box on Settings and Setup, the scene
+                // list's on Play. Escape empties the one that is up.
+                else if (ctrl && e.Key == Key.F && TabSearch() != null)
                 {
-                    _navPlay.IsChecked = true;
-                    _search.Focus();
-                    _search.SelectAll();
+                    TextBox box = TabSearch();
+                    if (box == _search) _navPlay.IsChecked = true;
+                    box.Focus();
+                    box.SelectAll();
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Escape && _editPanel.Visibility == Visibility.Visible &&
@@ -284,9 +332,9 @@ namespace Mgs4Launcher
                     EndEdit();
                     e.Handled = true;
                 }
-                else if (e.Key == Key.Escape && _search.Text.Length > 0 && _playView.Visibility == Visibility.Visible)
+                else if (e.Key == Key.Escape && TabSearch() != null && TabSearch().Text.Length > 0)
                 {
-                    _search.Clear();
+                    TabSearch().Clear();
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Enter &&
@@ -298,6 +346,15 @@ namespace Mgs4Launcher
                     e.Handled = true;
                 }
             };
+        }
+
+        // The search box that belongs to the tab on screen, or null where there is none (the simple Play view).
+        TextBox TabSearch()
+        {
+            if (_settingsView.Visibility == Visibility.Visible) return _settingsRail != null ? _settingsRail.Search : null;
+            if (_installView.Visibility == Visibility.Visible) return _setupRail != null ? _setupRail.Search : null;
+            if (_playView.Visibility == Visibility.Visible || (_navPlay.IsChecked == true && !_simplePlay)) return _search;
+            return null;
         }
 
         void ShowTab(string tab)
@@ -323,6 +380,7 @@ namespace Mgs4Launcher
             if (tab == "install") ShowSetup();
             else if (tab == "settings") ShowSettings();
             RefreshState();
+            if (_padGuide != null) EnterTab();
         }
 
         // Everything that depends on whether the game is up: what the window cannot infer, it polls for. Driven by
@@ -405,7 +463,19 @@ namespace Mgs4Launcher
                 if (o != null) _favorites.Add(o.ToString());
         }
 
+        // Restoring sets controls whose change handlers save, and a save half-way through a restore writes the
+        // half that has not been read yet as empty - the acts all shut, the filters all off. SavePrefs is a no-op
+        // until the restore is over.
+        bool _restoring;
+
         void RestorePrefs()
+        {
+            _restoring = true;
+            try { RestorePrefsInner(); }
+            finally { _restoring = false; }
+        }
+
+        void RestorePrefsInner()
         {
             _optAdvance.IsChecked = true;
             Dictionary<string, object> p = Prefs.Read();
@@ -421,6 +491,9 @@ namespace Mgs4Launcher
                 return p.TryGetValue(k, out v) && v != null ? v.ToString() : null;
             };
             if (p.ContainsKey("Advance")) _optAdvance.IsChecked = flag("Advance");
+            object hearts;
+            if (p.TryGetValue("MusicFavorites", out hearts) && hearts is object[])
+                foreach (object o in (object[])hearts) if (o != null) Music.Favorites.Add(o.ToString());
             // The simple view's own copy of the same option, and its own default: off. Starting the game and
             // getting out of the way is what that view is for, and a scene run's habits are not its business.
             _startAdvance.IsChecked = flag("StartAdvance");
@@ -447,6 +520,13 @@ namespace Mgs4Launcher
                     if (chip != null && chip.Tag != null) chip.IsChecked = want.Contains(chip.Tag.ToString());
                 }
             }
+
+            // Which cards on Settings and Setup were folded shut, by key, and whether Setup was left showing only
+            // the rows that want something.
+            object shutCards;
+            if (p.TryGetValue("CardsClosed", out shutCards) && shutCards is object[])
+                foreach (object o in (object[])shutCards) if (o != null) Widgets.Closed.Add(o.ToString());
+            if (_problemsChip != null) _problemsChip.IsChecked = flag("SetupProblemsOnly");
 
             // Which acts were left closed. Stored as the closed ones rather than the open ones, so an act added to
             // the catalog later starts closed like every other act does on a first run.
@@ -480,6 +560,7 @@ namespace Mgs4Launcher
 
         void SavePrefs()
         {
+            if (_restoring) return;
             var filters = new List<string>();
             foreach (object child in _filters.Children)
             {
@@ -491,8 +572,11 @@ namespace Mgs4Launcher
                 { "Stage", _pickedId },
                 { "Filters", filters },
                 { "Favorites", new List<string>(_favorites) },
+                { "MusicFavorites", new List<string>(Music.Favorites) },
                 { "SceneEdits", SceneEditsForSaving() },
                 { "Collapsed", _collapsed.Where(kv => kv.Value).Select(kv => kv.Key).ToList() },
+                { "CardsClosed", new List<string>(Widgets.Closed) },
+                { "SetupProblemsOnly", _problemsChip != null && _problemsChip.IsChecked == true },
                 { "Advance", _optAdvance.IsChecked == true },
                 { "StartAdvance", _startAdvance.IsChecked == true },
                 { "SpoilerSeen", _spoilerSeen },
@@ -545,8 +629,25 @@ namespace Mgs4Launcher
         // to colour one icon: thirty-five milliseconds of file reads and a driver lookup, on the window's thread.
         // Now it takes the check the last run left on disk, and when there is none it starts the same background
         // refresh the Setup tab uses and lets that set the icon when it lands.
+        // MGS4_SETUP_TAB in config.ini: "hidden" turns the window into a plain launcher - no install check, no
+        // add-on, nothing about DLSS - for a machine with nothing to set up, an AMD card's among them.
+        public const string SetupTabKey = "MGS4_SETUP_TAB";
+
+        static bool SetupHidden()
+        {
+            return string.Equals(Paths.Setting(SetupTabKey, "shown"), "hidden", StringComparison.OrdinalIgnoreCase);
+        }
+
+        void ApplySetupTab()
+        {
+            bool hidden = SetupHidden();
+            _navInstall.Visibility = hidden ? Visibility.Collapsed : Visibility.Visible;
+            if (hidden && _installView.Visibility == Visibility.Visible) ShowTab("play");
+        }
+
         void PrimeSetupIcon()
         {
+            if (SetupHidden()) return;
             if (_installView.Visibility == Visibility.Visible) return;   // ShowSetup is about to do it properly
             if (string.IsNullOrEmpty(_gameDir))
             {

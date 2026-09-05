@@ -56,11 +56,36 @@ namespace Mgs4Launcher
         bool _running;
 
         Window _win;
+        static SmoothScroll _shared;      // the one Attach made, so a click elsewhere can ask for the same easing
 
         public static void Attach(Window win)
         {
             var s = new SmoothScroll { _win = win };
             win.PreviewMouseWheel += s.OnWheel;
+            _shared = s;
+        }
+
+        /// <summary>Ease a scroller to an offset with the wheel's own curve - what the rails use, so a jump to a
+        /// card reads as the page moving rather than as the page being replaced.</summary>
+        public static void Glide(ScrollViewer sv, double to)
+        {
+            if (sv == null) return;
+            if (_shared == null) { sv.ScrollToVerticalOffset(to); return; }
+            _shared.Aim(sv, to, Tau);
+        }
+
+        void Aim(ScrollViewer sv, double to, double tau)
+        {
+            if (to < 0) to = 0;
+            if (to > sv.ScrollableHeight) to = sv.ScrollableHeight;
+            _targets[sv] = to;
+            _tau = tau;
+            if (!_running)
+            {
+                _clock.Restart();
+                CompositionTarget.Rendering += OnRender;
+                _running = true;
+            }
         }
 
         // What one notch is worth here. Windows' own setting rather than a number of ours: Mouse settings calls it

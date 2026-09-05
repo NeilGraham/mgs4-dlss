@@ -27,9 +27,128 @@ using System.Web.Script.Serialization;
 
 namespace Mgs4Launcher
 {
+    // A track as a list shows it. Top level and public, because WPF binds only to public members of public
+    // types, and Music is neither.
+    public class TrackItem
+    {
+        public string File { get; private set; }
+        public string Label { get; private set; }
+        public bool Favorite { get; private set; }
+        // The heart at the row's end: filled for a favourite, an outline for the rest, one character wide either
+        // way so the column holds still. Tag="heart" in the template is what a click on it is told apart by.
+        public string Heart { get { return Favorite ? "♥" : "♡"; } }
+        public string HeartInk { get { return Favorite ? "#F27E9A" : "#4A4A52"; } }
+        public TrackItem(string file)
+        {
+            File = file;
+            Favorite = Music.Favorites.Contains(file);
+            Music.Known k = Music.Lookup(file);
+            string name = k != null ? "★ " + k.Title + "  ·  " + k.From : Music.Pretty(file);
+            Label = (Favorite ? "♥ " : "") + name;
+        }
+    }
+
     static class Music
     {
-        public const string Off = "off", Random = "random";
+        // "random" is what the setting was called before it was Shuffle; a config.ini still saying so means the same.
+        public const string Off = "off", Shuffle = "shuffle", OldShuffle = "random";
+
+        // Playlist plays the list in config.ini in order; playlist-shuffle deals that list the way Shuffle deals
+        // the whole iPod.
+        public const string Playlist = "playlist", PlaylistShuffle = "playlist-shuffle";
+
+        public static bool IsShuffle(string setting)
+        {
+            return string.Equals(setting, Shuffle, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(setting, OldShuffle, StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsPlaylist(string setting)
+        {
+            return string.Equals(setting, Playlist, StringComparison.OrdinalIgnoreCase) || IsPlaylistShuffle(setting);
+        }
+
+        public static bool IsPlaylistShuffle(string setting)
+        {
+            return string.Equals(setting, PlaylistShuffle, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>A mode that walks a queue - anything but Off and a single named track.</summary>
+        public static bool IsQueued(string setting) { return IsShuffle(setting) || IsPlaylist(setting); }
+
+        // ------------------------------------------------------------------------------------ the playlist
+
+        public const string PlaylistKey = "MGS4_PLAYLIST";
+
+        /// <summary>The playlist as config.ini holds it - file names, comma-separated, in play order - kept to
+        /// the tracks this install actually has.</summary>
+        public static List<string> ReadPlaylist(string gameDir)
+        {
+            var outp = new List<string>();
+            string raw = Paths.Setting(PlaylistKey, "");
+            if (string.IsNullOrEmpty(raw)) return outp;
+            var have = new HashSet<string>(Tracks(gameDir), StringComparer.OrdinalIgnoreCase);
+            foreach (string part in raw.Split(','))
+            {
+                string t = part.Trim();
+                if (t.Length > 0 && have.Contains(t)) outp.Add(t);
+            }
+            return outp;
+        }
+
+        public static void WritePlaylist(IEnumerable<string> files)
+        {
+            var values = new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>(PlaylistKey, string.Join(",", files)),
+            };
+            Checks.SetIni(Paths.EnsureConfig(), values, null);
+            Paths.ForgetConfig();
+        }
+
+        /// <summary>The tracks dealt into a random order, every one once. The first is never notThis - the track
+        /// that just finished - so a fresh deal never plays the same song twice running.</summary>
+        public static List<string> Shuffled(List<string> pool, string notThis)
+        {
+            var deck = new List<string>(pool);
+            lock (_dice)
+            {
+                for (int i = deck.Count - 1; i > 0; i--)
+                {
+                    int j = _dice.Next(i + 1);
+                    string t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+                }
+                if (deck.Count > 1 && notThis != null && string.Equals(deck[0], notThis, StringComparison.OrdinalIgnoreCase))
+                {
+                    int j = 1 + _dice.Next(deck.Count - 1);
+                    string t = deck[0]; deck[0] = deck[j]; deck[j] = t;
+                }
+            }
+            return deck;
+        }
+
+        // The tracks someone has hearted, kept in launcher.json by MainWindow the way the scene favourites are.
+        public static readonly HashSet<string> Favorites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>The iPod in the order every list shows it: the favourites first, then the memorable tracks,
+        /// then the rest - each group keeping the order it had.</summary>
+        public static List<string> Ordered(List<string> tracks)
+        {
+            var rest = new List<string>(tracks);
+            var ranked = new List<string>();
+            foreach (Known k in Memorable)
+            {
+                int i = rest.FindIndex(t => string.Equals(t, k.File, StringComparison.OrdinalIgnoreCase));
+                if (i < 0) continue;
+                ranked.Add(rest[i]);
+                rest.RemoveAt(i);
+            }
+            ranked.AddRange(rest);
+            var outp = new List<string>();
+            foreach (string t in ranked) if (Favorites.Contains(t)) outp.Add(t);
+            foreach (string t in ranked) if (!Favorites.Contains(t)) outp.Add(t);
+            return outp;
+        }
 
         // vgmstream's own releases. The API is asked for the current one so this does not rot; the pinned URL is
         // what it falls back to when GitHub cannot be reached or answers with something unexpected.
@@ -61,6 +180,13 @@ namespace Mgs4Launcher
             return true;
         }
 
+        // The game's own score is not in the iPod's folder under any name a person would pick: it is filed as
+        // bgm_* cues, and the cutscene music under ww\bank\default. Two of those are worth having on the deck -
+        // the title screen's theme, which is what the main menu plays, and the full Love Theme from an Act 5
+        // cutscene - so they are named here and looked for in both folders.
+        static readonly string[] Extras = { "bgm_title_01", "E_bgm_hv_24demo_lovetheme" };
+        static readonly string[] BankDirs = { "common\\bank\\default", "ww\\bank\\default" };
+
         public static List<string> Tracks(string gameDir)
         {
             var outp = new List<string>();
@@ -76,6 +202,8 @@ namespace Mgs4Launcher
             }
             catch { }
             outp.Sort(StringComparer.OrdinalIgnoreCase);
+            foreach (string x in Extras)
+                if (BankOf(gameDir, x) != null) outp.Add(x);
             return outp;
         }
 
@@ -85,21 +213,71 @@ namespace Mgs4Launcher
             return string.IsNullOrEmpty(track) ? "" : track.Replace('_', ' ');
         }
 
-        public static string BankOf(string gameDir, string track)
+        // The banks are the iPod's playlist, named the way the files are. These are the ones worth putting at
+        // the head of the list, in this order: the game's own themes first, then the series' - each with the
+        // title it is actually known by, and a word on where it is from. Anything not here is listed after
+        // them under its file name, made readable.
+        public class Known { public string File, Title, From; }
+        public static readonly Known[] Memorable =
         {
-            string dir = BankDir(gameDir);
-            if (string.IsNullOrEmpty(dir) || string.IsNullOrEmpty(track)) return null;
-            string p = Path.Combine(dir, track + ".bank");
-            return Paths.Exists(p) ? p : null;
+            new Known { File = "bgm_title_01",               Title = "Title screen",                      From = "MGS4's title and main menu" },
+            new Known { File = "E_bgm_hv_24demo_lovetheme",  Title = "Love Theme",                        From = "MGS4, in full, from an Act 5 cutscene" },
+            new Known { File = "Love_Theme_hum_ver",         Title = "Love Theme (hum ver.)",             From = "MGS4's main theme, hummed" },
+            new Known { File = "MGS4_Thema_Of_Love_SmaXvr",  Title = "Theme of Love (Smash Bros. ver.)",  From = "MGS4, Brawl's arrangement" },
+            new Known { File = "Sea_Breeze",                 Title = "Sea Breeze",                        From = "MGS4" },
+            new Known { File = "Everything_Begins",          Title = "Everything Begins",                 From = "MGS4" },
+            new Known { File = "Father_and_Son",             Title = "Father and Son",                    From = "MGS4" },
+            new Known { File = "Flowing_Destiny",            Title = "Flowing Destiny",                   From = "MGS4" },
+            new Known { File = "Inori",                      Title = "Inori",                             From = "MGS4" },
+            new Known { File = "At_Dawn",                    Title = "At Dawn",                           From = "MGS4" },
+            new Known { File = "War_Has_Changed",            Title = "War Has Changed",                   From = "MGS4" },
+            new Known { File = "Calling_To_The_Night",       Title = "Calling to the Night",              From = "Portable Ops" },
+            new Known { File = "Snake_Eater",                Title = "Snake Eater",                       From = "MGS3" },
+            new Known { File = "THE_BEST_IS_YET_TO_CO",      Title = "The Best Is Yet to Come",           From = "MGS1" },
+            new Known { File = "MGSTheme_DocumentRemix",     Title = "Metal Gear Solid Main Theme (Document remix)", From = "MGS" },
+            new Known { File = "THEME_OF_SOLID_SNAKE",       Title = "Theme of Solid Snake",              From = "Metal Gear 2" },
+            new Known { File = "ZanzibarBreeze",             Title = "Zanzibar Breeze",                   From = "Metal Gear 2" },
+            new Known { File = "Yell_dead_cell",             Title = "Yell \"Dead Cell\"",                From = "MGS2" },
+            new Known { File = "MGS1_HIND_D",                Title = "Hind D",                            From = "MGS1" },
+            new Known { File = "Beyond_The_Bounds",          Title = "Beyond the Bounds",                 From = "Zone of the Enders 2" },
+            new Known { File = "One_Night_in_NEOKOBECITY",   Title = "One Night in Neo Kobe City",        From = "Snatcher" },
+            new Known { File = "OPENING_TITLE_OLD_L",        Title = "Opening / Old L.A. 2040",           From = "Snatcher" },
+            new Known { File = "POLICENAUTS_END_TITLE",      Title = "End Title",                         From = "Policenauts" },
+        };
+
+        public static Known Lookup(string track)
+        {
+            foreach (Known k in Memorable)
+                if (string.Equals(k.File, track, StringComparison.OrdinalIgnoreCase)) return k;
+            return null;
         }
 
-        // What "Random" means: one of the named tracks, chosen per run. Seeded from the clock, so two launches in
-        // the same minute do not sit on the same song.
+        /// <summary>The title a track is known by, or its file name made readable.</summary>
+        public static string Title(string track)
+        {
+            Known k = Lookup(track);
+            return k != null ? k.Title : Pretty(track);
+        }
+
+        public static string BankOf(string gameDir, string track)
+        {
+            if (string.IsNullOrEmpty(gameDir) || string.IsNullOrEmpty(track)) return null;
+            foreach (string d in BankDirs)
+            {
+                string p = Paths.Join(gameDir, d + "\\" + track + ".bank");
+                if (Paths.Exists(p)) return p;
+            }
+            return null;
+        }
+
+        // What Shuffle means: one of the named tracks, never the one that just played. Seeded from the clock, so
+        // two launches in the same minute do not sit on the same song.
         static readonly System.Random _dice = new System.Random();
-        public static string Pick(string gameDir)
+        public static string Pick(string gameDir, string notThis = null)
         {
             List<string> all = Tracks(gameDir);
             if (all.Count == 0) return null;
+            if (all.Count > 1 && notThis != null) all.RemoveAll(t => string.Equals(t, notThis, StringComparison.OrdinalIgnoreCase));
             lock (_dice) return all[_dice.Next(all.Count)];
         }
 

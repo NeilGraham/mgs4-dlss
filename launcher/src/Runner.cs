@@ -1,6 +1,6 @@
 // Running a scene: the boot (mgs4.exe --stage), pressing through the auto-save notice and the "press any button"
-// screen until the first 3D frame, tapping Cross for the in-cutscene flashback prompts, and ending a scene when
-// the cutscene hands over to gameplay. A port of Invoke-SceneRun in tools/mgs4_dlss_launcher.ps1.
+// screen until the first 3D frame, tapping E for the in-cutscene flashback prompts, and ending a scene when the
+// cutscene hands over to gameplay. A port of Invoke-SceneRun in tools/mgs4_dlss_launcher.ps1.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -46,86 +46,6 @@ namespace Mgs4Launcher
         }
 
         public static bool EscapeDown() { return (GetAsyncKeyState(0x1B) & 0x8000) != 0; }
-    }
-
-    // A virtual DualShock 4 through ViGEmBus. Cross is the button MGS4's flashback prompts want; a keyboard Enter
-    // gets past the boot prompts but does not fire them. The DLL is loaded by full path first, so the DllImport
-    // binds to the module already in the process whatever folder it came from.
-    static class Pad
-    {
-        [StructLayout(LayoutKind.Sequential)]
-        public struct DS4Report { public byte lx, ly, rx, ry; public ushort buttons; public byte special, tl, tr; }
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibraryW(string path);
-        [DllImport("ViGEmClient.dll")] static extern IntPtr vigem_alloc();
-        [DllImport("ViGEmClient.dll")] static extern int vigem_connect(IntPtr client);
-        [DllImport("ViGEmClient.dll")] static extern void vigem_disconnect(IntPtr client);
-        [DllImport("ViGEmClient.dll")] static extern void vigem_free(IntPtr client);
-        [DllImport("ViGEmClient.dll")] static extern IntPtr vigem_target_ds4_alloc();
-        [DllImport("ViGEmClient.dll")] static extern int vigem_target_add(IntPtr client, IntPtr target);
-        [DllImport("ViGEmClient.dll")] static extern int vigem_target_remove(IntPtr client, IntPtr target);
-        [DllImport("ViGEmClient.dll")] static extern void vigem_target_free(IntPtr target);
-        [DllImport("ViGEmClient.dll")] static extern int vigem_target_ds4_update(IntPtr client, IntPtr target, DS4Report r);
-
-        const int VIGEM_ERROR_NONE = 0x20000000;
-        const ushort DPAD_NONE = 0x8, CROSS = 1 << 5;
-        static IntPtr _client = IntPtr.Zero, _pad = IntPtr.Zero;
-        public static string Error = "";
-
-        // tools\ViGEmClient.dll, VIGEM_CLIENT_DLL, or the copy the vgamepad package installs.
-        public static string FindDll()
-        {
-            foreach (string c in new[] { Environment.GetEnvironmentVariable("VIGEM_CLIENT_DLL"),
-                                         Paths.Join(Paths.Root, "tools\\ViGEmClient.dll"),
-                                         Paths.Join(Paths.Root, "ViGEmClient.dll") })
-                if (!string.IsNullOrEmpty(c) && Paths.Exists(c)) return c;
-            return null;
-        }
-
-        public static bool Open(string dllPath)
-        {
-            if (_pad != IntPtr.Zero) return true;
-            try
-            {
-                if (!string.IsNullOrEmpty(dllPath) && LoadLibraryW(dllPath) == IntPtr.Zero)
-                { Error = "ViGEmClient.dll could not be loaded from " + dllPath; return false; }
-                _client = vigem_alloc();
-                int r = vigem_connect(_client);
-                if (r != VIGEM_ERROR_NONE)
-                { Error = "ViGEmBus is not running (vigem_connect 0x" + r.ToString("X8") + ")"; Close(); return false; }
-                _pad = vigem_target_ds4_alloc();
-                r = vigem_target_add(_client, _pad);
-                if (r != VIGEM_ERROR_NONE) { Error = "vigem_target_add 0x" + r.ToString("X8"); Close(); return false; }
-                Send(0);
-                return true;
-            }
-            catch (Exception e) { Error = e.Message; Close(); return false; }
-        }
-
-        static void Send(ushort buttons)
-        {
-            var rep = new DS4Report();
-            rep.lx = rep.ly = rep.rx = rep.ry = 128;
-            rep.buttons = (ushort)(DPAD_NONE | buttons);
-            vigem_target_ds4_update(_client, _pad, rep);
-        }
-
-        public static void TapCross(int holdMs)
-        {
-            if (_pad == IntPtr.Zero) return;
-            Send(CROSS); Thread.Sleep(holdMs); Send(0);
-        }
-
-        public static void Close()
-        {
-            try
-            {
-                if (_pad != IntPtr.Zero) { vigem_target_remove(_client, _pad); vigem_target_free(_pad); }
-                if (_client != IntPtr.Zero) { vigem_disconnect(_client); vigem_free(_client); }
-            }
-            catch { }
-            _pad = IntPtr.Zero; _client = IntPtr.Zero;
-        }
     }
 
     // Only the lines the add-on wrote since we started reading. The log is replaced at every launch, so a shrink
@@ -331,33 +251,26 @@ namespace Mgs4Launcher
             }
             if (hwnd == IntPtr.Zero) { say("no game window appeared"); return 1; }
 
-            // A virtual DualShock exists for one reason: MGS4's in-cutscene flashback prompts want Cross, and a
-            // keyboard Enter does not fire them. The boot prompts are not like that - the auto-save notice and
-            // "press any button" take any button at all, and Enter is one. So a run that is only pressing through
-            // those stays on the keyboard and never creates a controller for the game to notice.
-            bool padOk = false;
-            if (opt.MashX && string.IsNullOrEmpty(opt.PressKey))
+            // Two keys. The boot prompts - the auto-save notice and "press any button" - take any key at all, and
+            // Enter is the one that has always got past them. The flashback prompts inside a cutscene are the
+            // port's Cross, which on the keyboard is E; Enter does nothing to them. This used to be a virtual
+            // DualShock through the ViGEmBus driver, which meant a kernel driver and a DLL to install for one
+            // checkbox - E is the same press with nothing to set up. --press-key names one key for both.
+            string bootKey = string.IsNullOrEmpty(opt.PressKey) ? "ENTER" : opt.PressKey;
+            string sceneKey = string.IsNullOrEmpty(opt.PressKey) ? "E" : opt.PressKey;
+            Func<string, Action> tapper = name =>
             {
-                string dll = Pad.FindDll();
-                if (dll == null) say("no ViGEmClient.dll - falling back to Enter, flashback prompts will not fire");
-                else
+                ushort vk = VirtualKey(name);
+                return () =>
                 {
-                    padOk = Pad.Open(dll);
-                    if (padOk) say("virtual DualShock 4 on " + Path.GetFileName(dll));
-                    else say("no controller: " + Pad.Error + " - falling back to Enter, flashback prompts will not fire");
-                }
-            }
-            ushort vk = VirtualKey(string.IsNullOrEmpty(opt.PressKey) ? "ENTER" : opt.PressKey);
-            bool usePad = padOk && string.IsNullOrEmpty(opt.PressKey);
-            if (opt.Advance && !usePad && string.IsNullOrEmpty(opt.Keys))
-                say("pressing " + (string.IsNullOrEmpty(opt.PressKey) ? "Enter" : opt.PressKey.ToUpperInvariant()) +
-                    " on the keyboard" + (opt.MashX ? "" : " (no controller needed for the boot prompts)"));
-            Action press = () =>
-            {
-                if (!Win.Focus(hwnd)) Win.Focus(hwnd);
-                if (usePad) Pad.TapCross((int)(opt.PressHold * 1000));
-                else { Win.Key(vk, true); Thread.Sleep((int)(opt.PressHold * 1000)); Win.Key(vk, false); }
+                    if (!Win.Focus(hwnd)) Win.Focus(hwnd);
+                    Win.Key(vk, true); Thread.Sleep((int)(opt.PressHold * 1000)); Win.Key(vk, false);
+                };
             };
+            Action press = tapper(bootKey), pressScene = tapper(sceneKey);
+            if (opt.Advance && string.IsNullOrEmpty(opt.Keys))
+                say("pressing " + bootKey.ToUpperInvariant() + " through the boot prompts" +
+                    (opt.MashX ? ", then " + sceneKey.ToUpperInvariant() + " for the flashbacks" : ""));
 
             if (!string.IsNullOrEmpty(opt.Keys))
             {
@@ -376,10 +289,10 @@ namespace Mgs4Launcher
                 int n = 0;
                 while ((DateTime.Now - t0).TotalSeconds < opt.StartTimeout)
                 {
-                    if (Win.EscapeDown()) { say("Escape - stopping"); Pad.Close(); return 130; }
+                    if (Win.EscapeDown()) { say("Escape - stopping"); return 130; }
                     ReadSceneSignals(tail, ref state, ref hud);
                     if (opt.SceneDetect && (state == "cutscene" || state == "gameplay")) break;
-                    if (GameWindow() == IntPtr.Zero) { say("the game exited"); Pad.Close(); return 1; }
+                    if (GameWindow() == IntPtr.Zero) { say("the game exited"); return 1; }
                     press(); n++;
                     Thread.Sleep((int)(opt.PressEvery * 1000));
                 }
@@ -387,9 +300,9 @@ namespace Mgs4Launcher
                 else say("no 3D frame within " + opt.StartTimeout + "s (state " + state + ")");
             }
 
-            if (!(opt.MashX || opt.EndOnGameplay || opt.Hold > 0 || opt.MaxMinutes > 0)) { Pad.Close(); return 0; }
+            if (!(opt.MashX || opt.EndOnGameplay || opt.Hold > 0 || opt.MaxMinutes > 0)) return 0;
 
-            // Phase 2 - stay with the scene: keep Cross going for the flashbacks, and watch for the hand-over.
+            // Phase 2 - stay with the scene: keep E going for the flashbacks, and watch for the hand-over.
             DateTime tScene = DateTime.Now;
             DateTime? gameplaySince = null, staticSince = null;
             string reason = "still running";
@@ -401,7 +314,7 @@ namespace Mgs4Launcher
                 if (opt.Hold > 0 && inScene >= opt.Hold) { reason = "held " + opt.Hold + "s"; break; }
                 if (opt.MaxMinutes > 0 && (DateTime.Now - t0).TotalMinutes >= opt.MaxMinutes) { reason = "max-minutes"; break; }
 
-                if (opt.MashX) press();
+                if (opt.MashX) pressScene();
                 Thread.Sleep((int)(opt.PressEvery * 1000));
 
                 string prev = state;
@@ -426,7 +339,6 @@ namespace Mgs4Launcher
                     else staticSince = null;
                 }
             }
-            Pad.Close();
             say(string.Format("done after {0:n0}s: {1}", (DateTime.Now - tScene).TotalSeconds, reason));
             if (!opt.KeepRunning && reason != "still running" && reason != "the game exited")
                 if (opt.EndOnGameplay || opt.Hold > 0 || opt.MaxMinutes > 0) { say("closing the game"); StopGame(); }

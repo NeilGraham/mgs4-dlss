@@ -181,15 +181,10 @@ namespace Mgs4Launcher
                 };
             }).ToList();
 
-            // Whether the pad *could* be used, asked without using one. This line used to be worked out by opening
-            // a virtual DualShock and closing it again, every time the window opened - which really did connect a
-            // controller, sound and all, to answer a question about a note under a checkbox. The two things that
-            // decide it are a file on disk and a driver's state, and both can simply be looked at.
-            Row vigem = Checks.VigemRow();
-            _mashNote.Text = vigem.Status == "ok"
-                ? "A virtual DualShock 4 taps Cross about six times a second, which is what MGS4's in-cutscene flashback prompts want. The game must stay in the foreground. It is created when a run starts and removed when it ends."
-                : "Needs ViGEmBus and ViGEmClient.dll (" + vigem.Value +
-                  "). Without them the launcher can only press Enter, which gets past the prompts but does not fire the flashbacks.";
+            // E is the port's keyboard binding for Cross, the button the in-cutscene flashback prompts want. This
+            // used to be a virtual DualShock through the ViGEmBus driver, and the note here said what was missing;
+            // a key needs nothing installed.
+            _mashNote.Text = "Taps E about six times a second for the whole scene, which is what MGS4's in-cutscene flashback prompts want. The game must stay in the foreground.";
 
             foreach (string name in CatNames)
             {
@@ -413,9 +408,13 @@ namespace Mgs4Launcher
             System.Windows.Media.ImageSource shot = Thumbs.Get(scene.Id, 960);
             _pickShot.Fill = shot == null ? null : new System.Windows.Media.ImageBrush(shot)
             {
-                Stretch = System.Windows.Media.Stretch.Uniform,         // the whole frame; the box is 16:9 to fit it
+                // The whole frame; the box is 16:9 to fit it. On a short window the box is held shorter than
+                // that and MainWindow.Bind swaps this for UniformToFill, so the frame is cropped rather than
+                // letterboxed.
+                Stretch = System.Windows.Media.Stretch.Uniform,
             };
             _pickShotBox.Visibility = shot != null ? Visibility.Visible : Visibility.Collapsed;
+            _pickShotBox.Height = double.NaN;      // let the fit run again for this frame's box
 
             // A menu entry takes none of the run options: there are no boot prompts to press through, and a press
             // on MGS4's main menu picks an entry rather than getting past anything. The title-screen boot is a

@@ -22,6 +22,15 @@ namespace Mgs4Launcher
 
         public static Style LinkStyle, FlatStyle, PrimaryStyle, ChipStyle;
 
+        // What a row holds that a controller can act on, hung on the row's Tag: the button in an action, guide
+        // or link row, or the editor and its key in a settings row. MainWindow.Pad.cs reads it.
+        public class RowInfo
+        {
+            public Button Button;
+            public FrameworkElement Editor;
+            public IniKey Spec;
+        }
+
         public static Brush Brush(string hex)
         {
             return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
@@ -104,13 +113,36 @@ namespace Mgs4Launcher
         public static Border Card(string title, string blurb, string tagKind, string tagLabel,
                                   IEnumerable<string> badges, out StackPanel body)
         {
+            return Card(title, blurb, tagKind, tagLabel, badges, null, out body);
+        }
+
+        // Which cards are folded shut, by the key each was given, and who to tell when one is. MainWindow keeps
+        // the set in the preferences file, the way it keeps the acts on the Play tab. A card with no key does not
+        // fold.
+        public static readonly HashSet<string> Closed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        public static Action FoldChanged;
+
+        // What a folding card is made of, hung on the card's Tag so Fold and IsFolded can find it again.
+        class CardParts
+        {
+            public string Key;
+            public Border Header;
+            public StackPanel Body;
+            public TextBlock Chevron;
+        }
+
+        /// <summary>A card whose header folds the body away on a click, remembered under foldKey. The blurb
+        /// rides the title's own line, so a card is one line tall folded and its rows start a line sooner open.</summary>
+        public static Border Card(string title, string blurb, string tagKind, string tagLabel,
+                                  IEnumerable<string> badges, string foldKey, out StackPanel body)
+        {
             var card = new Border
             {
                 Background = Brush("#151517"),
                 BorderBrush = Brush("#26262A"),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(10),
-                Margin = new Thickness(0, 0, 0, 14),
+                Margin = new Thickness(0, 0, 0, 12),
             };
             var stack = new StackPanel();
 
@@ -120,24 +152,36 @@ namespace Mgs4Launcher
                 BorderBrush = Brush("#26262A"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
                 CornerRadius = new CornerRadius(10, 10, 0, 0),
-                Padding = new Thickness(18, 13, 18, 13),
+                Padding = new Thickness(18, 10, 18, 10),
             };
-            Grid hg = Columns("*", "Auto");
-            var hs = new StackPanel();
-            var titleRow = new StackPanel { Orientation = Orientation.Horizontal };
+            Grid hg = Columns("Auto", "*", "Auto");
+            var titleRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            TextBlock chevron = null;
+            if (foldKey != null)
+            {
+                // The same mark the act headers on the Play tab wear, in the same place: a card folds the way an
+                // act does.
+                chevron = Text("▼", 10, "#97979F");
+                chevron.VerticalAlignment = VerticalAlignment.Center;
+                chevron.Margin = new Thickness(0, 0, 12, 0);
+                chevron.Width = 12;
+                titleRow.Children.Add(chevron);
+            }
             if (badges != null)
                 foreach (string b in badges) titleRow.Children.Add(Badge(b));
             TextBlock titleText = Text(title, 14, "#ECECEE", true);
             titleText.VerticalAlignment = VerticalAlignment.Center;
+            titleText.TextWrapping = TextWrapping.NoWrap;
             titleRow.Children.Add(titleText);
-            hs.Children.Add(titleRow);
+            hg.Children.Add(titleRow);
             if (!string.IsNullOrEmpty(blurb))
             {
                 TextBlock b = Text(blurb, 11, "#97979F");
-                b.Margin = new Thickness(0, 2, 12, 0);
-                hs.Children.Add(b);
+                b.Margin = new Thickness(14, 0, 14, 0);
+                b.VerticalAlignment = VerticalAlignment.Center;
+                Grid.SetColumn(b, 1);
+                hg.Children.Add(b);
             }
-            hg.Children.Add(hs);
             if (!string.IsNullOrEmpty(tagLabel))
             {
                 StatusStyle st = Status.ContainsKey(tagKind) ? Status[tagKind] : Status["info"];
@@ -151,32 +195,97 @@ namespace Mgs4Launcher
                     VerticalAlignment = VerticalAlignment.Center,
                     Child = Text(tagLabel, 11, st.Fg, true),
                 };
-                Grid.SetColumn(tag, 1);
+                Grid.SetColumn(tag, 2);
                 hg.Children.Add(tag);
             }
             hdr.Child = hg;
             stack.Children.Add(hdr);
+            body = new StackPanel();
+            stack.Children.Add(body);
             card.Child = stack;
-            body = stack;
+
+            if (foldKey != null)
+            {
+                var parts = new CardParts { Key = foldKey, Header = hdr, Body = body, Chevron = chevron };
+                card.Tag = parts;
+                hdr.Cursor = System.Windows.Input.Cursors.Hand;
+                hdr.ToolTip = "Click to fold this card away, or open it again";
+                hdr.MouseLeftButtonUp += (s, e) =>
+                {
+                    // A click on a link or a button in the header is that control's, not the fold's.
+                    if (e.OriginalSource is System.Windows.Controls.Primitives.ButtonBase) return;
+                    bool shut = !Closed.Contains(foldKey);
+                    if (shut) Closed.Add(foldKey); else Closed.Remove(foldKey);
+                    Apply(card, parts);
+                    if (FoldChanged != null) FoldChanged();
+                };
+                hdr.MouseEnter += (s, e) => hdr.Background = Brush("#1B1B1F");
+                hdr.MouseLeave += (s, e) => hdr.Background = Brush("#17171A");
+                Apply(card, parts);
+            }
             return card;
+        }
+
+        static void Apply(Border card, CardParts p)
+        {
+            bool shut = Closed.Contains(p.Key);
+            p.Body.Visibility = shut ? Visibility.Collapsed : Visibility.Visible;
+            p.Chevron.Text = shut ? "▶" : "▼";
+            // Folded, the header is the whole card: its bottom corners round off and its rule goes.
+            p.Header.CornerRadius = shut ? new CornerRadius(10) : new CornerRadius(10, 10, 0, 0);
+            p.Header.BorderThickness = new Thickness(0, 0, 0, shut ? 0 : 1);
+        }
+
+        /// <summary>Open or shut a folding card from code - the rail's "Collapse all", or a search opening what it
+        /// found something in. Cards without a key are left as they are.</summary>
+        public static void Fold(Border card, bool shut)
+        {
+            var p = card.Tag as CardParts;
+            if (p == null) return;
+            if (shut) Closed.Add(p.Key); else Closed.Remove(p.Key);
+            Apply(card, p);
+        }
+
+        /// <summary>Show the body whatever the fold says, without changing what is remembered: a search wants the
+        /// rows it matched on screen, and the fold back the way it was when the search is cleared.</summary>
+        public static void Reveal(Border card, bool reveal)
+        {
+            var p = card.Tag as CardParts;
+            if (p == null) return;
+            if (reveal)
+            {
+                p.Body.Visibility = Visibility.Visible;
+                p.Header.CornerRadius = new CornerRadius(10, 10, 0, 0);
+                p.Header.BorderThickness = new Thickness(0, 0, 0, 1);
+            }
+            else Apply(card, p);
         }
 
         // A row of explanation with one button on the right - the shape every "do it for me" row in Setup takes.
         public static Border ActionRow(string text, string buttonLabel, string tooltip, bool enabled,
                                        bool primary, RoutedEventHandler onClick)
         {
+            TextBlock ignored;
+            return ActionRow(text, buttonLabel, tooltip, enabled, primary, onClick, out ignored);
+        }
+
+        /// <summary>The same row, handing back its text so the caller can rewrite it later.</summary>
+        public static Border ActionRow(string text, string buttonLabel, string tooltip, bool enabled,
+                                       bool primary, RoutedEventHandler onClick, out TextBlock label)
+        {
             var b = new Border
             {
                 Background = Brush("#101012"),
                 BorderBrush = Brush("#202023"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(18, 12, 18, 12),
+                Padding = new Thickness(18, 10, 18, 10),
             };
             Grid g = Columns("*", "Auto");
             TextBlock t = Text(text, 11, "#A9A9B1");
             t.VerticalAlignment = VerticalAlignment.Center;
             t.Margin = new Thickness(0, 0, 16, 0);
             g.Children.Add(t);
+            label = t;
             var btn = new Button
             {
                 Content = buttonLabel,
@@ -189,6 +298,7 @@ namespace Mgs4Launcher
             Grid.SetColumn(btn, 1);
             g.Children.Add(btn);
             b.Child = g;
+            b.Tag = new RowInfo { Button = btn };
             return b;
         }
 
@@ -200,7 +310,7 @@ namespace Mgs4Launcher
                 Background = Brush("#101012"),
                 BorderBrush = Brush("#202023"),
                 BorderThickness = new Thickness(0, 0, 0, 1),
-                Padding = new Thickness(18, 12, 18, 12),
+                Padding = new Thickness(18, 10, 18, 10),
             };
             Grid g = Columns("*", "Auto");
             TextBlock t = Text(sec.Guide, 11, "#A9A9B1");
@@ -220,6 +330,7 @@ namespace Mgs4Launcher
                 link.Click += (s, e) => Open(((Button)s).Tag as string);
                 Grid.SetColumn(link, 1);
                 g.Children.Add(link);
+                b.Tag = new RowInfo { Button = link };
             }
             b.Child = g;
             return b;
@@ -230,7 +341,7 @@ namespace Mgs4Launcher
         public static Border CheckRow(Row row, bool first)
         {
             StatusStyle st = Status.ContainsKey(row.Status) ? Status[row.Status] : Status["info"];
-            var rb = new Border { Padding = new Thickness(18, 11, 18, 11) };
+            var rb = new Border { Padding = new Thickness(18, 8, 18, 8) };
             if (!first)
             {
                 rb.BorderBrush = Brush("#202023");
@@ -256,6 +367,7 @@ namespace Mgs4Launcher
                 var lb = new Button { Content = row.Url, Style = LinkStyle, Tag = row.Url, HorizontalAlignment = HorizontalAlignment.Left };
                 lb.Click += (s, e) => Open(((Button)s).Tag as string);
                 mid.Children.Add(lb);
+                rb.Tag = new RowInfo { Button = lb };
             }
             Grid.SetColumn(mid, 1);
             g.Children.Add(mid);

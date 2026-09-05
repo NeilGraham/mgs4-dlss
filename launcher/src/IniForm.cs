@@ -26,6 +26,9 @@ namespace Mgs4Launcher
         // What the app does when the file says nothing. Without it a key nobody has written yet shows as an empty
         // row, which reads as "off" or "none" rather than as the default it actually behaves like.
         public string Fallback;
+        // For an int with a known range: the Settings tab shows it as a slider, and a controller nudges it by
+        // Step. NaN means "a number, any number" and the row stays a box.
+        public double Min = double.NaN, Max = double.NaN, Step = 1;
         public IniKey(string group, string key, string type, string label, string help,
                       string[] choices = null, string[] choiceLabels = null,
                       IniSource source = IniSource.Addon, string trueWord = "1", string falseWord = "0")
@@ -48,7 +51,7 @@ namespace Mgs4Launcher
             new IniKey("Launcher", "MGS4_PLAY_VIEW", "choice", "Play tab",
                 "which half of the Play tab is on. All scenes is the working view - 400-odd entries, named and pictured, in story order",
                 new[] { "simple", "all" },
-                new[] { "Just the ways to start the game", "All scenes  -  spoilers" },
+                new[] { "Start Options", "All Scenes (SPOILERS)" },
                 IniSource.Launcher, "true", "false") { Fallback = "simple" },
 
             // The game's own soundtrack, played in the window. The choices are not written here - they are the
@@ -58,8 +61,14 @@ namespace Mgs4Launcher
                 "a track out of the game's own soundtrack, played while the window is open and stopped while the game is running",
                 new[] { Music.Off }, new[] { "None" },
                 IniSource.Launcher, "true", "false") { Fallback = Music.Off },
+            // The window as a plain launcher: no Setup tab, and so nothing about the add-on or DLSS in sight, for
+            // a machine with nothing to set up - an AMD card's, say.
+            new IniKey("Launcher", "MGS4_SETUP_TAB", "choice", "Setup tab",
+                "hide it to use this as a plain launcher for the game - no install check, nothing about DLSS. For a machine with no NVIDIA card, or nothing to set up",
+                new[] { "shown", "hidden" }, new[] { "Shown", "Hidden - a plain launcher" },
+                IniSource.Launcher, "true", "false") { Fallback = "shown" },
             new IniKey("Launcher", "MGS4_MUSIC_VOLUME", "int", "Music volume",
-                "0 to 100", null, null, IniSource.Launcher, "true", "false") { Fallback = "35" },
+                "0 to 100", null, null, IniSource.Launcher, "true", "false") { Fallback = "35", Min = 0, Max = 100 },
 
             // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
             // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
@@ -69,7 +78,7 @@ namespace Mgs4Launcher
                 new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
                 IniSource.Game, "true", "false"),
             new IniKey("Display", "displayIndex", "int", "Display",
-                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false"),
+                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false") { Min = 0, Max = 7 },
             new IniKey("Display", "vsync", "bool", "Vsync",
                 "off pairs better with frame generation - the limiter below is what paces the game",
                 null, null, IniSource.Game, "true", "false"),
@@ -119,7 +128,7 @@ namespace Mgs4Launcher
                 "what the game renders at - detected and written by the add-on itself"),
             new IniKey("DLSS", "Preset", "choice", "Preset", "the DLSS model preset",
                 new[] { "10", "11" }, new[] { "10 - preset J", "11 - preset K (transformer)" }),
-            new IniKey("DLSS", "Sharpness", "int", "Sharpness", "0..100, applied live"),
+            new IniKey("DLSS", "Sharpness", "int", "Sharpness", "0..100, applied live") { Min = 0, Max = 100 },
             new IniKey("DLSS", "PrePost", "choice", "Insertion point",
                 "auto = the final image when the DLSS 5 NR add-on is loaded, otherwise before post and the HUD",
                 new[] { "auto", "0", "1" }, new[] { "auto", "before the post chain", "on the final image" }),
@@ -128,7 +137,7 @@ namespace Mgs4Launcher
                 "needs the Streamline runtime next to mgs4.exe and a display faster than 60 Hz. Restart to change.",
                 new[] { "0", "1", "2", "3", "4" }, new[] { "off", "2x", "3x", "4x", "dynamic to the target fps" }),
             new IniKey("Frame generation", "FGTargetFps", "int", "Target fps",
-                "dynamic mode aims here; match your refresh rate (0 = ask the monitor)"),
+                "dynamic mode aims here; match your refresh rate (0 = ask the monitor)") { Min = 0, Max = 480 },
             new IniKey("Frame generation", "Reflex", "bool", "Reflex", "latency pacing; DLSS-G wants it on"),
 
             new IniKey("Image", "PostDof", "bool", "Depth of field after DLSS",
@@ -176,7 +185,7 @@ namespace Mgs4Launcher
             new IniKey("Diagnostics", "SceneLog", "bool", "Scene-state log",
                 "the SCENE-STATE lines this launcher reads to tell a cutscene from gameplay - leave it on"),
             new IniKey("Diagnostics", "TraceFrames", "int", "Trace frames",
-                "N = log every full-frame draw for the next N frames"),
+                "N = log every full-frame draw for the next N frames") { Min = 0, Max = 600 },
             new IniKey("Diagnostics", "TraceFreeze", "bool", "Trace freezes",
                 "log the draw chain around the moment the world stops rendering"),
             new IniKey("Diagnostics", "Probe", "bool", "Pipeline probe", "sample the image before and after the insertion"),
@@ -185,7 +194,7 @@ namespace Mgs4Launcher
 
         };
 
-        // The menu-music list, from the banks the install actually has: None, Random, then every named track. Done
+        // The menu-music list, from the banks the install actually has: None, Shuffle, then every named track. Done
         // here rather than in the spec because a spec is written once and this answer belongs to the machine - a
         // person with no game found gets None alone, which is exactly what they can have.
         public static void MusicChoices(string gameDir)
@@ -197,9 +206,15 @@ namespace Mgs4Launcher
             List<string> tracks = Music.Tracks(gameDir);
             if (tracks.Count > 0)
             {
-                ids.Add(Music.Random);
-                labels.Add("Random - a different one each time");
-                foreach (string t in tracks) { ids.Add(t); labels.Add(Music.Pretty(t)); }
+                ids.Add(Music.Shuffle);
+                labels.Add("Shuffle  -  the whole iPod, each track once before any repeats");
+                ids.Add(Music.Playlist);
+                labels.Add("Playlist  -  your list, in order");
+                ids.Add(Music.PlaylistShuffle);
+                labels.Add("Playlist, shuffled");
+                // The ones worth knowing first, starred and named, in Music.Memorable's order; then the rest of
+                // the install's playlist as the files name them.
+                foreach (string t in Music.Ordered(tracks)) { ids.Add(t); labels.Add(new TrackItem(t).Label); }
             }
             spec.Choices = ids.ToArray();
             spec.ChoiceLabels = labels.ToArray();

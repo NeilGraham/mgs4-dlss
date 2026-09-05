@@ -63,7 +63,7 @@ the scroll easing ran a script block per frame there and native code here. `laun
 | `Paths.DataText` | those data files, from `tools\` or from the copies built into the exe |
 | `Install.cs` | the bundled add-on, `steam_appid.txt`, drag-and-drop, the headless ReShade setup |
 | `Catalog.cs` | the scene list, in story order |
-| `Runner.cs` | the scene run: boot, press through the prompts, tap Cross, end on gameplay |
+| `Runner.cs` | the scene run: boot, press through the prompts, tap E for the flashbacks, end on gameplay |
 | `Ui\` | the window: shell, Play, Settings, Setup, artwork, smooth scrolling |
 
 There is no MSBuild and no compiled XAML: `csc` alone cannot produce BAML, so `Window.xaml` is an embedded resource
@@ -110,6 +110,26 @@ happens a moment after the window opens as well as every time Setup is refreshed
 The window opens even when no MGS4 install can be found — it starts on Setup and says which folder it looked in,
 which is the one case where a tool that needs the game folder still has to be useful.
 
+## A controller
+
+The whole window works from a pad. An Xbox pad, or anything that arrives as one (Steam Input, DS4Windows, the
+virtual pad a Sunshine/Moonlight stream makes), is read through XInput; a DualSense or DualShock 4 plugged straight
+in, over USB or Bluetooth, is read as raw HID (`Gamepad.cs`). The moment one is seen, a guide appears in the bottom
+bar saying what the buttons do on the tab that is up, in the pad's own names - A / START on an Xbox pad, ✕ / OPTIONS
+on a Sony one - and it goes when the pad does. Only the **active** window listens: with the game in front the
+presses are the game's.
+
+The bumpers and triggers step between the tabs. On **Play, all scenes** the left stick scrolls the list and the
+d-pad steps the pick; when the pick has been scrolled off screen, Down takes the first row on screen and Up the
+last. Right (or A) crosses into the run options, where the right stick scrolls, Up and Down walk the boxes, A ticks
+one, and Left (or B) comes back. Y goes to the filter chips: Left and Right walk them, A toggles, Y or B leaves.
+Start launches whatever is picked, from anywhere; Select flips to **Start Options**, where Left and Right pick a
+card, Down reaches the one checkbox, and Select comes back. On **Settings** and **Setup** the right stick scrolls,
+Up and Down walk the rows with the same off-screen rule, A presses a row's button or ticks its box, Left and Right
+(or the left stick) step a choice or nudge a slider, and Start is Save or Re-check. The numbers with a known range -
+volume, sharpness, target fps, display index, trace frames - are sliders for exactly this reason, with the number
+in a box beside them that still takes typing.
+
 ## Play
 
 **The tab has two views, and it opens on the one that gives nothing away.** The scene list is a spoiler: it names
@@ -117,7 +137,7 @@ every cutscene in the game, in the order the story tells them, with a frame of i
 where it happens and how it ends. That is exactly what the person measuring the catalog wants and exactly what
 someone who has not finished MGS4 does not.
 
-- **Just the ways to start the game** (the default) is three cards: **Start the game** (`--main`, straight to the
+- **Start Options** (the default) is three cards: **Start the game** (`--main`, straight to the
   menu selection), **Start from the title screen** (`s10a10l`, the logos and PRESS ANY BUTTON first) and **Master
   Collection launcher** (`--collection`). A picture of each, its name and what it is under that; click to pick, and
   **Launch**, **Enter** or a double-click starts it. Each card wears a **Fast** / **Normal** / **Slow** tag in the
@@ -130,8 +150,8 @@ someone who has not finished MGS4 does not.
 - **All scenes** is the working view described in the rest of this section: the search box, the filter chips and
   the four hundred rows.
 
-**The bottom bar switches them**, in both directions and from either side — **Show all scenes** one way, **Just the
-start options** the other. That strip carries nothing else on this tab, and a switch that is only reachable from
+**The bottom bar switches them**, in both directions and from either side — **All Scenes** one way, **Start
+Options** the other. That strip carries nothing else on this tab, and a switch that is only reachable from
 one of two views is a switch you can be stranded away from. Going *towards* the scene list asks first, in as many
 words, and asks **once ever**: `SpoilerSeen` in `launcher.json` remembers the answer, because the warning is worth
 reading the first time and is nagging by the third, and someone who has said yes has already seen what is behind
@@ -291,23 +311,21 @@ are the scene (row 0 of a title-card frame measures 0.85 luma, not 0.0). That wa
   `scene_names.json` put them there).
 
 The three game-start entries take none of this: a menu has no boot prompts to press through and no first 3D frame
-to wait for, and tapping Cross on it would just start a new game, so the launcher starts the game and leaves it
+to wait for, and tapping a key on it would just start a new game, so the launcher starts the game and leaves it
 alone. The options below are grayed out while one of them is picked.
 
 What can be ticked (all of it also works from the command line):
 
 - **Skip the boot prompts** (`--advance`, on by default) — taps **Enter** until the add-on log reports the first 3D
   frame, which is what gets a `--stage` boot past the auto-save notice, the "press any button" screen and the load.
-  On its own it stays on the keyboard: those prompts take any button, so nothing needs a controller, and none is
-  created. Tick **Keep pressing X** as well and the tapping moves to the pad's Cross, because that is the one the
-  flashback prompts want. `--press-key <name>` taps that key instead of either.
-- **Keep pressing X** (`--mash-x`) — a virtual DualShock 4 taps **Cross** about six times a second for the whole
-  scene. It is the only thing that creates one: the pad is made when such a run starts and removed when it ends,
-  and opening the window does not make one at all. This is what makes MGS4's in-cutscene **flashback** prompts fire; a keyboard Enter gets past the boot
-  prompts but does not trigger them. It needs the [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver plus
-  `ViGEmClient.dll` in `tools\` (both Nefarius, BSD-3; the DLL also ships inside the `vgamepad` PyPI package, or set
-  `VIGEM_CLIENT_DLL`) — the same pair `tools\ds4.py` uses, and the Install tab reports whether both are there.
-  Without them the app says so and falls back to Enter.
+  Those prompts take any key, and Enter is the one that has always got past them.
+- **Keep pressing E for the flashbacks** (`--mash-x`) — taps **E** about six times a second for the whole scene.
+  E is the port's keyboard binding for Cross, and Cross is what MGS4's in-cutscene **flashback** prompts want; Enter
+  gets past the boot prompts but does not trigger them. This used to be a virtual DualShock 4 through the
+  [ViGEmBus](https://github.com/nefarius/ViGEmBus) driver, which meant installing a kernel driver and a DLL for one
+  checkbox; a key needs nothing installed, and the driver, the DLL and the Setup row for them are gone from the
+  launcher (`tools\ds4.py`, the sweep's own pad, still uses them). `--press-key <name>` taps that key instead, for
+  the boot prompts and the scene both.
 - **Close the game when gameplay starts** (`--end-on-gameplay`) — for cutscenes. The add-on's `SCENE-STATE` /
   `SCENE-STATE-TICK` lines say whether the frame is a cutscene, gameplay or no 3D at all; the HUD coming up (40+ HUD
   draws in one heartbeat, against the 4-5 a cutscene draws) or a sustained `gameplay` state ends the run, and a
@@ -350,10 +368,38 @@ rest matters. Each card names the file - or files - its rows are written to.
 
 ### Menu music
 
-The window can play the game's own soundtrack while it is open. **None**, **Random**, or one of the tracks the
+The window can play the game's own soundtrack while it is open. **None**, **Shuffle**, or one of the tracks the
 install actually has — the list is read off disk when the form is built, so it is that machine's answer rather than
 a list written here. It stops the moment a run starts and comes back when the game is gone: the game gets the
 speakers to itself.
+
+**The menu's own music is not on the iPod.** The named banks are the iPod's playlist; the game's score is filed
+as `bgm_*` cues, and its cutscene music under `ww\bank\default`. Two of those are put on the list by name
+(`Music.Extras`): `bgm_title_01`, the title screen's theme and what the main menu plays, and
+`E_bgm_hv_24demo_lovetheme`, the full Love Theme. They head the list as **Title screen** and **Love Theme**.
+
+**The deck.** While anything plays, the bottom bar carries the track's title, the buttons under it drawn the way
+iTunes draws its own, and under those a scrubber with the time either side - drag it or click along it to seek.
+A single picked track loops and gets pause alone; the queued modes get back and next as well. Back within three
+seconds of a track starting goes to the one before it, later than that to the top of the one playing, and at the
+head of a queue with nowhere to go it is greyed out.
+
+**Shuffle** (`MGS4_MUSIC=shuffle`; a `config.ini` still saying `random` means the same) is the iPod on the Nomad:
+the whole list dealt into a random order once, walked to its end before a fresh deal is cut, and the first card of
+the new deal never the track that just finished. **Playlist** (`playlist`) plays a list of your own in order and
+goes round; **Playlist, shuffled** (`playlist-shuffle`) deals that list the same way. The list itself is
+`MGS4_PLAYLIST` in `config.ini`, file names comma-separated in play order, and is edited from the Launcher card's
+**Edit playlist...** row: the iPod on the left, the list on the right, double-click or Enter to add, Delete to take
+out, Space to sample the picked track on the deck, Escape or Done to keep it. On a controller Left and Right pick
+the list, A adds or removes, X samples, B is Done. Order of adding is the order of playing.
+
+**Favourites.** Each row on the iPod side ends in a heart; click it, press F, or Y on a pad, and the track is
+hearted (`MusicFavorites` in `launcher.json`). Favourites head every list the iPod is shown in - the Menu music
+choice and the editor's own - ahead of the starred tracks, with a ♥ in front of the name.
+
+**A plain launcher.** `MGS4_SETUP_TAB=hidden` in `config.ini` (Settings, Launcher, **Setup tab**) takes the Setup
+tab away: no install check, no add-on, nothing about DLSS on screen, for a machine with nothing to set up - an AMD
+card's, say. The bumpers skip it and a first run opens on Play instead.
 
 **Where the music is.** `<GameDir>\common\bank\default`, one FMOD Studio bank per track and named for the track:
 `At_Dawn.bank`, `Sea_Breeze.bank`, `Beyond_The_Bounds.bank`. 272 banks there, 73 of them named tracks — the rest
@@ -372,7 +418,7 @@ vgmstream** button in the Launcher card fetches it (about 4 MB, from vgmstream's
 `%LOCALAPPDATA%\mgs4-dlss-launcher\tools\vgmstream`. It is a press rather than something the app does on its own
 the first time it runs: that is this program reaching out to the internet, and it is the person's call. Already
 have one? `MGS4_VGMSTREAM` in `config.ini` names it, and a `vgmstream-cli.exe` on PATH is found too. With no
-decoder the setting still shows and says what is missing, the way "Keep pressing X" explains ViGEmBus.
+decoder the setting still shows and says what is missing.
 
 **Nothing of Konami's is copied into this repo or into a release.** The banks are read from the install the person
 already owns, decoded into a cache under their own `%LOCALAPPDATA%\mgs4-dlss-launcher\music`, and played there —
@@ -509,7 +555,7 @@ The shipped ini is the configuration v1.2.0 ships with and was verified on: DLAA
 relaunching. A desktop shortcut "MGS4 (stage s00a00l)" boots straight into the cemetery for quick tests.
 
 `mgs4-dlss-launcher` (see above) does this and the rest of it — a scene list, the
-Cross tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
+E tapping the flashback prompts want, ending a scene when gameplay starts — and it is what the desktop shortcuts
 and `tools\test_stages.ps1` call. `tools\launch_stage.ps1` is still there as a shim over it, so existing shortcuts
 and notes keep working:
 

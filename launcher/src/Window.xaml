@@ -17,25 +17,37 @@
     <SolidColorBrush x:Key="Text" Color="#ECECEE"/>
     <SolidColorBrush x:Key="Muted" Color="#97979F"/>
     <SolidColorBrush x:Key="Accent" Color="#7C9CFF"/>
-    <!-- 6 wide with a 4 px thumb, which is what Windows 11 draws for an idle overlay scrollbar. The thumb keeps a
-         minimum length: Track sizes it by the viewport-to-content ratio, and on a short window over a 400-row
-         list that came out a few pixels tall. -->
+    <!-- 6 wide with a 4 px thumb, which is what Windows 11 draws for an idle overlay scrollbar.
+
+         MinWidth is the setter that matters. A style like this one layers over the theme's, it does not replace
+         it, and the theme's ScrollBar style carries MinWidth = the system scrollbar width (17): with only Width
+         set here the bar came out 17 wide wearing this template - the thumb was ours, the width was Windows'.
+
+         The thumb's length is not settled here either. Track sizes it by the viewport-to-content ratio, and on a
+         short window over a 400-row list that is a few pixels; a MinHeight on the Thumb only made it *draw*
+         taller than Track thought it was, so it overhung the track's end and dragged wrong. ScrollThumb.cs gives
+         the Track an inflated viewport instead, so the thumb never goes under a comfortable length and the drag
+         arithmetic agrees with what is drawn. -->
     <Style TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Width" Value="6"/>
+      <Setter Property="MinWidth" Value="0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ScrollBar">
             <Grid Background="Transparent">
               <Track x:Name="PART_Track" IsDirectionReversed="True">
                 <Track.Thumb>
-                  <Thumb MinHeight="40">
+                  <Thumb>
                     <Thumb.Template>
                       <ControlTemplate TargetType="Thumb">
                         <Border x:Name="t" CornerRadius="2" Background="#35353C" Margin="1,2"/>
                         <ControlTemplate.Triggers>
                           <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="t" Property="Background" Value="#4A4A54"/>
+                          </Trigger>
+                          <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="t" Property="Background" Value="#5A5A66"/>
                           </Trigger>
                         </ControlTemplate.Triggers>
                       </ControlTemplate>
@@ -49,6 +61,69 @@
                   <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0" Focusable="False"/>
                 </Track.DecreaseRepeatButton>
               </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <!-- The same bar lying down, for the rare horizontal one (a wide line in a text box). Without this the
+           vertical template was used sideways: 6 wide, 17 tall, and the thumb running the wrong way. -->
+      <Style.Triggers>
+        <Trigger Property="Orientation" Value="Horizontal">
+          <Setter Property="Width" Value="Auto"/>
+          <Setter Property="Height" Value="6"/>
+          <Setter Property="MinHeight" Value="0"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="Transparent">
+                  <Track x:Name="PART_Track" IsDirectionReversed="False">
+                    <Track.Thumb>
+                      <Thumb>
+                        <Thumb.Template>
+                          <ControlTemplate TargetType="Thumb">
+                            <Border x:Name="t" CornerRadius="2" Background="#35353C" Margin="2,1"/>
+                            <ControlTemplate.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="t" Property="Background" Value="#4A4A54"/>
+                              </Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </Thumb.Template>
+                      </Thumb>
+                    </Track.Thumb>
+                    <Track.IncreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/>
+                    </Track.IncreaseRepeatButton>
+                    <Track.DecreaseRepeatButton>
+                      <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/>
+                    </Track.DecreaseRepeatButton>
+                  </Track>
+                </Grid>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <!-- A scroller whose bar lies over the content instead of beside it, for the picked-scene panel: the frame at
+         its head runs edge to edge, and a bar in a column of its own would have cut a strip off the right of it.
+         The bar is the same 6 px one, so it costs nothing to see through. -->
+    <Style x:Key="OverlayScroll" TargetType="ScrollViewer">
+      <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollViewer">
+            <Grid Background="{TemplateBinding Background}">
+              <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" Margin="{TemplateBinding Padding}"
+                                      CanContentScroll="{TemplateBinding CanContentScroll}"
+                                      CanHorizontallyScroll="False" CanVerticallyScroll="False"
+                                      Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"/>
+              <ScrollBar x:Name="PART_VerticalScrollBar" HorizontalAlignment="Right" Orientation="Vertical"
+                         Minimum="0" Maximum="{TemplateBinding ScrollableHeight}"
+                         ViewportSize="{TemplateBinding ViewportHeight}"
+                         Value="{Binding VerticalOffset, Mode=OneWay, RelativeSource={RelativeSource TemplatedParent}}"
+                         Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
             </Grid>
           </ControlTemplate>
         </Setter.Value>
@@ -316,6 +391,135 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- A slider for the settings that are a number in a range, so a value can be dragged, or nudged with a
+         controller's d-pad, rather than typed. A thin rounded track, the part behind the thumb in the accent, and
+         a round thumb; WPF's own is the light theme's grey bar. -->
+    <Style TargetType="Slider">
+      <Setter Property="Height" Value="22"/>
+      <Setter Property="Width" Value="150"/>
+      <Setter Property="IsMoveToPointEnabled" Value="True"/>
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Background="Transparent">
+              <Border Height="4" CornerRadius="2" Background="#2A2A30" VerticalAlignment="Center" Margin="7,0"/>
+              <Track x:Name="PART_Track">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                    <RepeatButton.Template>
+                      <ControlTemplate TargetType="RepeatButton">
+                        <Grid Background="Transparent">
+                          <Border Height="4" CornerRadius="2" Background="#5C7CE0" VerticalAlignment="Center" Margin="7,0,0,0"/>
+                        </Grid>
+                      </ControlTemplate>
+                    </RepeatButton.Template>
+                  </RepeatButton>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Width="14" Height="14" Focusable="False">
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="e" Fill="#DCE2FF" Stroke="#7C9CFF" StrokeThickness="1"/>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#FFFFFF"/>
+                          </Trigger>
+                          <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#7C9CFF"/>
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Opacity="0"/>
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- The deck's buttons, the way iTunes draws its own: a bare glyph, no box round it, grey until the pointer is
+         on it and white then. The play button is drawn larger than the two beside it by the caller. -->
+    <Style x:Key="Deck" TargetType="Button">
+      <Setter Property="Foreground" Value="#B8B8C2"/>
+      <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="8,4"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="#FFFFFF"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Foreground" Value="#7C9CFF"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="#4A4A52"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- The scrubber under the deck: the settings slider drawn thinner, with a small thumb, so it reads as a
+         progress line that happens to take a drag. -->
+    <Style x:Key="Scrub" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+      <Setter Property="Height" Value="16"/>
+      <Setter Property="Width" Value="240"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Background="Transparent">
+              <Border Height="3" CornerRadius="1.5" Background="#2A2A30" VerticalAlignment="Center" Margin="5,0"/>
+              <Track x:Name="PART_Track">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                    <RepeatButton.Template>
+                      <ControlTemplate TargetType="RepeatButton">
+                        <Grid Background="Transparent">
+                          <Border Height="3" CornerRadius="1.5" Background="#8A8A96" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                        </Grid>
+                      </ControlTemplate>
+                    </RepeatButton.Template>
+                  </RepeatButton>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Width="10" Height="10" Focusable="False">
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="e" Fill="#DCE2FF"/>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#FFFFFF"/>
+                          </Trigger>
+                          <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#7C9CFF"/>
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Opacity="0"/>
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
@@ -549,13 +753,18 @@
 
       <Border Grid.Column="1" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
               CornerRadius="10" Margin="14,0,0,0">
+        <!-- Two rows, not three: the picked scene's head and the run options scroll as one, and only the three
+             buttons are pinned. With the head fixed, a window at its minimum height had the head and the buttons
+             adding up to more than the card, and Launch was the thing that fell off the bottom. -->
         <Grid>
           <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
-          <Border Grid.Row="0" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
+          <ScrollViewer x:Name="PickScroll" Grid.Row="0" Style="{StaticResource OverlayScroll}"
+                        VerticalScrollBarVisibility="Auto" Background="Transparent">
+          <StackPanel>
+          <Border Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1"
                   CornerRadius="10,10,0,0" ClipToBounds="True">
             <StackPanel>
               <!-- The picked scene's own frame, filling the head of the panel edge to edge - no padding of its
@@ -602,12 +811,11 @@
             </StackPanel>
             </StackPanel>
           </Border>
-          <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="18,14,14,10">
-            <StackPanel>
+            <StackPanel Margin="18,14,14,10">
               <CheckBox x:Name="OptAdvance" Content="Skip the boot prompts"/>
               <TextBlock Text="Presses through the auto-save notice and the &quot;press any button&quot; screen until the first 3D frame."
                          FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="25,3,0,13"/>
-              <CheckBox x:Name="OptMashX" Content="Keep pressing X"/>
+              <CheckBox x:Name="OptMashX" Content="Keep pressing E for the flashbacks"/>
               <TextBlock x:Name="MashNote" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="25,3,0,13"/>
               <CheckBox x:Name="OptEnd" Content="Close the game when gameplay starts"/>
               <TextBlock Text="For cutscenes: the HUD coming up means the scene has handed over."
@@ -640,8 +848,9 @@
                 </Grid>
               </Border>
             </StackPanel>
+          </StackPanel>
           </ScrollViewer>
-          <Border Grid.Row="2" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0"
+          <Border Grid.Row="1" Background="#17171A" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0"
                   CornerRadius="0,0,10,10" Padding="18,14">
             <StackPanel>
               <Button x:Name="LaunchBtn" Content="Launch" Style="{StaticResource Primary}" Padding="16,11"
@@ -711,10 +920,27 @@
       </ScrollViewer>
     </Grid>
 
-    <ScrollViewer x:Name="InstallView" Grid.Row="1" Margin="22,16,10,0" VerticalScrollBarVisibility="Auto"
-                  Padding="0,0,12,0" Visibility="Collapsed" AllowDrop="True" Background="Transparent">
-      <StackPanel x:Name="InstallHost"/>
-    </ScrollViewer>
+    <!-- Setup and Settings are the same shape: a rail down the left naming every card on the page, with a search
+         box over it, and the cards themselves scrolling on the right. The rail is what lets the whole page be
+         seen at once - eight settings groups and seven install sections never fit a window - and a click on it
+         glides the page to that card. Both rails are built in code (Ui/Rail.cs), because their rows are the
+         cards' rows and the cards are data.
+
+         Transparent rather than unset on the scrollers: a panel with no brush at all takes no hit test, so the
+         gaps between the cards would hand the wheel to whatever is behind and the page would not know it had
+         been scrolled over. -->
+    <Grid x:Name="InstallView" Grid.Row="1" Margin="22,16,22,0" Visibility="Collapsed" AllowDrop="True"
+          Background="Transparent">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Grid x:Name="InstallRail" Grid.Column="0" Width="204" Margin="0,0,14,16"/>
+      <ScrollViewer x:Name="InstallScroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                    Background="Transparent">
+        <StackPanel x:Name="InstallHost"/>
+      </ScrollViewer>
+    </Grid>
 
     <Grid x:Name="SettingsView" Grid.Row="1" Margin="22,16,22,0" Visibility="Collapsed">
       <Grid.RowDefinitions>
@@ -725,23 +951,41 @@
               CornerRadius="8" Padding="16,11" Margin="0,0,0,14" Visibility="Collapsed">
         <TextBlock x:Name="LockText" FontSize="12" Foreground="#F2C14E" TextWrapping="Wrap"/>
       </Border>
-      <!-- Transparent rather than unset: a panel with no brush at all takes no hit test, so the gaps between the
-           cards would hand the wheel to whatever is behind and the page would not know it had been scrolled over.
-           The Setup tab's ScrollViewer says the same thing for the same reason. -->
-      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,12,0" Background="Transparent">
-        <StackPanel x:Name="SettingsHost"/>
-      </ScrollViewer>
+      <Grid Grid.Row="1">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Grid x:Name="SettingsRail" Grid.Column="0" Width="204" Margin="0,0,14,16"/>
+        <ScrollViewer x:Name="SettingsScroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,8,0"
+                      Background="Transparent">
+          <StackPanel x:Name="SettingsHost"/>
+        </ScrollViewer>
+      </Grid>
     </Grid>
 
     <Border Grid.Row="2" Background="#121214" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="22,13">
+      <!-- Three columns, the outer two sharing what the middle leaves, so the music deck in the middle sits on
+           the window's own centre line whatever is either side of it. The status line and the controller guide
+           stack on the left; the tab's buttons sit on the right. -->
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
-        <TextBlock x:Name="Status" Grid.Column="0" VerticalAlignment="Center" FontSize="11"
-                   Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
-        <StackPanel Grid.Column="1" Orientation="Horizontal">
+        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,14,0">
+          <TextBlock x:Name="Status" FontSize="11" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
+          <!-- Which buttons do what on the tab that is up, while a controller is connected. The badges are the
+               pad's own names - A / START on an Xbox pad, the cross and OPTIONS on a DualSense - and the strip is
+               collapsed until one is plugged in. Filled by MainWindow.Pad.cs; wraps when the column is narrow. -->
+          <WrapPanel x:Name="PadGuide" Margin="0,6,0,0" Visibility="Collapsed"/>
+        </StackPanel>
+        <!-- The music deck: the track's name over its buttons - back, pause, next under Shuffle, pause alone for
+             a picked track. Built in MainWindow.Music.cs; collapsed until a track is on it. -->
+        <StackPanel x:Name="Transport" Grid.Column="1" VerticalAlignment="Center" Visibility="Collapsed"/>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="14,0,0,0">
           <!-- The Play tab's two views, switched from the one strip that is on screen in both of them. The label
                says where it goes, not where you are, and MainWindow.Start.cs writes it. -->
           <Button x:Name="ViewSwitchBtn" Style="{StaticResource Flat}" Margin="0,0,10,0" Visibility="Collapsed"/>
@@ -757,6 +1001,98 @@
          cannot be styled, and the only thing this app has to ask - whether to reveal the scene list - deserves to
          be read rather than dismissed. Declared last so it paints over everything, and it covers the header too:
          the caption stays draggable because the chrome, not this Border, owns that strip. -->
+    <!-- The playlist editor: the game's iPod on the left, the playlist on the right, and what is picked on either
+         side can be sampled on the deck. Order of adding is the order they play in. Driven from
+         MainWindow.Music.cs, by the mouse, the keyboard and a controller alike. -->
+    <Border x:Name="PlaylistVeil" Grid.Row="0" Grid.RowSpan="3" Background="#D00B0B0C" Visibility="Collapsed">
+      <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+              CornerRadius="12" Padding="24,20" Width="880" MaxHeight="680" Margin="22"
+              VerticalAlignment="Center" HorizontalAlignment="Center">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <TextBlock Text="Playlist" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+            <TextBlock Text="Pick from the game's iPod. Tracks play in the order they were added; double-click one to add it or take it out, and Sample plays it now."
+                       FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+          </StackPanel>
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border x:Name="AllTracksBox" Grid.Column="0" Background="#111114" BorderBrush="#26262A" BorderThickness="1"
+                    CornerRadius="8" MinHeight="300">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="AllTracksHead" Text="The iPod" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{StaticResource Muted}" Margin="12,9,12,7"/>
+                <ListBox x:Name="AllTracks" Grid.Row="1">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*"/>
+                          <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Label}" FontSize="12" Foreground="#ECECEE" Margin="12,7"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <!-- Tag="heart" is what the click handler looks for, so a click here hearts the track
+                             instead of picking it. -->
+                        <TextBlock Grid.Column="1" Tag="heart" Text="{Binding Heart}" FontSize="14"
+                                   Foreground="{Binding HeartInk}" Margin="8,0,12,0" VerticalAlignment="Center"
+                                   Cursor="Hand" ToolTip="Favourite - favourites head every list"/>
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0">
+              <Button x:Name="PlAddBtn" Content="Add  ►" Style="{StaticResource Flat}" ToolTip="Add the picked track to the playlist (Enter, or A on a pad)"/>
+              <Button x:Name="PlSampleBtn" Content="Sample" Style="{StaticResource Flat}" Margin="0,8,0,0"
+                      ToolTip="Play the picked track on the deck now (Space, or X on a pad)"/>
+              <Button x:Name="PlFavBtn" Content="&#x2665;  Favourite" Style="{StaticResource Flat}" Margin="0,8,0,0"
+                      ToolTip="Heart the picked track; favourites head every list (F, or Y on a pad)"/>
+              <Button x:Name="PlRemoveBtn" Content="◄  Remove" Style="{StaticResource Flat}" Margin="0,8,0,0"
+                      ToolTip="Take the picked track out of the playlist (Delete, or A on a pad)"/>
+            </StackPanel>
+            <Border x:Name="PlaylistBox" Grid.Column="2" Background="#111114" BorderBrush="#26262A" BorderThickness="1"
+                    CornerRadius="8" MinHeight="300">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="PlaylistHead" Text="Playlist" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{StaticResource Muted}" Margin="12,9,12,7"/>
+                <ListBox x:Name="PlaylistTracks" Grid.Row="1">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" FontSize="12" Foreground="#ECECEE" Margin="12,7"
+                                 TextTrimming="CharacterEllipsis"/>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+          </Grid>
+          <Grid Grid.Row="2" Margin="0,16,0,0">
+            <Button x:Name="PlClearBtn" Content="Clear the playlist" Style="{StaticResource Flat}" HorizontalAlignment="Left"/>
+            <Button x:Name="PlDoneBtn" Content="Done" Style="{StaticResource Primary}" HorizontalAlignment="Right"
+                    ToolTip="Keep this playlist (Escape closes too)"/>
+          </Grid>
+        </Grid>
+      </Border>
+    </Border>
+
     <Border x:Name="Veil" Grid.Row="0" Grid.RowSpan="3" Background="#D00B0B0C" Visibility="Collapsed">
       <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
               CornerRadius="12" Padding="26,22" MaxWidth="480" Margin="22"

@@ -16,7 +16,7 @@ namespace Mgs4Launcher
         public bool GameDirGiven;           // true only when --game-dir was passed, so previews do not echo a detected path
         public string GameDirBad = "";      // a folder that was named but holds no mgs4.exe, kept for the Setup tab
         public bool Advance = true;         // press through the boot prompts until the first 3D frame
-        public bool MashX;                  // keep tapping Cross so the flashback prompts fire
+        public bool MashX;                  // keep tapping E so the flashback prompts fire
         public string Keys = "";            // an explicit key sequence instead of pressing through the prompts
         public double Settle = 2.0;
         public string PressKey = "";
@@ -154,8 +154,8 @@ namespace Mgs4Launcher
 Run options (any of them keeps this attached until the scene is done):
   --advance / --no-advance   press through the auto-save notice and ""press any button"" until the
                              first 3D frame. On by default.
-  --mash-x                   keep tapping Cross for the whole scene, so the flashback prompts in
-                             cutscenes fire. Wants ViGEmBus + ViGEmClient.dll; falls back to Enter.
+  --mash-x                   keep tapping E for the whole scene, so the flashback prompts in
+                             cutscenes fire (E is the port's keyboard Cross).
   --end-on-gameplay          close the game when the cutscene hands over to gameplay (HUD up).
   --hold <seconds>           close the game that many seconds into the scene.
   --max-minutes <n>          ceiling on the whole run.
@@ -165,7 +165,7 @@ Run options (any of them keeps this attached until the scene is done):
                              key names (E, SPACE, ENTER, ESC, TAB, arrows, F1..) and numbers = seconds
                              to wait. For driving menus.
   --settle <seconds>         wait that long after the window appears before --keys (default 2).
-  --press-key <name>         tap that keyboard key in the advance loop instead of the pad's Cross.
+  --press-key <name>         tap that key instead: for the boot prompts (Enter) and the scene (E) both.
   --no-scene-detect          keep pressing for the whole --start-timeout instead of stopping at the
                              first 3D frame.
   --res <W>x<H>              render resolution on the command line (--res_width / --res_height).

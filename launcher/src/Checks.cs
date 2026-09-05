@@ -507,42 +507,7 @@ namespace Mgs4Launcher
                         target + " fps", null));
             }
 
-            // Not part of the add-on, but the Play tab's "Keep pressing X" needs both halves of it.
-            Row vigem = VigemRow();
-            sec.Rows.Add(vigem);
             return sec;
-        }
-
-        public static Row VigemRow()
-        {
-            string dll = null;
-            foreach (string c in new[] { Environment.GetEnvironmentVariable("VIGEM_CLIENT_DLL"),
-                                         Path.Combine(Paths.Root, "tools\\ViGEmClient.dll") })
-                if (!string.IsNullOrEmpty(c) && Paths.Exists(c)) { dll = c; break; }
-            bool driver = false;
-            try
-            {
-                using (var s = new System.Management.ManagementObjectSearcher(
-                           "SELECT State FROM Win32_SystemDriver WHERE Name='ViGEmBus'"))
-                    foreach (System.Management.ManagementObject o in s.Get())
-                        if ((o["State"] as string) == "Running") driver = true;
-            }
-            catch { }
-            string url = "https://github.com/nefarius/ViGEmBus/releases";
-            if (dll != null && driver)
-                return new Row("ok", "Virtual controller",
-                    "ViGEmBus is running and " + Path.GetFileName(dll) + " is in place - the launcher can tap Cross for the flashback prompts",
-                    "ready", url);
-            if (dll == null && !driver)
-                return new Row("info", "Virtual controller",
-                    "optional: ViGEmBus + tools\\ViGEmClient.dll let the launcher tap Cross through a cutscene; without them it can only press Enter",
-                    "not installed", url);
-            if (dll == null)
-                return new Row("warn", "Virtual controller",
-                    "the ViGEmBus driver is running, but tools\\ViGEmClient.dll is missing (it also ships inside the vgamepad package, or set VIGEM_CLIENT_DLL)",
-                    "no ViGEmClient.dll", url);
-            return new Row("warn", "Virtual controller",
-                "ViGEmClient.dll is here but the ViGEmBus driver is not running - install it", "no driver", url);
         }
 
         static Section LastRunSection(LastRun run)

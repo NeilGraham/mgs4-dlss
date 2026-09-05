@@ -107,7 +107,7 @@ namespace Mgs4Launcher
                 + "happens and how it ends are all on the row.\n\n"
                 + "If you have not finished MGS4, this is the game spoiled. It is asked once: the button in the "
                 + "bottom bar swaps the two views from here on, and Settings > Launcher holds the same switch.",
-                "Show all scenes",
+                "All Scenes",
                 () =>
                 {
                     _spoilerSeen = true;
@@ -120,7 +120,7 @@ namespace Mgs4Launcher
         void LabelViewSwitch()
         {
             if (_viewSwitchBtn == null) return;
-            _viewSwitchBtn.Content = _simplePlay ? "Show all scenes" : "Just the start options";
+            _viewSwitchBtn.Content = _simplePlay ? "All Scenes" : "Start Options";
             _viewSwitchBtn.ToolTip = _simplePlay
                 ? "Every scene in the game, named and with a frame of itself - the story, spoiled"
                 : "Back to the three ways to start the game";

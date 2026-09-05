@@ -30,6 +30,19 @@ namespace Mgs4Launcher
         string _settingsShape;      // which groups had no file, which is what decides the cards themselves
         bool _settingsBusy;
 
+        // The rail beside the form, and what the search over it filters: every card with its rows, each row
+        // carrying the words a search can find it by.
+        Rail _settingsRail;
+        class SettingsCard
+        {
+            public Border Card;
+            public string Group;
+            public bool Missing;
+            public List<KeyValuePair<Border, string>> Rows = new List<KeyValuePair<Border, string>>();
+            public List<Binding> Bindings = new List<Binding>();
+        }
+        readonly List<SettingsCard> _settingsCards = new List<SettingsCard>();
+
         // Save is for writing changes, so it is only offered when there are any. Recomputed on every edit, and
         // reset by building the form, reloading, and saving - each of which makes the controls agree with the
         // files again.
@@ -49,12 +62,72 @@ namespace Mgs4Launcher
                              : running ? "The game is running - close it to write these files"
                              : changed ? "Write the changed settings to their files"
                              : "Nothing has been changed yet";
+            MarkEditedGroups();
+        }
+
+        // The rail's dot for a settings group says what the card's tag says - amber for a group whose file is not
+        // there - and, over that, the accent for a group holding an edit not yet saved: the one thing on this
+        // page that matters and that a folded card would otherwise hide.
+        void MarkEditedGroups()
+        {
+            if (_settingsRail == null) return;
+            foreach (SettingsCard c in _settingsCards)
+            {
+                bool edited = false;
+                foreach (Binding b in c.Bindings)
+                    if (!string.Equals(b.Read(), b.Original, StringComparison.Ordinal)) { edited = true; break; }
+                _settingsRail.Dot(c.Card, edited ? "#7C9CFF" : c.Missing ? "#F2C14E" : null);
+            }
         }
 
         void WireSettings()
         {
             _reloadBtn.Click += (s, e) => { BuildSettings(); Say("reloaded from mgs4_dlss.ini"); };
             _saveBtn.Click += (s, e) => SaveSettings();
+
+            _settingsRail = new Rail(_settingsRailSlot, _settingsScroll, _settingsHost, "Find a setting");
+            _settingsRail.Search.TextChanged += (s, e) => ApplySettingsFilter();
+            _settingsRail.CollapseAll = () => { foreach (SettingsCard c in _settingsCards) Widgets.Fold(c.Card, true); SavePrefs(); };
+            _settingsRail.ExpandAll = () => { foreach (SettingsCard c in _settingsCards) Widgets.Fold(c.Card, false); SavePrefs(); };
+        }
+
+        // The search over the form: a row stays when its label, its key or its help holds every word typed, a
+        // card stays while any of its rows do, and a card with a match is opened whatever its fold says - what
+        // was asked for should be on screen, not behind a header.
+        void ApplySettingsFilter()
+        {
+            string[] words = SearchWords(_settingsRail.Search.Text);
+            int shown = 0, total = 0;
+            foreach (SettingsCard c in _settingsCards)
+            {
+                int hits = 0;
+                foreach (KeyValuePair<Border, string> row in c.Rows)
+                {
+                    bool hit = Matches(row.Value, words);
+                    row.Key.Visibility = hit ? Visibility.Visible : Visibility.Collapsed;
+                    if (hit) hits++;
+                    total++;
+                }
+                shown += hits;
+                bool keep = words.Length == 0 || hits > 0 || (c.Rows.Count == 0 && Matches(c.Group, words));
+                c.Card.Visibility = keep ? Visibility.Visible : Visibility.Collapsed;
+                Widgets.Reveal(c.Card, words.Length > 0);
+                _settingsRail.Shown(c.Card, keep);
+            }
+            if (words.Length > 0) Say(shown + " of " + total + " settings match");
+        }
+
+        static string[] SearchWords(string text)
+        {
+            return (text ?? "").ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        static bool Matches(string hay, string[] words)
+        {
+            if (words.Length == 0) return true;
+            string h = (hay ?? "").ToLowerInvariant();
+            foreach (string w in words) if (!h.Contains(w)) return false;
+            return true;
         }
 
         // Opening the tab shows the form that is already there and re-reads the files behind it. The reading is
@@ -139,6 +212,10 @@ namespace Mgs4Launcher
                 if (!string.Equals(b.Read(), b.Original, StringComparison.Ordinal)) continue;   // but the user has
                 b.Original = v;                 // set first, so the control's own change event sees no edit
                 if (b.Write != null) b.Write(v);
+                // Then what the control reads back, not the file's spelling: the game writes True where the
+                // form reads true, and with the raw value kept as the baseline every refresh from a running game
+                // left Save lit over a form nobody had touched.
+                b.Original = b.Read();
                 moved++;
             }
             foreach (KeyValuePair<IniKey, TextBlock> kv in _settingLabels)
@@ -158,6 +235,8 @@ namespace Mgs4Launcher
             _settingsHost.Children.Clear();
             _settingReaders.Clear();
             _settingLabels.Clear();
+            _settingsCards.Clear();
+            if (_settingsRail != null) _settingsRail.Clear();
             _settingsDir = _gameDir;
             _settingsShape = SettingsShape(_gameDir);
 
@@ -198,19 +277,39 @@ namespace Mgs4Launcher
                         : " - not there yet; run the game once and it writes them";
 
                 StackPanel body;
-                _settingsHost.Children.Add(Widgets.Card(group.Key, blurb, missing ? "warn" : "info",
-                                                        missing ? "not there" : null,
-                                                        IniForm.BadgesFor(keys[0]), out body));
+                Border card = Widgets.Card(group.Key, blurb, missing ? "warn" : "info",
+                                           missing ? "not there" : null,
+                                           IniForm.BadgesFor(keys[0]), "settings:" + group.Key, out body);
+                _settingsHost.Children.Add(card);
+                var info = new SettingsCard { Card = card, Group = group.Key, Missing = missing };
+                _settingsCards.Add(info);
+                if (_settingsRail != null)
+                    _settingsRail.Add(group.Key, missing ? "#F2C14E" : null, card,
+                                      missing ? group.Key + " - " + blurb : string.Join(", ", files));
                 if (missing) continue;
                 foreach (IniKey spec in keys)
-                    body.Children.Add(SettingRow(spec, IniForm.Read(spec, addonIni, gameIni)));
-                if (group.Key == "Launcher") body.Children.Add(DecoderRow());
+                {
+                    int before = _settingReaders.Count;
+                    Border row = SettingRow(spec, IniForm.Read(spec, addonIni, gameIni));
+                    body.Children.Add(row);
+                    info.Rows.Add(new KeyValuePair<Border, string>(row, group.Key + " " + spec.Label + " " + spec.Key + " " + spec.Help));
+                    for (int i = before; i < _settingReaders.Count; i++) info.Bindings.Add(_settingReaders[i]);
+                }
+                if (group.Key == "Launcher")
+                {
+                    Border row = PlaylistRow();
+                    body.Children.Add(row);
+                    info.Rows.Add(new KeyValuePair<Border, string>(row, "Launcher menu music playlist tracks ipod"));
+                    row = DecoderRow();
+                    body.Children.Add(row);
+                    info.Rows.Add(new KeyValuePair<Border, string>(row, "Launcher menu music decoder vgmstream"));
+                }
             }
 
             // Building the form gives one of its controls focus, and WPF brings a focused control into view - so
             // the tab opened part-way down its own first card. Start at the top, where the reading starts.
-            var scroller = _settingsHost.Parent as ScrollViewer;
-            if (scroller != null) scroller.ScrollToTop();
+            _settingsScroll.ScrollToTop();
+            if (_settingsRail != null && _settingsRail.Search.Text.Length > 0) ApplySettingsFilter();
             UpdateSaveButton();
         }
 
@@ -218,16 +317,27 @@ namespace Mgs4Launcher
         {
             var b = new Border
             {
-                Padding = new Thickness(18, 11, 18, 11),
+                Padding = new Thickness(18, 8, 18, 8),
                 BorderBrush = Widgets.Brush("#202023"),
                 BorderThickness = new Thickness(0, 1, 0, 0),
             };
             Grid g = Widgets.Columns("*", "Auto");
-            var left = new StackPanel();
+            var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
             left.Children.Add(Widgets.Text(spec.Label, 12, "#ECECEE"));
-            var sub = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 12, 0) };
-            sub.Children.Add(Widgets.Text(spec.Key, 11, "#7C9CFF", false, true));
-            TextBlock help = Widgets.Text("  " + spec.Help, 11, "#97979F");
+            // The key and its help on one line under the label. The help used to run off the right edge and be
+            // cut mid-letter by the editor beside it; it is trimmed to an ellipsis now, with the whole of it in
+            // the tooltip - and the row is a line shorter than wrapping it would make it.
+            Grid sub = Widgets.Columns("Auto", "*");
+            sub.Margin = new Thickness(0, 1, 12, 0);
+            TextBlock key = Widgets.Text(spec.Key, 11, "#7C9CFF", false, true);
+            key.VerticalAlignment = VerticalAlignment.Center;
+            sub.Children.Add(key);
+            TextBlock help = Widgets.Text(spec.Help, 11, "#97979F");
+            help.Margin = new Thickness(8, 0, 0, 0);
+            help.TextWrapping = TextWrapping.NoWrap;
+            help.TextTrimming = TextTrimming.CharacterEllipsis;
+            help.ToolTip = spec.Help;
+            Grid.SetColumn(help, 1);
             sub.Children.Add(help);
             left.Children.Add(sub);
             g.Children.Add(left);
@@ -276,6 +386,50 @@ namespace Mgs4Launcher
                 }
                 default:
                 {
+                    if (spec.Type == "int" && !double.IsNaN(spec.Min) && !double.IsNaN(spec.Max))
+                    {
+                        // A number in a known range: a slider, with the number beside it in a box that still
+                        // takes typing. The two are kept level from either side, and the box is what is read.
+                        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                        var slider = new Slider
+                        {
+                            Minimum = spec.Min, Maximum = spec.Max,
+                            SmallChange = spec.Step, LargeChange = spec.Step * 5, TickFrequency = spec.Step,
+                            IsSnapToTickEnabled = true, VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(0, 0, 10, 0),
+                        };
+                        var box = new TextBox { Width = 58, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Right };
+                        double v0;
+                        if (!double.TryParse(value, out v0)) v0 = spec.Min;
+                        slider.Value = Math.Max(spec.Min, Math.Min(spec.Max, v0));
+                        box.Text = value ?? "";
+                        bool syncing = false;
+                        slider.ValueChanged += (s2, e2) =>
+                        {
+                            if (syncing) return;
+                            syncing = true; box.Text = ((int)Math.Round(slider.Value)).ToString(); syncing = false;
+                            UpdateSaveButton();
+                        };
+                        box.TextChanged += (s2, e2) =>
+                        {
+                            double v;
+                            if (!syncing && double.TryParse(box.Text, out v))
+                            { syncing = true; slider.Value = Math.Max(spec.Min, Math.Min(spec.Max, v)); syncing = false; }
+                            UpdateSaveButton();
+                        };
+                        Remember(spec, () => box.Text.Trim(), v =>
+                        {
+                            box.Text = v ?? "";
+                            double d; if (double.TryParse(v, out d)) { syncing = true; slider.Value = Math.Max(spec.Min, Math.Min(spec.Max, d)); syncing = false; }
+                        });
+                        panel.Children.Add(slider);
+                        panel.Children.Add(box);
+                        Grid.SetColumn(panel, 1);
+                        g.Children.Add(panel);
+                        b.Child = g;
+                        b.Tag = new Widgets.RowInfo { Editor = slider, Spec = spec };
+                        return b;
+                    }
                     var tb = new TextBox { Text = value ?? "", MinWidth = 90, VerticalAlignment = VerticalAlignment.Center };
                     Remember(spec, () => tb.Text.Trim(), v => tb.Text = v ?? "");
                     tb.TextChanged += (s2, e2) => UpdateSaveButton();
@@ -286,6 +440,7 @@ namespace Mgs4Launcher
             Grid.SetColumn(editor, 1);
             g.Children.Add(editor);
             b.Child = g;
+            if (spec.Type != "readonly") b.Tag = new Widgets.RowInfo { Editor = editor, Spec = spec };
             return b;
         }
 
@@ -331,6 +486,7 @@ namespace Mgs4Launcher
             // own view among it, which has to change on the spot rather than at the next start.
             Paths.ForgetConfig();
             ApplyPlayView(true);
+            ApplySetupTab();
             StopMusic();            // the track or the volume may have just changed; ApplyMusic picks the new one up
             ApplyMusic();
             UpdateSaveButton();

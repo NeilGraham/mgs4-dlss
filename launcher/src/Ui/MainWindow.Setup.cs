@@ -12,9 +12,40 @@ namespace Mgs4Launcher
 {
     partial class MainWindow
     {
+        // The rail beside the cards, and what its search and its one chip filter: every card with its rows, each
+        // row carrying its status and the words a search can find it by.
+        Rail _setupRail;
+        System.Windows.Controls.Primitives.ToggleButton _problemsChip;
+        class SetupCard
+        {
+            public Border Card;
+            public string Title;
+            public bool IsStatus;       // the first card: the verdict and the folder, never filtered away
+            public List<SetupRow> Rows = new List<SetupRow>();
+        }
+        class SetupRow { public Border Row; public string Status, Hay; }
+        readonly List<SetupCard> _setupCards = new List<SetupCard>();
+
         void WireSetup()
         {
             _recheckBtn.Click += (s, e) => ShowSetup();
+
+            _setupRail = new Rail(_installRailSlot, _installScroll, _installHost, "Find a file or a step");
+            _setupRail.Search.TextChanged += (s, e) => ApplySetupFilter();
+            _setupRail.CollapseAll = () => { foreach (SetupCard c in _setupCards) Widgets.Fold(c.Card, true); SavePrefs(); };
+            _setupRail.ExpandAll = () => { foreach (SetupCard c in _setupCards) Widgets.Fold(c.Card, false); SavePrefs(); };
+
+            // One chip under the search: only the rows that want something. A finished install is seven cards of
+            // green ticks, and the one amber row in it is what the tab is for.
+            _problemsChip = new System.Windows.Controls.Primitives.ToggleButton
+            {
+                Content = "Only what needs a look", Tag = "problems", Style = Widgets.ChipStyle,
+                ToolTip = "Hide every row that checked out, and every card with nothing left to show",
+            };
+            PaintProblemsChip();
+            _problemsChip.Checked += (s, e) => { PaintProblemsChip(); ApplySetupFilter(); SavePrefs(); };
+            _problemsChip.Unchecked += (s, e) => { PaintProblemsChip(); ApplySetupFilter(); SavePrefs(); };
+            _setupRail.Chips.Children.Add(_problemsChip);
             _copyBtn.Click += (s, e) =>
             {
                 if (_sections == null) return;
@@ -52,6 +83,43 @@ namespace Mgs4Launcher
                 catch (Exception ex) { Say("drop failed: " + ex.Message); }
                 ShowSetup();
             };
+        }
+
+        // The chip in the warn family, since what it shows is the amber and the red: lit like a Play chip when on.
+        void PaintProblemsChip()
+        {
+            StatusStyle st = Widgets.Status["warn"];
+            bool on = _problemsChip.IsChecked == true;
+            _problemsChip.BorderBrush = Widgets.Brush(st.Br);
+            _problemsChip.Background = on ? Widgets.Mix(st.Bg, st.Fg, 0.20) : Brushes.Transparent;
+            _problemsChip.Foreground = on ? Widgets.Brush(st.Fg) : Widgets.Mix(st.Fg, st.Bg, 0.35);
+        }
+
+        // What the rail's search and chip leave on the page. A row stays when it holds every word typed and, with
+        // the chip on, when it is not a plain tick; a card stays while any row does, the verdict card always. A
+        // card with a match is opened whatever its fold says.
+        void ApplySetupFilter()
+        {
+            if (_setupRail == null) return;
+            string[] words = SearchWords(_setupRail.Search.Text);
+            bool problems = _problemsChip != null && _problemsChip.IsChecked == true;
+            bool filtering = words.Length > 0 || problems;
+            int hidden = 0;
+            foreach (SetupCard c in _setupCards)
+            {
+                int hits = 0;
+                foreach (SetupRow r in c.Rows)
+                {
+                    bool hit = Matches(r.Hay, words) && !(problems && r.Status == "ok");
+                    r.Row.Visibility = hit ? Visibility.Visible : Visibility.Collapsed;
+                    if (hit) hits++; else hidden++;
+                }
+                bool keep = c.IsStatus || !filtering || hits > 0 || (words.Length > 0 && !problems && Matches(c.Title, words));
+                c.Card.Visibility = keep ? Visibility.Visible : Visibility.Collapsed;
+                Widgets.Reveal(c.Card, filtering);
+                _setupRail.Shown(c.Card, keep);
+            }
+            if (filtering) Say(hidden == 0 ? "everything shown" : hidden + " row" + (hidden == 1 ? "" : "s") + " hidden by the filter");
         }
 
         // The checks are about a third of a second of file reads and log parsing, and the cards on top of that.
@@ -159,14 +227,19 @@ namespace Mgs4Launcher
         void PaintSetup()
         {
             // A repaint from a refresh happens under the reader's eyes, so the page stays where they left it.
-            double keep = _installView.VerticalOffset;
+            double keep = _installScroll.VerticalOffset;
             _installHost.Children.Clear();
+            _setupCards.Clear();
+            _setupRail.Clear();
 
             if (string.IsNullOrEmpty(_gameDir))
             {
                 StackPanel none;
                 var nothing = new Verdict { Text = "No game folder", Kind = "bad", Note = "nothing to check against yet" };
-                _installHost.Children.Add(StatusCard(nothing));
+                Border status = StatusCard(nothing);
+                _installHost.Children.Add(status);
+                _setupCards.Add(new SetupCard { Card = status, Title = "Install check", IsStatus = true });
+                _setupRail.Add("Install check", Widgets.Status["bad"].Fg, status, nothing.Text);
                 SetSetupIcon(nothing);
                 // Which libraries were searched is the whole answer on a machine with more than one drive: Steam's
                 // own install on C: is what names a library on D:.
@@ -184,7 +257,11 @@ namespace Mgs4Launcher
 
             if (_sections == null) return;
             Verdict verdict = Checks.GetVerdict(_sections);
-            _installHost.Children.Add(StatusCard(verdict));
+            Border head = StatusCard(verdict);
+            _installHost.Children.Add(head);
+            _setupCards.Add(new SetupCard { Card = head, Title = "Install check", IsStatus = true });
+            _setupRail.Add("Install check", (Widgets.Status.ContainsKey(verdict.Kind) ? Widgets.Status[verdict.Kind] : Widgets.Status["info"]).Fg,
+                           head, verdict.Text + (string.IsNullOrEmpty(verdict.Note) ? "" : " - " + verdict.Note));
             SetSetupIcon(verdict);
 
             if (!string.IsNullOrEmpty(Checks.ManifestError))
@@ -209,21 +286,47 @@ namespace Mgs4Launcher
                 if (sec.Rows.Count == 0) { kind = "info"; label = "nothing to check"; }
 
                 StackPanel body;
-                Border card = Widgets.Card(sec.Title, sec.Blurb, kind, label, out body);
-                if (!string.IsNullOrEmpty(sec.Guide) || !string.IsNullOrEmpty(sec.Url))
-                    body.Children.Add(Widgets.GuideRow(sec));
+                Border card = Widgets.Card(sec.Title, sec.Blurb, kind, label, null, "setup:" + sec.Id, out body);
+                var info = new SetupCard { Card = card, Title = sec.Title };
+                _setupCards.Add(info);
+                _setupRail.Add(sec.Title, Widgets.Status[kind].Fg, card, sec.Title + " - " + label);
 
-                if (sec.Id == "settings" && !string.IsNullOrEmpty(sec.SavedSettings)) body.Children.Add(GameSettingsRow(sec));
-                if (sec.Id == "game" && !Paths.Exists(Paths.Join(_gameDir, "steam_appid.txt"))) body.Children.Add(AppIdRow());
-                if (sec.Bundled) body.Children.Add(AddonRow());
+                // The guide row wears the card's own verdict: with the chip on, a finished section's guide goes
+                // with its ticks and the card folds out of the page, while a section with something amber in it
+                // keeps the row that says how to fix it.
+                if (!string.IsNullOrEmpty(sec.Guide) || !string.IsNullOrEmpty(sec.Url))
+                    AddSetupRow(body, info, Widgets.GuideRow(sec), kind, sec.Guide + " " + sec.UrlLabel);
+
+                if (sec.Id == "settings" && !string.IsNullOrEmpty(sec.SavedSettings))
+                    AddSetupRow(body, info, GameSettingsRow(sec), sec.WrongKeys.Count > 0 ? "warn" : "ok",
+                                "game settings api vsync fxaa fps limiter " + string.Join(" ", sec.WrongKeys));
+                if (sec.Id == "game" && !Paths.Exists(Paths.Join(_gameDir, "steam_appid.txt")))
+                    AddSetupRow(body, info, AppIdRow(), "warn", "steam_appid.txt app id");
+                if (sec.Bundled)
+                {
+                    bool have = Paths.Exists(Paths.Join(_gameDir, "mgs4_dlss.addon64"));
+                    AddSetupRow(body, info, AddonRow(), have ? "ok" : "bad", "install the add-on mgs4_dlss.addon64 mgs4_dlss.ini");
+                }
 
                 bool first = true;
-                foreach (Row row in sec.Rows) { body.Children.Add(Widgets.CheckRow(row, first)); first = false; }
+                foreach (Row row in sec.Rows)
+                {
+                    AddSetupRow(body, info, Widgets.CheckRow(row, first), row.Status,
+                                row.Name + " " + row.Detail + " " + row.Value);
+                    first = false;
+                }
                 _installHost.Children.Add(card);
             }
+            ApplySetupFilter();
             if (keep > 0)
                 Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded,
-                                           new Action(delegate { _installView.ScrollToVerticalOffset(keep); }));
+                                           new Action(delegate { _installScroll.ScrollToVerticalOffset(keep); }));
+        }
+
+        void AddSetupRow(StackPanel body, SetupCard card, Border row, string status, string hay)
+        {
+            body.Children.Add(row);
+            card.Rows.Add(new SetupRow { Row = row, Status = status, Hay = card.Title + " " + hay });
         }
 
         // The first card, and the only one that is not a step: how the check came out, the folder it ran against,
@@ -234,7 +337,7 @@ namespace Mgs4Launcher
             Border card = Widgets.Card("Install check: " + verdict.Text, verdict.Note, verdict.Kind, verdict.Text, out body);
 
             bool ok = !string.IsNullOrEmpty(_gameDir);
-            var row = new Border { Padding = new Thickness(18, 13, 18, 13) };
+            var row = new Border { Padding = new Thickness(18, 10, 18, 10) };
             Grid g = Widgets.Columns("Auto", "*", "Auto");
             TextBlock label = Widgets.Text("Game folder", 12, "#97979F");
             label.VerticalAlignment = VerticalAlignment.Center;
@@ -285,48 +388,43 @@ namespace Mgs4Launcher
             return card;
         }
 
-        // What can be dropped, named from the manifest so the two cannot drift.
+        // What can be dropped, named from the manifest so the two cannot drift. One line, not a box: the whole
+        // tab takes a drop, so this is a label for that rather than the target itself, and a label does not need
+        // ninety pixels of the first card. The note about zips is its tooltip.
         Border DropArea()
         {
-            var wrap = new Border { Padding = new Thickness(18, 0, 18, 16) };
+            var wrap = new Border { Padding = new Thickness(18, 0, 18, 12) };
             var grid = new Grid();
             _dropZone = new System.Windows.Shapes.Rectangle
             {
-                RadiusX = 10, RadiusY = 10,
+                RadiusX = 8, RadiusY = 8,
                 Stroke = Widgets.Brush("#43434C"),
                 Fill = Widgets.Brush("#0E0E10"),
                 StrokeThickness = 1,
                 StrokeDashArray = new DoubleCollection(new[] { 4.0, 3.0 }),
-                MinHeight = 92,
+                MinHeight = 40,
             };
             grid.Children.Add(_dropZone);
 
-            var stack = new StackPanel
+            var line = new WrapPanel
             {
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(18, 14, 18, 14),
+                Margin = new Thickness(14, 8, 14, 8),
             };
-            TextBlock title = Widgets.Text("Drop files here", 12, "#ECECEE", true);
-            title.HorizontalAlignment = HorizontalAlignment.Center;
-            stack.Children.Add(title);
-
-            var names = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 6, 0, 0) };
+            TextBlock title = Widgets.Text("Drop files anywhere on this tab:", 11, "#B8B8C2", true);
+            title.Margin = new Thickness(0, 0, 10, 0);
+            line.Children.Add(title);
             List<string> drops = Install.DropNames();
             for (int i = 0; i < drops.Count; i++)
             {
                 TextBlock t = Widgets.Text(drops[i], 11, "#9FB6FF", false, true);
                 t.Margin = new Thickness(0, 0, 10, 0);
-                names.Children.Add(t);
-                if (i == drops.Count - 2) names.Children.Add(Widgets.Text("or ", 11, "#6E6E77"));
+                line.Children.Add(t);
+                if (i == drops.Count - 2) line.Children.Add(Widgets.Text("or ", 11, "#6E6E77"));
             }
-            stack.Children.Add(names);
-            TextBlock note = Widgets.Text("Zips are unpacked, everything else is copied into place. Anything else is left alone.",
-                                          11, "#6E6E77");
-            note.HorizontalAlignment = HorizontalAlignment.Center;
-            note.Margin = new Thickness(0, 6, 0, 0);
-            stack.Children.Add(note);
-            grid.Children.Add(stack);
+            grid.Children.Add(line);
+            grid.ToolTip = "Zips are unpacked, everything else is copied into place. Anything else is left alone.";
             wrap.Child = grid;
             return wrap;
         }
