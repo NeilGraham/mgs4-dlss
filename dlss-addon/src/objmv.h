@@ -70,7 +70,8 @@ namespace objmv {
     // feed's rectangle in that texture. The monitor entries then read feedMv and add the projected motion to mvRtv.
     void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& vp,
                   const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth,
-                  ID3D12Resource* feedDepth = nullptr, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv = {}, ID3D12Resource* feedMv = nullptr, const float* feedRect = nullptr, bool flipFeedV = false);
+                  ID3D12Resource* feedDepth = nullptr, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv = {}, ID3D12Resource* feedMv = nullptr, const float* feedRect = nullptr, bool flipFeedV = false,
+                  bool skipWindow = false);   // skipWindow: the 3D window's camera cut this frame - its objects keep the camera vector
     bool has_captures();
     // Plausibility limits of the velocity pass (velocity_ps.hlsl): a fragment whose vector exceeds maxPixels, or whose
     // vector changes by more than maxGradient pixels per screen pixel across the surface, is discarded (0 = no limit).

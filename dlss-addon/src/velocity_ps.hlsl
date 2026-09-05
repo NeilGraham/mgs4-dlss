@@ -30,8 +30,10 @@ float2 main(VSOut i) : SV_Target
     const float grad = max(abs(gx.x) + abs(gx.y), abs(gy.x) + abs(gy.y));   // pixels of motion per pixel of screen
     if (i.prv.w <= 1e-4 || i.cur.w <= 1e-4) discard;   // behind the camera last frame: keep the camera vector
     if (flags & 4u) {   // reversed-Z: only the visible surface (its depth equals the scene depth) writes
+        // the tolerance is relative: a fixed 2e-4 was ~4 cm at 3 m (reversed-Z, z = near / distance) and let the inner
+        // surface of an arm show through the torso at the armpit
         float d = depthFull.Load(int3(int2(i.pos.xy), 0));
-        if (i.pos.z < d - 2e-4) discard;
+        if (i.pos.z < d - max(2e-5, d * 1e-3)) discard;
     }
     if (maxPixels > 0.0 && dot(mv, mv) > maxPixels * maxPixels) discard;
     if (maxGradient > 0.0 && grad > maxGradient) discard;

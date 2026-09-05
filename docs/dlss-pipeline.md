@@ -249,6 +249,28 @@ occlude its characters; and a draw that belongs to neither view (the caller feed
 not evaluated by DLSS); `DebugMode=9` over `s10a20l_D2` shows the field and the character silhouettes inside the main
 window and the camera window only, at every scale.
 
+**The window's depth, and its camera.** The game clears the shared depth texture whole between passes (dozens of
+whole clears per frame), so at the insertion the camera window's depth is gone: its characters tested against far and
+every polygon of them showed, through the floor. The window's region is stretched into the full-grid depth copy at
+the window's first reader (its post pass, the last moment its depth is intact), the main view's stretch keeps that
+region (and runs even at full scale so the velocity pass and DLSS read the copy), and the window's target is the one
+whose draws fit the window's rectangle, not the most-drawn window-class target (the caller's view has more at times).
+The feed also cycles its cameras every 600 frames; each switch is a cut inside the window, so the window's own
+view-projection (the vote its draws share) is compared with last frame's and its object vectors are dropped for the
+frame (`camera cuts` in the stats line). The frame's camera vote itself now ranks main-view draws first: the camera
+window's room and the caller's view have hundreds of identity-matrix draws, and whenever one of them won, the main
+view's camera vectors were computed for a still camera - pans with a motionless background while every character
+moved.
+
+**The caller on the monitor.** The caller's draws are captured as their own view (objmv view 2) into a feed-vector
+texture at the feed's rectangle, depth-tested against the feed's own depth copied at its first reader, so they never
+reach the screen by themselves. `MonitorProject=1` (experimental, off by default) captures the Nomad's monitor draws
+with their texture coordinates (the draws sampling a texture copied from the final image this frame; a stream-out
+variant with a TEXCOORD entry) and a projector pass maps the feed's motion through the monitor's mapping onto the
+screen, added to the surface's camera vector. The screen itself is a 5-vertex quad whose coordinates are not in the
+first TEXCOORD output (mask 6 in TEXCOORD0; the projector took TEXCOORD1), so the motion landed beside the caller -
+left off until that mapping is pinned down.
+
 ## Frozen screens: the pause menu and Codec backgrounds (`FrozenBackground`, on by default)
 
 Behind the pause menu and the Codec the game shows a **still image of the world**, and until v1.1 that image was

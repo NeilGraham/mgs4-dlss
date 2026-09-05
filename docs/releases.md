@@ -32,6 +32,20 @@ The mission briefings get their vectors back in the window.
   into the window's on-screen rectangle at every scale (they were shrunk to the game's scaled viewport under load),
   and the window's own depth occludes them (the views share one depth texture, and its region is now brought to the
   full grid too).
+- **The camera window keeps its depth.** The game clears the shared depth texture whole between passes, so by the
+  time the vectors were tested the window's depth was gone: every polygon of its characters showed, through the floor
+  too. The window's region is copied to the full grid at its first reader, before the clears. And the feed cycles its
+  cameras every ten seconds: each switch is a cut inside the window, and its object vectors are dropped for that frame
+  (they drew as exploded triangles).
+- **The main view's camera wins the vote.** The camera window's room and the caller's view have hundreds of
+  identity-matrix draws of their own; when one of them won the view-projection vote the main view's camera vectors
+  came out for a still camera - pans with a motionless background while every character moved, half the time. The
+  vote now counts main-view draws first.
+- **Occlusion tolerance.** The object-vector depth test's tolerance is relative now; the fixed value let the inner
+  surface of an arm show through the torso at the armpit.
+- The caller's own vectors (Naomi, Campbell) are captured into a feed texture with the feed's own depth and stay off
+  the screen. `MonitorProject=1` (experimental, off) projects them through the Nomad's monitor; the screen quad's
+  texture coordinates are not where the projector looks yet, so leave it off.
 - The overlay and the 10-second stats line show the layout window in use; the log has `LAYOUT` lines on every change
   with the scale read from the viewports and from the upscale pass.
 

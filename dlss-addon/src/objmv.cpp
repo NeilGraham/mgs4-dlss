@@ -709,7 +709,7 @@ static uint32_t f2u(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 
 void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, D3D12_CPU_DESCRIPTOR_HANDLE sceneDsv, uint32_t w, uint32_t h, const D3D12_VIEWPORT& sceneVp,
               const float jitterCur[2], const float jitterPrev[2], const float prevSize[2], ID3D12Resource* manualDepth,
-              ID3D12Resource* feedDepth, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv, ID3D12Resource* feedMv, const float* feedRect, bool flipFeedV)
+              ID3D12Resource* feedDepth, D3D12_CPU_DESCRIPTOR_HANDLE feedMvRtv, ID3D12Resource* feedMv, const float* feedRect, bool flipFeedV, bool skipWindow)
 {
     if (!g_st.ready || !g_frameStarted) return;
     const double t0 = cpu_now_ms();
@@ -749,6 +749,7 @@ void velocity(ID3D12GraphicsCommandList* cl, D3D12_CPU_DESCRIPTOR_HANDLE mvRtv, 
         uint64_t boundKey = ~0ull; ID3D12PipelineState* cur = nullptr; bool curOwn = false; D3D12_VIEWPORT curVp = vp;
         for (const VelEntry& e : g_vel) {
             if (e.view >= 2) continue;   // the caller feed and the monitor: below
+            if (e.view == 1 && skipWindow) continue;   // the window's camera cut this frame
             // objects drawn into their own 3D window use that viewport (their clip positions map to it)
             if (e.ownVp != curOwn || (e.ownVp && memcmp(&e.vp, &curVp, sizeof(curVp)) != 0)) { curOwn = e.ownVp; curVp = e.ownVp ? e.vp : vp; cl->RSSetViewports(1, &curVp); }
             const uint64_t want = manual ? e.psoKeyManual : e.psoKey;

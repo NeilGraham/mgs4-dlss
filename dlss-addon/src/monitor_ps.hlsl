@@ -18,7 +18,7 @@ float2 main(VSOut i) : SV_Target
     const float2 uv = (flags & 32u) ? float2(i.uv.x, 1.0 - i.uv.y) : i.uv.xy;
     const float2 fp = rect.xy + saturate(uv) * rect.zw;   // the feed pixel under this screen pixel
     const float2 dx = ddx(fp), dy = ddy(fp);               // derivatives before any discard
-    if (flags & 4u) { const float d = depthFull.Load(int3(int2(i.pos.xy), 0)); if (i.pos.z < d - 2e-4) discard; }
+    if (flags & 4u) { const float d = depthFull.Load(int3(int2(i.pos.xy), 0)); if (i.pos.z < d - max(2e-5, d * 1e-3)) discard; }
     const float2 m = feedMv.Load(int3(int2(fp), 0));
     if (dot(m, m) < 1e-8) return float2(0, 0);
     const float det = dx.x * dy.y - dy.x * dx.y;

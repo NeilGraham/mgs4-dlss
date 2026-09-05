@@ -47,6 +47,8 @@ FGHintRescale=0          ; live: 1 = in a window that is not the render size, re
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
+MonitorProject=0         ; experimental: project the video call's caller (Naomi, Campbell) vectors through the Nomad's monitor; the screen quad's texture coordinates are not resolved yet, so the motion lands beside the caller - leave off
+MonitorFlipV=0           ; with MonitorProject=1: flip the feed's vertical texture coordinate
 FrozenBackground=1       ; live: pause menu / Codec: run DLSS before the game captures the still background it shows behind those screens
 UIMask=1                 ; live: HUD from the replayed UI layer -> DLSS bias-current-color mask + zero vectors on bright HUD detail (no HUD ghosting under camera motion)
 

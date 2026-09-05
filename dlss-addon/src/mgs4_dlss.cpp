@@ -595,6 +595,31 @@ static uint32_t g_objMvSkippedOther = 0;   // object captures skipped: the draw 
 // window's first reader (its post pass), the last moment its depth is intact; the main view's stretch at the insertion
 // then keeps that region.
 static uint32_t g_winDepthFrame = 0; static float g_winDepthRect[4] = {}; static uint32_t g_winDepthCopies = 0;
+static std::unordered_map<uint64_t, uint32_t> g_winFitDrawsPerRt; static uint64_t g_winFitRt = 0; static uint32_t g_winFitDraws = 0; static viewport g_winFitVp = {};   // the target / viewport of the draws that fit the camera window's rectangle (the caller's view has more window-class draws at times)
+// The video call's caller feed (Naomi, Campbell): a third 3D view at (0,0 2284x2160), rendered first, written into the
+// final texture under the main view and copied from there into the texture the Nomad's monitor samples. Its rectangle
+// is the scene write that overlaps the main view's and fits one of the frame's window viewports; its target is the one
+// drawing at that viewport; its depth is copied at its first reader (like the camera window's) into g_feedDepth; its
+// objects' vectors are rasterized into g_feedMv in that rectangle; and the monitor draws of the main view - the draws
+// sampling a texture that was copied from the final texture this frame - are captured with their texture coordinates
+// and project the feed's motion onto the screen (objmv view 3).
+static viewport g_feedLayoutRect = {}, g_feedLayoutVp = {}; static uint32_t g_feedLayoutFrame = 0; static bool g_feedLayoutValid = false;
+static viewport g_feedLayoutLast = {}, g_feedLayoutLastVp = {}; static uint32_t g_feedLayoutLastFrame = 0; static bool g_feedLayoutLastValid = false;
+static const viewport* feed_layout_now(const viewport** vp = nullptr)
+{
+    if (g_feedLayoutValid && g_feedLayoutFrame == g_frame) { if (vp) *vp = &g_feedLayoutVp; return &g_feedLayoutRect; }
+    if (g_feedLayoutLastValid && g_frame - g_feedLayoutLastFrame <= 2) { if (vp) *vp = &g_feedLayoutLastVp; return &g_feedLayoutLast; }
+    return nullptr;
+}
+static std::unordered_map<uint64_t, uint32_t> g_feedDrawsPerRt; static uint64_t g_feedGeoRt = 0; static uint32_t g_feedGeoDraws = 0; static viewport g_feedVpFrame = {}; static bool g_feedVpFrameValid = false;
+static resource g_feedDepth = { 0 }; static resource_usage g_feedDepthState = resource_usage::unordered_access; static uint32_t g_feedDepthFrame = 0, g_feedDepthCopies = 0;
+static resource g_feedMv = { 0 }; static resource_view g_feedMvRtv = { 0 }; static resource_usage g_feedMvState = resource_usage::render_target;
+static std::unordered_set<uint64_t> g_feedTexSet;   // this frame: targets of the few-vertex copies from the final texture (the monitor's texture among them)
+static uint32_t g_feedFrames = 0, g_monitorFrames = 0; static int g_cfgMonitorFlipV = 0;
+// MonitorProject=1 (experimental, off): project the caller's vectors through the monitor. The screen is a 5-vertex quad
+// whose texture coordinates are not in the first TEXCOORD output (mask 6 in TEXCOORD0, the projector took TEXCOORD1),
+// so the motion landed beside the caller. Off, the caller's draws are captured into the feed texture only, i.e. ignored.
+static int g_cfgMonitorProject = 0;
 static std::unordered_map<uint64_t, std::pair<uint32_t, std::pair<uint64_t, resource_desc>>> g_dumpTexHist;   // diagnostics: textures the main view's draws sample
 static std::unordered_set<uint64_t> g_dumpRtSet;   // diagnostics: every target drawn into this frame
 static uint64_t g_winGeoRt = 0, g_winGeoRtLast = 0; static uint32_t g_winGeoDraws = 0;   // RT receiving depth-tested draws at a window viewport (Codec caller scene)
@@ -658,7 +683,12 @@ static const region_info* region_of(const cl_state& s)
 static uint32_t g_patchedDraws = 0, g_matrixMisses = 0;
 static float g_frameVP[16] = {}; static bool g_haveFrameVP = false;   // unjittered VP of this frame (majority of c[0] blocks)
 static float g_prevVP[16] = {};  static bool g_havePrevVP = false;
-struct vp_vote { uint32_t count = 0; float m[16]; };
+struct vp_vote { uint32_t count = 0; uint32_t winCount = 0, mainCount = 0; float m[16]; };   // winCount / mainCount: draws at the camera window's / the main view's viewport
+// The camera window's camera. The security feed cycles its cameras (E CAM, F CAM, C CAM...), and every switch is a cut
+// inside the window: for that frame the window's characters pair with positions in the old camera's space, and what
+// survives the plausibility filter draws as exploded triangles. The window's view-projection is the vote most of its
+// draws share; a jump from last frame's drops the window's object vectors for the frame.
+static float g_winVP[16] = {}, g_winVPPrev[16] = {}; static bool g_haveWinVP = false, g_haveWinVPPrev = false, g_winCut = false; static uint32_t g_winCuts = 0;
 static std::unordered_map<uint64_t, vp_vote> g_vpVotes;              // per frame: hash -> block
 static uint32_t g_missLogBudget = 0;
 
@@ -750,6 +780,8 @@ static int jitter_scene_draw(const cl_state& s)
             uint64_t hsh = 1469598103934665603ull; const uint32_t* u = reinterpret_cast<const uint32_t*>(m);
             for (int i = 0; i < 16; ++i) { hsh ^= u[i]; hsh *= 1099511628211ull; }
             vp_vote& v = g_vpVotes[hsh]; if (v.count++ == 0) memcpy(v.m, m, 64);
+            if (s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp))) v.mainCount++;
+            else if (s.vp_valid) { const viewport* wl = win_layout_now(); if (wl && vp_in_layout(s.vp, *wl)) v.winCount++; }
         }
         if (g_cfgJitter && !g_injectedThisFrame) {   // draws after DLSS ran (transparents, particles, HUD) stay unjittered
             const float ox = g_cfgJitterSignX * 2.0f * g_jitterX / (jitter_ref_w() * drs_factor_x()), oy = g_cfgJitterSignY * 2.0f * g_jitterY / (jitter_ref_h() * drs_factor_y());
@@ -769,12 +801,20 @@ static int jitter_scene_draw(const cl_state& s)
 }
 
 static vp_vote g_topVotes[3] = {};
+static void select_window_vp()
+{
+    g_haveWinVP = false; g_winCut = false;
+    const vp_vote* best = nullptr;
+    for (auto& kv : g_vpVotes) { const vp_vote& v = kv.second; if (v.winCount >= 10 && (!best || v.winCount > best->winCount)) best = &v; }
+    if (best) { memcpy(g_winVP, best->m, 64); g_haveWinVP = true; if (g_haveWinVPPrev && !camera_close(g_winVP, g_winVPPrev)) { g_winCut = true; g_winCuts++; if (g_winCuts <= 20) logmsg("camera window: cut at frame %u (the feed switched cameras) - its object vectors dropped for the frame", g_frame); } }
+}
 static void select_frame_vp()
 {
     g_haveFrameVP = false;
     vp_vote top[3] = {};
     for (auto& kv : g_vpVotes) {
-        const vp_vote& v = kv.second;
+        vp_vote v = kv.second;
+        if (v.mainCount) v.count = 1000000u + v.mainCount;   // the main view's draws outrank everything: the camera window's and the caller's cameras have hundreds of identity-matrix draws of their own
         // Skip bare projection matrices (view = identity: w-row (0,0,1|0)) - those are view-space/HUD draws, not the camera.
         if (fabsf(v.m[15]) < 1.0f && fabsf(v.m[12]) < 1e-3f && fabsf(v.m[13]) < 1e-3f) continue;
         if (v.count > top[0].count) { top[2] = top[1]; top[1] = top[0]; top[0] = v; }
@@ -1004,9 +1044,10 @@ static int mv_dispatch(command_list* cmd, resource depth, format depthFmt, uint3
 
 
 // Dynamic resolution: nearest-neighbor stretch of the sub-rect scene depth into the full-size R32 copy (g_depthFull).
-static void depth_stretch_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t fullW, uint32_t fullH, float kx, float ky, const float* origin, const float* rect, bool clearOutside, const float* keep)
+static void depth_stretch_dispatch(command_list* cmd, resource depth, format depthFmt, uint32_t fullW, uint32_t fullH, float kx, float ky, const float* origin, const float* rect, bool clearOutside, const float* keep, resource dst = { 0 }, resource_usage* dstState = nullptr)
 {
-    if (!g_mvReady || !g_stretchPso || !g_depthFull.handle) return;
+    if (!dst.handle) { dst = g_depthFull; dstState = &g_depthFullState; }
+    if (!g_mvReady || !g_stretchPso || !dst.handle) return;
     static ID3D12Resource* cbRes = nullptr; static uint8_t* cbPtr = nullptr; static uint32_t cbSlot = 0;
     if (!cbRes) {
         D3D12_HEAP_PROPERTIES hp = { D3D12_HEAP_TYPE_UPLOAD, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_MEMORY_POOL_UNKNOWN, 1, 1 };
@@ -1031,11 +1072,11 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
     g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(depth.handle), &srv, h1);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R32_FLOAT; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
-    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_depthFull.handle), nullptr, &uav, h2);
+    g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(dst.handle), nullptr, &uav, h2);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDummy = {}; uavDummy.Format = DXGI_FORMAT_R8_UNORM; uavDummy.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_CPU_DESCRIPTOR_HANDLE h3 = cpu; h3.ptr += 3 * inc;
     g_d3d->CreateUnorderedAccessView(g_dummyUav, nullptr, &uavDummy, h3);
-    if (g_depthFullState != resource_usage::unordered_access) { cmd->barrier(g_depthFull, g_depthFullState, resource_usage::unordered_access); g_depthFullState = resource_usage::unordered_access; }
+    if (*dstState != resource_usage::unordered_access) { cmd->barrier(dst, *dstState, resource_usage::unordered_access); *dstState = resource_usage::unordered_access; }
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     ID3D12DescriptorHeap* heaps[1] = { g_mvHeap };
     native->SetDescriptorHeaps(1, heaps);
@@ -1046,7 +1087,7 @@ static void depth_stretch_dispatch(command_list* cmd, resource depth, format dep
     D3D12_GPU_DESCRIPTOR_HANDLE gpuUav = gpu; gpuUav.ptr += 2 * inc;
     native->SetComputeRootDescriptorTable(2, gpuUav);
     native->Dispatch((fullW + 7) / 8, (fullH + 7) / 8, 1);
-    cmd->barrier(g_depthFull, resource_usage::unordered_access, resource_usage::shader_resource); g_depthFullState = resource_usage::shader_resource;
+    cmd->barrier(dst, resource_usage::unordered_access, resource_usage::shader_resource); *dstState = resource_usage::shader_resource;
     cbSlot++;
 }
 
@@ -1580,6 +1621,9 @@ static void release_dlss_resources(device* dev)
     if (g_mvRtv.handle) { dev->destroy_resource_view(g_mvRtv); g_mvRtv = { 0 }; }
     if (g_mv.handle) { dev->destroy_resource(g_mv); g_mv = { 0 }; }
     if (g_depthFull.handle) { dev->destroy_resource(g_depthFull); g_depthFull = { 0 }; }
+    if (g_feedMvRtv.handle) { dev->destroy_resource_view(g_feedMvRtv); g_feedMvRtv = { 0 }; }
+    if (g_feedMv.handle) { dev->destroy_resource(g_feedMv); g_feedMv = { 0 }; }
+    if (g_feedDepth.handle) { dev->destroy_resource(g_feedDepth); g_feedDepth = { 0 }; }
     if (g_out.handle) { dev->destroy_resource(g_out); g_out = { 0 }; }
     if (g_dynDsv.handle) { dev->destroy_resource_view(g_dynDsv); g_dynDsv = { 0 }; }
     if (g_dynDepth.handle) { dev->destroy_resource(g_dynDepth); g_dynDepth = { 0 }; }
@@ -1661,6 +1705,13 @@ static bool ensure_resources(device* dev, command_list* cmd, uint32_t w, uint32_
     dev->set_resource_name(g_mv, "MGS4DLSS motion vectors");
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r32_float, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource), nullptr, resource_usage::unordered_access, &g_depthFull)) { dev->set_resource_name(g_depthFull, "MGS4DLSS depth (full grid)"); g_depthFullState = resource_usage::unordered_access; }
     else logmsg("create full-grid depth texture failed (dynamic resolution will not be corrected)");
+    // the video call's caller feed: its depth copy and its objects' vectors (see g_feedLayoutRect)
+    if (dev->create_resource(resource_desc(w, h, 1, 1, format::r32_float, 1, memory_heap::default_, resource_usage::unordered_access | resource_usage::shader_resource), nullptr, resource_usage::unordered_access, &g_feedDepth)) { dev->set_resource_name(g_feedDepth, "MGS4DLSS caller feed depth"); g_feedDepthState = resource_usage::unordered_access; }
+    else logmsg("create caller-feed depth texture failed");
+    if (dev->create_resource(resource_desc(w, h, 1, 1, format::r16g16_float, 1, memory_heap::default_, resource_usage::render_target | resource_usage::shader_resource), nullptr, resource_usage::render_target, &g_feedMv)) {
+        dev->set_resource_name(g_feedMv, "MGS4DLSS caller feed motion vectors"); g_feedMvState = resource_usage::render_target;
+        if (!dev->create_resource_view(g_feedMv, resource_usage::render_target, resource_view_desc(format::r16g16_float), &g_feedMvRtv)) { logmsg("create caller-feed MV RTV failed"); g_feedMvRtv = { 0 }; }
+    } else logmsg("create caller-feed MV texture failed");
     dev->set_resource_name(g_out, "MGS4DLSS output");
     // Phase 2: private depth for replayed dynamic draws + the mask DLSS gets as bias-current-color
     if (dev->create_resource(resource_desc(w, h, 1, 1, format::r24_g8_typeless, 1, memory_heap::default_, resource_usage::depth_stencil | resource_usage::shader_resource),
@@ -1845,6 +1896,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     }
     // Camera-only motion vectors from this frame's depth (VP = majority block of this frame's scene draws).
     select_frame_vp();
+    select_window_vp();
     // Frozen screen: no 3D scene and the final texture holds a recycled image (the seed blit, a copy of the other final
     // texture, or no rewrite at all) that DLSS + NR already produced on a live frame. Pass it through untouched.
     // The world is frozen from the seed capture until the final texture receives a fresh scene write (the geometry
@@ -1895,8 +1947,22 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
                                : D3D12_VIEWPORT{ lay.x, lay.y, lay.width, lay.height, 0, 1 };   // the layout window (the whole image normally)
             float jitCur[2]; jitter_ndc(jitCur);
             const float prevSz[2] = { svp.Width, svp.Height };
+            // the video call: the caller feed's vectors in its rectangle, projected onto the screen through the monitor
+            const viewport* flv = feed_layout_now(); float feedRect[4] = {}; bool feedOn = false;
+            if (flv && g_feedMv.handle && g_feedMvRtv.handle && g_internalW && g_internalH) {
+                const float tx = float(cd.texture.width) / float(g_internalW), ty = float(cd.texture.height) / float(g_internalH);
+                feedRect[0] = flv->x * tx; feedRect[1] = flv->y * ty; feedRect[2] = flv->width * tx; feedRect[3] = flv->height * ty; feedOn = true;
+                if (g_feedMvState != resource_usage::render_target) { cmd->barrier(g_feedMv, g_feedMvState, resource_usage::render_target); g_feedMvState = resource_usage::render_target; }
+                const float zero[4] = { 0, 0, 0, 0 }; cmd->clear_render_target_view(g_feedMvRtv, zero);
+                const bool feedDepthOk = g_feedDepthFrame == g_frame && g_feedDepth.handle;
+                if (feedDepthOk && g_feedDepthState != resource_usage::shader_resource) { cmd->barrier(g_feedDepth, g_feedDepthState, resource_usage::shader_resource); g_feedDepthState = resource_usage::shader_resource; }
+                g_feedFrames++; if (objmv::stats().monitorCaptured) g_monitorFrames++;
+            }
             objmv::velocity(native, D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)g_mvRtv.handle }, haveDsv ? D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)itv->second.handle } : D3D12_CPU_DESCRIPTOR_HANDLE{ 0 }, cd.texture.width, cd.texture.height, svp, jitCur, g_prevJitNdc, prevSz,
-                            depthStretched ? reinterpret_cast<ID3D12Resource*>(g_depthFull.handle) : nullptr);
+                            depthStretched ? reinterpret_cast<ID3D12Resource*>(g_depthFull.handle) : nullptr,
+                            (feedOn && g_feedDepthFrame == g_frame) ? reinterpret_cast<ID3D12Resource*>(g_feedDepth.handle) : nullptr,
+                            feedOn ? D3D12_CPU_DESCRIPTOR_HANDLE{ (SIZE_T)g_feedMvRtv.handle } : D3D12_CPU_DESCRIPTOR_HANDLE{ 0 },
+                            feedOn ? reinterpret_cast<ID3D12Resource*>(g_feedMv.handle) : nullptr, feedOn ? feedRect : nullptr, g_cfgMonitorFlipV != 0, g_winCut);
             cmd->barrier(g_mv, resource_usage::render_target, resource_usage::shader_resource_non_pixel); g_mvState = resource_usage::shader_resource_non_pixel;
             if (!depthStretched) cmd->barrier(depth, resource_usage::depth_stencil_write, resource_usage::shader_resource_non_pixel);
             g_objMvFrames++;
@@ -2737,6 +2803,8 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                            && s.vp.width < s.rt_w - 1.0f && s.vp.x + s.vp.width <= s.rt_w + 1.0f && s.vp.y + s.vp.height <= s.rt_h + 1.0f) {
                     // a 3D window (Codec caller, pause-menu model): smaller than the frame or at an offset, blitted 1:1 to the final image
                     { uint32_t& n = g_winGeoDrawsPerRt[s.rt.handle]; if (++n > g_winGeoDraws) { g_winGeoDraws = n; g_winGeoRt = s.rt.handle; } }
+                    if (const viewport* fl = feed_layout_now()) if (vp_in_layout(s.vp, *fl)) { uint32_t& n = g_feedDrawsPerRt[s.rt.handle]; if (++n > g_feedGeoDraws) { g_feedGeoDraws = n; g_feedGeoRt = s.rt.handle; g_feedVpFrame = s.vp; g_feedVpFrameValid = true; } }
+                    if (const viewport* wlf = win_layout_now()) if (vp_in_layout(s.vp, *wlf)) { uint32_t& n = g_winFitDrawsPerRt[s.rt.handle]; if (++n > g_winFitDraws) { g_winFitDraws = n; g_winFitRt = s.rt.handle; g_winFitVp = s.vp; } }
                     auto& e = g_winVpHist[(uint64_t)(uint32_t)(s.vp.x + 0.5f) << 48 | (uint64_t)(uint32_t)(s.vp.y + 0.5f) << 32 | (uint32_t)(s.vp.width + 0.5f) << 16 | (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) e.second = s.vp;
                     if (!g_winVpFrameValid || e.first > g_winVpHist[(uint64_t)(uint32_t)(g_winVpFrame.x + 0.5f) << 48 | (uint64_t)(uint32_t)(g_winVpFrame.y + 0.5f) << 32 | (uint32_t)(g_winVpFrame.width + 0.5f) << 16 | (uint32_t)(g_winVpFrame.height + 0.5f)].first) { g_winVpFrame = e.second; g_winVpFrameValid = true; }
@@ -2773,11 +2841,28 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     const bool mainClass = !s.vp_valid || vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp);
                     const viewport* wl = mainClass ? nullptr : win_layout_now();
                     const bool winClass = !mainClass && wl && vp_in_layout(s.vp, *wl);
-                    const bool legacyWin = !mainClass && !winClass && !wl;
+                    const viewport* fl = (mainClass || winClass) ? nullptr : feed_layout_now();
+                    const bool feedClass = fl && vp_in_layout(s.vp, *fl) && g_feedMvRtv.handle && g_cfgMonitorProject;
+                    const bool legacyWin = !mainClass && !winClass && !feedClass && !wl;
                     D3D12_VIEWPORT own = { s.vp.x, s.vp.y, s.vp.width, s.vp.height, s.vp.min_depth, s.vp.max_depth };
                     if (winClass) own = D3D12_VIEWPORT{ wl->x, wl->y, wl->width, wl->height, 0.0f, 1.0f };
-                    if (mainClass || winClass || legacyWin) objmv::capture(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native()), key, s.pso, s.topology, oda, jittered, mainClass ? nullptr : &own, anchor, anchorN);
+                    if (feedClass) { const float tx = g_internalW ? float(g_dlssW) / float(g_internalW) : 1.0f, ty = g_internalH ? float(g_dlssH) / float(g_internalH) : 1.0f; own = D3D12_VIEWPORT{ fl->x * tx, fl->y * ty, fl->width * tx, fl->height * ty, 0.0f, 1.0f }; }
+                    if (mainClass || winClass || feedClass || legacyWin) objmv::capture(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native()), key, s.pso, s.topology, oda, jittered, mainClass ? nullptr : &own, anchor, anchorN, feedClass ? 2 : (winClass ? 1 : 0));
                     else g_objMvSkippedOther++;
+                }
+                // The in-world monitor showing the caller feed: a main-view draw sampling a texture that was copied from the
+                // final texture this frame. Captured with its texture coordinates for the projector pass (objmv view 3).
+                if (g_cfgMonitorProject && g_cfgObjectMV && objmv::ready() && !g_injectedThisFrame && s.ds.handle == g_lastDepth && s.pso && da.count >= 3 && !g_feedTexSet.empty() && s.table_set[1] && s.vp_valid
+                    && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp)) && feed_layout_now()) {
+                    bool monitor = false;
+                    for (int i = 0; i < 8 && !monitor; ++i) { resource r = resolve_descriptor(dev, s.tables[1], i); if (r.handle && g_feedTexSet.count(r.handle)) monitor = true; }
+                    if (monitor) {
+                        uint64_t key = 0x9E3779B97F4A7C15ull; const uint64_t parts[6] = { s.vb0.handle, s.vb0_off, s.ib.handle, s.ib_off, da.first, da.count }; for (uint64_t v : parts) { key ^= v; key *= 1099511628211ull; }
+                        objmv::DrawArgs oda = { da.indexed, da.count, da.instances, da.first, da.vertex_offset, da.first_instance };
+                        if (objmv::capture(reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native()), key, s.pso, s.topology, oda, false, nullptr, nullptr, 0, 3)) {
+                            static uint32_t nlog = 0; if (nlog++ < 4) logmsg("LAYOUT: monitor draw f%u captured with texture coordinates: %u vertices, pso %p, vp (%.0f,%.0f %.0fx%.0f)", g_frame, da.count, (void*)s.pso, s.vp.x, s.vp.y, s.vp.width, s.vp.height);
+                        }
+                    }
                 }
                 if (g_cfgDynMask && dynamic && g_dynDepth.handle && g_dynDsv.handle && s.ds.handle == g_lastDepth && da.count > 6 && !g_injectedThisFrame) {
                     t_reentrant = true;
@@ -2839,6 +2924,10 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         static bool once = false; if (!once) { once = true; logmsg("frozen frame: the seed blit into %s now samples the kept full-size DLSS frame (seed %p) at frame %u", desc_str(dev, s.rt).c_str(), (void*)g_keepSeed, g_frame); }
                     }
                 }
+            }
+            if (!depthOn && da.count <= 8 && s.table_set[1] && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1] && s.rt_w < g_dlssW && feed_layout_now()) {
+                resource r0 = resolve_descriptor(dev, s.tables[1], 0);
+                if (r0.handle && (r0.handle == g_finalRt[0] || r0.handle == g_finalRt[1] || r0.handle == g_finalSceneRt)) g_feedTexSet.insert(s.rt.handle);
             }
             if (g_layoutDumpFrames && !depthOn && da.count <= 8 && s.table_set[1] && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]) {
                 resource r0 = resolve_descriptor(dev, s.tables[1], 0);
@@ -2954,6 +3043,9 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                             const viewport* ml = layout_now();
                             if (!(ml && rects_overlap(R, *ml)) && (!g_winLayoutValid || g_winLayoutFrame != g_frame || R.width * R.height < g_winLayoutRect.width * g_winLayoutRect.height))
                                 for (auto& kv : g_winVpHist) if (kv.second.first >= 20 && vp_in_layout(kv.second.second, R)) { g_winLayoutRect = R; g_winLayoutVp = kv.second.second; g_winLayoutValid = true; g_winLayoutFrame = g_frame; break; }
+                            // the caller feed's: overlaps the main view's rectangle (drawn under it) and fits a window viewport
+                            if (ml && layout_is_window(*ml) && rects_overlap(R, *ml) && (!g_feedLayoutValid || g_feedLayoutFrame != g_frame))
+                                for (auto& kv : g_winVpHist) if (kv.second.first >= 20 && vp_in_layout(kv.second.second, R)) { g_feedLayoutRect = R; g_feedLayoutVp = kv.second.second; g_feedLayoutValid = true; g_feedLayoutFrame = g_frame; break; }
                         }
                         if (g_layoutDumpFrames) logmsg("   f%u scene write into %p: scissor (%d,%d %d,%d) vp=(%.0f,%.0f %.0fx%.0f) %u verts, samples %p (%s); scene vp %d (%.0f,%.0f %.0fx%.0f) -> %s", g_frame, (void*)s.rt.handle, s.sc_valid ? (int)s.sc.left : -1, s.sc_valid ? (int)s.sc.top : -1, s.sc_valid ? (int)s.sc.right : -1, s.sc_valid ? (int)s.sc.bottom : -1, s.vp.x, s.vp.y, s.vp.width, s.vp.height, da.count, (void*)slot0, desc_str(dev, resource{ slot0 }).c_str(), (int)g_sceneVpFrameValid, g_sceneVpFrame.x, g_sceneVpFrame.y, g_sceneVpFrame.width, g_sceneVpFrame.height, fits ? "fits" : "no");
                     }
@@ -3032,13 +3124,14 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             // started, and inserting on the window there left the scene itself raw for the frame (flicker + resets).
             // The camera window's depth, at the window's first reader (see g_winDepthRect): the window's rectangle in the
             // image is last frame's (its own scene write comes later in the frame), its viewport this frame's.
-            if (g_winGeoRt && g_winGeoDraws >= 20 && g_winVpFrameValid && g_winDepthFrame != g_frame && s.rt.handle != g_winGeoRt && is_live(g_winGeoRt)
+            if (g_winFitRt && g_winFitDraws >= 20 && g_winDepthFrame != g_frame && s.rt.handle != g_winFitRt && is_live(g_winFitRt)
                 && g_depthFull.handle && g_stretchPso && g_cfgDRS != 2 && g_cfgEnabled && !g_scaling && g_internalW && g_internalH && layout_now()) {
                 bool reads = false;
-                for (int p = 1; p < 5 && !reads; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_winGeoRt) { reads = true; break; } }
+                for (int p = 1; p < 5 && !reads; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_winFitRt) { reads = true; break; } }
                 if (reads) {
                     const viewport* wvpL = nullptr; const viewport* wl = win_layout_now(&wvpL);
-                    auto itDs = g_dsForRt.find(g_winGeoRt);
+                    auto itDs = g_dsForRt.find(g_winFitRt);
+                    const viewport& g_winVpFrame = g_winFitVp;   // the window's own draws' viewport this frame
                     if (wl && itDs != g_dsForRt.end() && is_live(itDs->second) && vp_in_layout(g_winVpFrame, *wl) && wl->width > 0 && wl->height > 0) {
                         const resource ds{ itDs->second }; const resource_desc dd = dev->get_resource_desc(ds);
                         if (dd.type == resource_type::texture_2d && dd.texture.width == g_dlssW && dd.texture.height == g_dlssH) {
@@ -3052,6 +3145,31 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                             restore_state(dev, cmd, s);
                             g_winDepthFrame = g_frame; memcpy(g_winDepthRect, wr, sizeof(wr)); g_winDepthCopies++;
                             static bool once = false; if (!once) { once = true; logmsg("LAYOUT: the camera window (%.0f,%.0f %.0fx%.0f), drawn at (%.0f,%.0f %.0fx%.0f), gets its depth copied to the full grid at its first reader (into %s) and its objects rasterized into it", wl->x, wl->y, wl->width, wl->height, g_winVpFrame.x, g_winVpFrame.y, g_winVpFrame.width, g_winVpFrame.height, desc_str(dev, s.rt).c_str()); }
+                        }
+                    }
+                }
+            }
+            // The caller feed's depth, at the feed's first reader (see g_feedLayoutRect), into g_feedDepth at the feed's rectangle.
+            if (g_feedGeoRt && g_feedGeoDraws >= 20 && g_feedVpFrameValid && g_feedDepthFrame != g_frame && s.rt.handle != g_feedGeoRt && is_live(g_feedGeoRt)
+                && g_feedDepth.handle && g_stretchPso && g_cfgDRS != 2 && g_cfgEnabled && !g_scaling && g_internalW && g_internalH && g_cfgObjectMV && g_cfgMonitorProject) {
+                bool reads = false;
+                for (int p = 1; p < 5 && !reads; ++p) if (s.table_set[p]) for (int i = 0; i < 8; ++i) { resource r = resolve_descriptor(dev, s.tables[p], i); if (r.handle == g_feedGeoRt) { reads = true; break; } }
+                if (reads) {
+                    const viewport* fl = feed_layout_now();
+                    auto itDs = g_dsForRt.find(g_feedGeoRt);
+                    if (fl && itDs != g_dsForRt.end() && is_live(itDs->second) && vp_in_layout(g_feedVpFrame, *fl) && fl->width > 0 && fl->height > 0) {
+                        const resource ds{ itDs->second }; const resource_desc dd = dev->get_resource_desc(ds);
+                        if (dd.type == resource_type::texture_2d && dd.texture.width == g_dlssW && dd.texture.height == g_dlssH) {
+                            const float tx = float(g_dlssW) / float(g_internalW), ty = float(g_dlssH) / float(g_internalH);
+                            const float fr[4] = { fl->x * tx, fl->y * ty, fl->width * tx, fl->height * ty };
+                            const float kfx = g_feedVpFrame.width / fl->width, kfy = g_feedVpFrame.height / fl->height;
+                            const float fo[2] = { g_feedVpFrame.x * tx - fr[0] * kfx, g_feedVpFrame.y * ty - fr[1] * kfy };
+                            cmd->barrier(ds, resource_usage::depth_stencil_write, resource_usage::shader_resource_non_pixel);
+                            depth_stretch_dispatch(cmd, ds, dd.texture.format, g_dlssW, g_dlssH, kfx, kfy, fo, fr, true, nullptr, g_feedDepth, &g_feedDepthState);
+                            cmd->barrier(ds, resource_usage::shader_resource_non_pixel, resource_usage::depth_stencil_write);
+                            restore_state(dev, cmd, s);
+                            g_feedDepthFrame = g_frame; g_feedDepthCopies++;
+                            static bool once = false; if (!once) { once = true; logmsg("LAYOUT: the caller feed (%.0f,%.0f %.0fx%.0f), drawn at (%.0f,%.0f %.0fx%.0f) into %p, gets its depth copied at its first reader; its objects' vectors go to the feed texture and reach the screen through the monitor", fl->x, fl->y, fl->width, fl->height, g_feedVpFrame.x, g_feedVpFrame.y, g_feedVpFrame.width, g_feedVpFrame.height, (void*)g_feedGeoRt); }
                         }
                     }
                 }
@@ -3201,6 +3319,8 @@ static void reload_config()
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
+    g_cfgMonitorFlipV = GetPrivateProfileIntA("DLSS", "MonitorFlipV", 0, g_iniPath);
+    g_cfgMonitorProject = GetPrivateProfileIntA("DLSS", "MonitorProject", 0, g_iniPath);
     g_cfgFrozenBg = GetPrivateProfileIntA("DLSS", "FrozenBackground", 1, g_iniPath);
     g_cfgTraceFreeze = GetPrivateProfileIntA("DLSS", "TraceFreeze", 0, g_iniPath);
     g_cfgFileTrace = GetPrivateProfileIntA("DLSS", "FileTrace", 0, g_iniPath);
@@ -3227,6 +3347,8 @@ static void reload_config()
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
     g_cfgWindowScene = GetPrivateProfileIntA("DLSS", "WindowScene", 1, g_iniPath);
+    g_cfgMonitorFlipV = GetPrivateProfileIntA("DLSS", "MonitorFlipV", 0, g_iniPath);
+    g_cfgMonitorProject = GetPrivateProfileIntA("DLSS", "MonitorProject", 0, g_iniPath);
     g_cfgDynMaskProps = GetPrivateProfileIntA("DLSS", "DynamicMaskProps", 0, g_iniPath);
     g_cfgDynZeroMV = GetPrivateProfileIntA("DLSS", "DynamicZeroMV", 0, g_iniPath);
     {
@@ -3361,6 +3483,9 @@ static void frame_rollover()
     // the layout rectangle seen at this frame's scene write serves the next frame's scene draws (jitter) until its own
     if (g_layoutValid && g_layoutFrame == g_frame - 1) { g_layoutLast = g_layoutRect; g_layoutLastValid = true; }
     if (g_winLayoutValid && g_winLayoutFrame == g_frame - 1) { g_winLayoutLast = g_winLayoutRect; g_winLayoutLastVp = g_winLayoutVp; g_winLayoutLastValid = true; g_winLayoutLastFrame = g_frame - 1; }
+    if (g_feedLayoutValid && g_feedLayoutFrame == g_frame - 1) { g_feedLayoutLast = g_feedLayoutRect; g_feedLayoutLastVp = g_feedLayoutVp; g_feedLayoutLastValid = true; g_feedLayoutLastFrame = g_frame - 1; }
+    g_feedDrawsPerRt.clear(); g_feedGeoRt = 0; g_feedGeoDraws = 0; g_feedVpFrameValid = false; g_feedTexSet.clear();
+    g_winFitDrawsPerRt.clear(); g_winFitRt = 0; g_winFitDraws = 0;
     if (g_layoutDumpFrames) {   // diagnostics after a layout change: the frame's viewport candidates and targets
         g_layoutDumpFrames--; std::string t; char b[128];
         for (auto& kv : g_vpHist) { snprintf(b, sizeof b, " scene(%.0f,%.0f %.0fx%.0f)x%u", kv.second.second.x, kv.second.second.y, kv.second.second.width, kv.second.second.height, kv.second.first); t += b; }
@@ -3397,7 +3522,8 @@ static void frame_rollover()
         logmsg("   dynamic draws replayed last frame: %u (skinned %u; mask %s, zero-MV %s); pre-HUD missed frames %u; final RTs %p/%p; 3D target %p (%u depth-bound draws); PSOs known %zu", g_dynDrawsLastFrame, g_skinnedDrawsLast, g_cfgDynMask ? "on" : "off", g_cfgDynZeroMV ? "on" : "off", g_ppMissFrames, (void*)g_finalRt[0], (void*)g_finalRt[1], (void*)g_geoRt, g_geoDrawsLast, g_psoDepth.size());
         logmsg("   scene viewport (last dynamic draw): %s (%.0f,%.0f %.0fx%.0f) in %ux%u targets", g_sceneVpValid ? "" : "unknown", g_sceneVp.x, g_sceneVp.y, g_sceneVp.width, g_sceneVp.height, g_dlssW, g_dlssH);
         if (const viewport* lw = layout_window()) logmsg("   layout window: the scene occupies (%.0f,%.0f %.0fx%.0f) of the image (mission briefing); %u evaluations in a window so far, 3D target re-picked in %u frames, object captures skipped (other views) %u", lw->x, lw->y, lw->width, lw->height, g_layoutFrames, g_geoRepicks, g_objMvSkippedOther);
-        { const viewport* wvp = nullptr; const viewport* wl = win_layout_now(&wvp); if (wl && wvp) logmsg("   camera window: (%.0f,%.0f %.0fx%.0f) of the image, drawn at (%.0f,%.0f %.0fx%.0f); depth copied at its first reader in %u frames", wl->x, wl->y, wl->width, wl->height, wvp->x, wvp->y, wvp->width, wvp->height, g_winDepthCopies); }
+        { const viewport* wvp = nullptr; const viewport* wl = win_layout_now(&wvp); if (wl && wvp) logmsg("   camera window: (%.0f,%.0f %.0fx%.0f) of the image, drawn at (%.0f,%.0f %.0fx%.0f); depth copied at its first reader in %u frames; camera cuts %u", wl->x, wl->y, wl->width, wl->height, wvp->x, wvp->y, wvp->width, wvp->height, g_winDepthCopies, g_winCuts); }
+        { const viewport* fvp = nullptr; const viewport* fl = feed_layout_now(&fvp); const objmv::Stats& os = objmv::stats(); if (fl && fvp) logmsg("   caller feed: (%.0f,%.0f %.0fx%.0f) of the image, drawn at (%.0f,%.0f %.0fx%.0f) into %p; depth copies %u, feed frames %u, frames with a monitor capture %u, monitor draws projected %u (last frame: feed captures %u, monitor captures %u); %s", fl->x, fl->y, fl->width, fl->height, fvp->x, fvp->y, fvp->width, fvp->height, (void*)g_feedGeoRt, g_feedDepthCopies, g_feedFrames, g_monitorFrames, os.monitorDrawn, os.feedCaptured, os.monitorCaptured, os.monitorInfo); }
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model)", g_windowInjections);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
@@ -3410,6 +3536,7 @@ static void frame_rollover()
     memset(g_jitStat, 0, sizeof(g_jitStat));
     if (!g_haveFrameVP) select_frame_vp();
     if (g_haveFrameVP) { memcpy(g_prevVP, g_frameVP, 64); g_havePrevVP = true; memcpy(g_lastGoodVP, g_frameVP, 64); g_haveLastGoodVP = true; }
+    if (g_haveWinVP) { memcpy(g_winVPPrev, g_winVP, 64); g_haveWinVPPrev = true; } else g_haveWinVPPrev = false;
     g_haveFrameVP = false; g_vpVotes.clear(); g_patchedRegions.clear(); g_patchedDraws = 0; g_matrixMisses = 0;
     jitter_ndc(g_prevJitNdc);   // this frame's offsets become 'previous' for the next velocity pass
     advance_jitter();
