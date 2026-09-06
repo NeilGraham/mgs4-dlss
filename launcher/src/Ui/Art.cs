@@ -187,10 +187,11 @@ namespace Mgs4Launcher
                 artBand.Height = band;
                 artBand.OpacityMask = Fade(h / band);
                 if (aspect <= 0) return;
-                // Snake's face fills the band's height and, hair and all, is about a quarter wider than it is
-                // tall, so the band's height and a quarter clears it whatever the art's own width. Steam's key
-                // art, the fallback, cuts the face tighter and gets a little more room than it needs.
-                double push = band * 1.25;                   // clear of the face, over the shoulder
+                // The banner is cut bandana to chin, so Snake's face fills the band's height and is a shade wider
+                // than it is tall, with the hair fading to black past that; the band's height and a bit clears
+                // the face whatever the art's own width, and the logo lands on the fade. Steam's key art, the
+                // fallback, frames the face the same way.
+                double push = band * 1.15;                   // clear of the face, over the shoulder
                 double lift = (h - Caption) * 0.12;          // a little above the center line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);

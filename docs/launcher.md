@@ -37,9 +37,9 @@ powershell -ExecutionPolicy Bypass -File launcher\build.ps1 -Release     :: the 
 **One file, everything in it.** The exe carries its XAML, the scene table, the thumbnails, the header banner and
 the install file list as resources, and - once `dlss-addon\build.bat` has run - `mgs4_dlss.addon64` and
 `mgs4_dlss.ini` too, so a copy carried off on its own can do the whole install. A file on disk wins over the
-built-in copy whenever it is there
-(`tools\scenes.csv`, `build\mgs4_dlss.addon64`, ...), so editing or rebuilding in a checkout changes what the app
-uses without rebuilding the app. A lone exe also keeps its `config.ini` and its `work\` folder under
+built-in copy whenever it is there (`tools\scenes.csv`, `build\mgs4_dlss.addon64`, ...), so editing or rebuilding
+in a checkout changes what the app uses without rebuilding the app. A lone exe also keeps its `config.ini` and its
+`work\` folder under
 `%LOCALAPPDATA%\mgs4-dlss-launcher` rather than beside itself; in a checkout they stay in the repo root, where every
 script reads them, and a `config.ini` already next to the exe is used wherever it is.
 
@@ -308,7 +308,7 @@ unattended; every step is resumable or re-runnable.
 | `tools\verify_detection.py --cases` | re-derives every kind, merge and order verdict from the recordings alone (`.mkv` frames through the classifier and the OCR, the add-on log for the demo / environment / video) and prints the evidence beside each one. The cases are the ones a review found wrong; keep it green before editing `scene_names.json`. |
 | `tools\pick_thumbs.py` | the frame each scene is shown by, chosen by eye from its contact sheets and kept as a **timestamp** in `tools\scene_thumbs.json` (`offset` seconds into the scene, plus a few words on why). `--brief 1 out.md` lists every sheet of an act for the picker, `--merge` folds the answers in, `--apply` cuts each picked frame out of its recording at 1280 wide into `<MGS4_OUT>\sweep\thumbs\`. A pick survives a re-recording because the offset is measured from the scene's own start. |
 | `tools\make_thumbs.py` | writes one frame per recorded scene to `tools\thumbs\<id>.jpg` (960x540, q74, ~47 KB each) - the picked frame when there is one, else the sweep's ~18 s still. Individual files so a re-pick changes one file in git; `launcher\build.ps1` zips the folder into the exe at build time, and the launcher decodes at the detail pane's physical width (960 on a 4K screen at 200%) rather than the logical one. |
-| `tools\make_banner.py` | the banner behind the header, `toolsrtanner.jpg`: the title screen's Snake (`@collection`, at its thumbnail's pick) cut from the recording at the game's own 4K, cropped to the face and the smoke - the logo and the copyright line fall outside the crop - and scaled to 2560 wide |
+| `tools\make_banner.py` | the banner behind the header, `toolsrtanner.jpg`: the title screen's Snake (`@collection`, at its thumbnail's pick) cut from the recording at the game's own 4K, cropped close round the face, bandana to chin - the logo and the copyright line fall outside the crop - with its right-hand quarter faded to black, and scaled to 2100 wide |
 | `tools\apply_sweep.py` | folds `stage_probe.csv`, `scene_kinds.json`, `scene_hud.json`, the locations and the written `tools\scene_names.json` into `tools\scene_info.json`, which is what the launcher reads. The kind is measured (`measured_kind`: Codec screen > boss bar > 400-series demo = video > item card > environment-at-boot = gameplay > the sweep's live reading) and so is the story order inside a stage (`story_order`: cutscenes by demo number, a playable entry right after the cutscene that hands over into the environment it boots into; the launcher sorts on `order`). Run `scene_identity.py --apply` after it, so an alias row is only ever `sameAs`. |
 
 **How the classifier decides**, and why it is these three signals:
