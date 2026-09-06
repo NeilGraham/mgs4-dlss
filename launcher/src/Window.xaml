@@ -520,13 +520,13 @@
         </Setter.Value>
       </Setter>
     </Style>
-    <!-- The same line stood on end, for the deck's volume: it takes the deck's height and a thumb's width, so the
-         bottom bar's right-hand column keeps it clear of the tab's buttons at any window width. The filled part
-         is the lower one, the level rising from the bottom. -->
+    <!-- The same line stood on end, for the deck's volume: with the speaker under it the pair takes the deck's
+         height and a thumb's width, so the bottom bar's right-hand column keeps clear of the tab's buttons at any
+         window width. The filled part is the lower one, the level rising from the bottom. -->
     <Style x:Key="ScrubV" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
       <Setter Property="Orientation" Value="Vertical"/>
       <Setter Property="Width" Value="16"/>
-      <Setter Property="Height" Value="48"/>
+      <Setter Property="Height" Value="34"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Slider">

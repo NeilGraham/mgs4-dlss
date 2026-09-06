@@ -179,24 +179,27 @@ namespace Mgs4Launcher
             // Mute is a click on the speaker; the slider beside it is the volume, and it writes MGS4_MUSIC_VOLUME
             // for itself a moment after it stops moving. Mute writes nothing: it is for this sitting. The pair
             // goes in the bottom bar's right-hand column, hard against the deck's edge, so it reads as the deck's
-            // and leaves the deck centred. The slider stands on end, the deck's height and a thumb wide: laid
-            // flat it was the one thing in that column with a width of its own, and at the window's minimum
-            // width it ran into the tab's buttons on the column's far side.
+            // and leaves the deck centred. The slider stands on end with the speaker under it, the two together
+            // the deck's height and a thumb wide: laid flat the slider was the one thing in that column with a
+            // width of its own, and at the window's minimum width it ran into the tab's buttons on the column's
+            // far side.
             _muteBtn = DeckButton(GlyphVol2, 12, "Mute", (s, e) => ToggleMute(), deck);
+            _muteBtn.Padding = new Thickness(8, 2, 8, 0);
+            _muteBtn.HorizontalAlignment = HorizontalAlignment.Center;
             _volume = new Slider
             {
                 Style = (Style)Win.FindResource("ScrubV"), Minimum = 0, Maximum = 100,
-                VerticalAlignment = VerticalAlignment.Center, ToolTip = "Music volume - written to config.ini as you set it",
+                HorizontalAlignment = HorizontalAlignment.Center, ToolTip = "Music volume - written to config.ini as you set it",
             };
             _volume.ValueChanged += (s, e) => { if (!_volumeSyncing) VolumeMoved(_volume.Value); };
             _volumeBox = new StackPanel
             {
-                Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left,
+                Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0),
                 Visibility = Visibility.Collapsed,
             };
-            _volumeBox.Children.Add(_muteBtn);
             _volumeBox.Children.Add(_volume);
+            _volumeBox.Children.Add(_muteBtn);
             var bar = _transport.Parent as Grid;
             if (bar != null) { Grid.SetColumn(_volumeBox, 2); bar.Children.Add(_volumeBox); }
 
