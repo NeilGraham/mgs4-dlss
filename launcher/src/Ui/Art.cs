@@ -145,7 +145,7 @@ namespace Mgs4Launcher
         // how far up it is lifted (the top of the bandana leaves, the mouth arrives), and the gap from the left.
         const double ArtScale = 1.12;
         const double ArtLift = 0.20;
-        const double ArtInset = 0.14;
+        const double ArtInset = 0;      // hard against the window's edge: any gap reads as the picture's own edge
 
         public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText, Panel navTabs,
                                        System.Windows.Shapes.Rectangle heroArt, Border headerBar, Grid artBand)
@@ -222,8 +222,10 @@ namespace Mgs4Launcher
         static Brush Fade(double solidTo)
         {
             var g = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+            // Three stops rather than two on the way out, so the roll-off eases in instead of starting on a line.
             g.GradientStops.Add(new GradientStop(Colors.White, 0));
-            g.GradientStops.Add(new GradientStop(Colors.White, solidTo * 0.88));
+            g.GradientStops.Add(new GradientStop(Colors.White, solidTo * 0.72));
+            g.GradientStops.Add(new GradientStop(Color.FromArgb(200, 255, 255, 255), solidTo * 0.72 + (1 - solidTo * 0.72) * 0.35));
             g.GradientStops.Add(new GradientStop(Color.FromArgb(0, 255, 255, 255), 1));
             g.Freeze();
             return g;

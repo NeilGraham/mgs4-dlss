@@ -28,7 +28,7 @@ SCENE = "@collection"
 CROP = (650, 300, 2750, 2160)        # left, top, right, bottom in the 3840x2160 frame: bandana down, cheek to hair
 COPYRIGHT = (0, 1950, 1200, 2160)    # the copyright line and the version, bottom-left, on black
 FADE_FROM = 0.78                     # the right-hand edge goes to black from here, as a fraction of the crop's width
-FADE_BOTTOM = 0.86                   # and the foot from here, as a fraction of its height
+FADE_BOTTOM = 0.70                   # and the foot from here, as a fraction of its height - long, under the band's own
 OUT = os.path.join(HERE, "art", "banner.jpg")
 
 
@@ -43,7 +43,8 @@ def fade_edges(im, right_from, bottom_from):
     y0 = int(h * bottom_from)
     for y in range(y0, h):
         t = (y - y0) / float(h - y0)
-        row = mask.crop((0, y, w, y + 1)).point(lambda v, k=(1 - t) ** 1.5: int(v * k))
+        k = 1 - t * t * (3 - 2 * t)                          # smoothstep: no corner where the fade begins
+        row = mask.crop((0, y, w, y + 1)).point(lambda v, k=k: int(v * k))
         mask.paste(row, (0, y))
     return Image.composite(im, Image.new("RGB", (w, h), (0, 0, 0)), mask)
 
