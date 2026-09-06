@@ -114,21 +114,45 @@ which is the one case where a tool that needs the game folder still has to be us
 
 The whole window works from a pad. An Xbox pad, or anything that arrives as one (Steam Input, DS4Windows, the
 virtual pad a Sunshine/Moonlight stream makes), is read through XInput; a DualSense or DualShock 4 plugged straight
-in, over USB or Bluetooth, is read as raw HID (`Gamepad.cs`). The moment one is seen, a guide appears in the bottom
-bar saying what the buttons do on the tab that is up, in the pad's own names - A / START on an Xbox pad, ✕ / OPTIONS
-on a Sony one - and it goes when the pad does. Only the **active** window listens: with the game in front the
-presses are the game's.
+in, over USB or Bluetooth, is read as raw HID (`Gamepad.cs`). The moment one is seen, the buttons' names appear
+beside the things they do, in the pad's own names, and go when the pad does: ☰ on **Launch**, **Save settings** and
+**Re-check**; LB and RB (L1 and R1) either side of the tabs, each only while there is a tab in that direction; the
+Play tab's view button wears VIEW / CREATE; △ (Y) sits at the head of the filter chips; and the playlist editor's own
+buttons carry ✕ / □ / △ / ○. There is no legend for the d-pad, A or B - those do what they do everywhere. Only the
+**active** window listens: with the game in front the presses are the game's.
 
 The bumpers and triggers step between the tabs. On **Play, all scenes** the left stick scrolls the list and the
-d-pad steps the pick; when the pick has been scrolled off screen, Down takes the first row on screen and Up the
-last. Right (or A) crosses into the run options, where the right stick scrolls, Up and Down walk the boxes, A ticks
-one, and Left (or B) comes back. Y goes to the filter chips: Left and Right walk them, A toggles, Y or B leaves.
-Start launches whatever is picked, from anywhere; Select flips to **Start Options**, where Left and Right pick a
-card, Down reaches the one checkbox, and Select comes back. On **Settings** and **Setup** the right stick scrolls,
-Up and Down walk the rows with the same off-screen rule, A presses a row's button or ticks its box, Left and Right
-(or the left stick) step a choice or nudge a slider, and Start is Save or Re-check. The numbers with a known range -
-volume, sharpness, target fps, display index, trace frames - are sliders for exactly this reason, with the number
-in a box beside them that still takes typing.
+d-pad steps the pick - through the act headers as well as the scenes, so on a header A (or Right) opens or shuts the
+act the way a click on it does. When the pick has been scrolled off screen, Down takes the first row on screen and
+Up the last. On a scene, Right (or A) crosses into the run options, where the right stick scrolls, Up and Down walk
+the boxes, A ticks one, and Left (or B) comes back. Y goes to the filter chips: Left and Right walk them, A toggles,
+Y or B leaves. Start launches whatever is picked, from anywhere, and so does A on the Launch button itself, which
+the option walk reaches at its foot; Select flips to **Start Options**, where Left and Right pick a card, Down
+reaches the row under them - the checkbox and the three buttons, Launch among them, walked with Left and Right and
+pressed with A - and Select comes back. On **Settings** and **Setup** the right
+stick scrolls, Up and Down walk the rows with the same off-screen rule, A presses a row's button or ticks its box,
+Left and Right (or the left stick) step a choice or nudge a slider, and Start is Save or Re-check. The numbers with
+a known range - volume, sharpness, target fps, display index, trace frames - are sliders for exactly this reason,
+with the number in a box beside them that still takes typing.
+
+Holding a direction walks the rows at thirteen a second. The off-screen rule is judged against where the page is
+*going* when a glide is still carrying it, not against the drawn offset: a held Down steps faster than the glide
+lands, and judged against the drawn offset the row it had just moved to read as off the bottom, so every second
+press snapped back to the top of the screen.
+
+**The game's state** sits in the bottom-left corner, under the status line: a grey **Not running**, an amber
+**Launching** from the moment Launch is pressed until any of the game's programs is seen (it lapses on its own
+after a minute and a half if nothing appears), and a green **Running** - or **Master Collection running** / **MGS1
+running**, since the collection's front-end and the bundled MGS1 are watched for as well as `mgs4.exe`. The music
+reads the same thing: it stays down through a launch and while any of the three is up, rather than coming back for
+the seconds a boot takes and being cut off again.
+
+**Steam first.** `mgs4.exe` is a Steam build: started with no Steam client running it hands itself back to Steam,
+which asks about the custom arguments and then launches the collection's front-end *without* them - the scene that
+was picked is lost and the collection menu comes up instead. So a launch that finds no Steam signed in starts it
+(`steam.exe -silent`, from the registry) and waits for it to sign in, up to a minute and a half, before the game is
+started; the status line says so, and `logs\launcher.log` has the timing. `steam_appid.txt` still matters: it is
+what keeps a *running* Steam from relaunching the exe.
 
 ## Play
 
@@ -370,8 +394,9 @@ rest matters. Each card names the file - or files - its rows are written to.
 
 The window can play the game's own soundtrack while it is open. **None**, **Shuffle**, or one of the tracks the
 install actually has — the list is read off disk when the form is built, so it is that machine's answer rather than
-a list written here. It stops the moment a run starts and comes back when the game is gone: the game gets the
-speakers to itself.
+a list written here. It goes down the moment Launch is pressed and comes back when the game is gone - the game,
+the Master Collection front-end or the bundled MGS1, whichever of them has the screen: the game gets the speakers
+to itself.
 
 **The menu's own music is not on the iPod.** The named banks are the iPod's playlist; the game's score is filed
 as `bgm_*` cues, and its cutscene music under `ww\bank\default`. Two of those are put on the list by name
@@ -382,7 +407,17 @@ as `bgm_*` cues, and its cutscene music under `ww\bank\default`. Two of those ar
 iTunes draws its own, and under those a scrubber with the time either side - drag it or click along it to seek.
 A single picked track loops and gets pause alone; the queued modes get back and next as well. Back within three
 seconds of a track starting goes to the one before it, later than that to the top of the one playing, and at the
-head of a queue with nowhere to go it is greyed out.
+head of a queue with nowhere to go it is greyed out. Off the deck's right-hand edge - in the bar's own right-hand
+column, so the deck stays on the window's centre line - are a speaker and a volume slider: the slider is
+`MGS4_MUSIC_VOLUME` and writes itself to `config.ini` a moment after it stops moving (the Settings form's own row
+follows), while the speaker mutes for this sitting and writes nothing - the slider keeps its place under it, and
+moving the slider unmutes.
+
+**Nothing cuts.** A change of track is a crossfade, the one leaving going out under the one arriving over a second
+and a half; a track starting over silence fades in; a stop - the game taking the speakers - is a short fade; pause,
+mute and the volume ride a quarter-second ramp. Saving the Settings form leaves the track exactly where it was
+unless the *mode* changed: a new volume is picked up by the ramp, and a new mode that still holds the track playing
+carries on from it (a fresh Shuffle deal is cut with that track at its head) rather than cutting to another.
 
 **Shuffle** (`MGS4_MUSIC=shuffle`; a `config.ini` still saying `random` means the same) is the iPod on the Nomad:
 the whole list dealt into a random order once, walked to its end before a fresh deal is cut, and the first card of

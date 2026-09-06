@@ -37,6 +37,16 @@ namespace Mgs4Launcher
         // file is what matters, not a label.
         bool _gameUp;
         bool _pollBusy;
+        // The wider answer from the same poll: which of the game's programs has the screen - mgs4.exe, the bundled
+        // MGS1, or the Master Collection front-end - or null for none. The music and the status pill read this;
+        // Save reads _gameUp, because only mgs4.exe owns the ini files.
+        string _gameActivity;
+        // When Launch was last pressed. Between then and the game being seen the window is "launching": the
+        // music stays down and the pill says so, rather than the music coming back for the seconds Steam and the
+        // boot take and being cut off again when the process appears.
+        DateTime _launchedAt = DateTime.MinValue;
+        const double LaunchGraceSeconds = 90;
+        bool _padWired;
         // The primary way in, until the preferences file says which scene was picked last.
         string _pickedId = "@main";
         // Scene ids the user has starred. Kept in the preferences file next to everything else the window
@@ -52,7 +62,9 @@ namespace Mgs4Launcher
         // Named controls from the XAML, by the names the PowerShell app used.
         Border _headerBar, _lockBanner;
         TextBlock _titleText, _status, _lockText, _pickTitle, _pickSub, _pickWarn,
-                  _mashNote, _searchHint, _startAdvanceNote, _veilTitle, _veilBody;
+                  _mashNote, _searchHint, _startAdvanceNote, _veilTitle, _veilBody, _gameStateText;
+        Border _gameStateTag, _navPrevHint, _navNextHint;
+        System.Windows.Shapes.Ellipse _gameStateDot;
         Image _logoArt;
         System.Windows.Shapes.Rectangle _pickShot;
         Border _pickShotBox;
@@ -149,7 +161,7 @@ namespace Mgs4Launcher
             // anything that costs a third of a second is started for it.
             Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
                                        new Action(ApplyMusic));
-            Win.Closing += (s, e) => { StopMusic(); SavePrefs(); };
+            Win.Closing += (s, e) => { StopMusic(false); SavePrefs(); };
         }
 
         // The menu WPF puts up when a text box is right-clicked is built by WPF itself and lives in a popup of its
@@ -273,7 +285,11 @@ namespace Mgs4Launcher
             _stopBtn = (Button)f("StopBtn");
             _shortcutBtn = (Button)f("ShortcutBtn");
             _status = (TextBlock)f("Status");
-            _padGuide = (WrapPanel)f("PadGuide");
+            _gameStateTag = (Border)f("GameStateTag");
+            _gameStateDot = (System.Windows.Shapes.Ellipse)f("GameStateDot");
+            _gameStateText = (TextBlock)f("GameStateText");
+            _navPrevHint = (Border)f("NavPrevHint");
+            _navNextHint = (Border)f("NavNextHint");
             _pickScroll = (ScrollViewer)f("PickScroll");
             _startScroll = (ScrollViewer)f("StartScroll");
             _lockBanner = (Border)f("LockBanner");
@@ -380,23 +396,39 @@ namespace Mgs4Launcher
             if (tab == "install") ShowSetup();
             else if (tab == "settings") ShowSettings();
             RefreshState();
-            if (_padGuide != null) EnterTab();
+            if (_padWired) EnterTab();
         }
+
+        // The three things the pill can say. Launching is the stretch between Launch being pressed and any of the
+        // game's programs being seen - Steam coming up, the boot - and it lapses on its own if nothing appears.
+        bool RunnerBusy() { return _runProc != null && !_runProc.HasExited; }
+
+        bool Launching()
+        {
+            if (_gameActivity != null) return false;
+            if (RunnerBusy()) return true;
+            return _launchedAt != DateTime.MinValue && (DateTime.Now - _launchedAt).TotalSeconds < LaunchGraceSeconds;
+        }
+
+        /// <summary>The game has the screen, or is about to: the music stays down and the pill is not grey.</summary>
+        bool GameBusy() { return _gameActivity != null || Launching(); }
 
         // Everything that depends on whether the game is up: what the window cannot infer, it polls for. Driven by
         // a timer rather than by tab switches alone - the game can start or stop while the window sits there, and
         // it did, which left Close the game pressable with nothing to close. The header used to carry a
-        // idle/running/driving badge as well; it said what Close the game and the Settings banner already say.
+        // idle/running/driving badge as well; the pill in the bottom bar is its successor, next to the status
+        // line, small enough to be glanced at rather than read.
         void RefreshState()
         {
             bool running = _gameUp;
-            bool busy = _runProc != null && !_runProc.HasExited;
+            bool busy = RunnerBusy();
 
-            _stopBtn.IsEnabled = _startStopBtn.IsEnabled = running || busy;
+            _stopBtn.IsEnabled = _startStopBtn.IsEnabled = _gameActivity != null || busy;
             UpdateSaveButton();
+            PaintGameState();
             // The game gets the speakers to itself, and gets them back when it goes. Cheap either way: this
             // returns at once when what is playing is already what should be.
-            ApplyMusic();     // enabled only while there is an edit to write, and the game is not running
+            ApplyMusic();
 
             if (_settingsView.Visibility == Visibility.Visible)
             {
@@ -430,17 +462,57 @@ namespace Mgs4Launcher
         {
             if (_pollBusy) return;
             _pollBusy = true;
+            string dir = _gameDir;
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                bool up;
-                try { up = Checks.GameRunning(); } catch { up = false; }
+                string activity;
+                try { activity = Runner.GameActivity(dir); } catch { activity = null; }
                 Win.Dispatcher.BeginInvoke(new Action(delegate
                 {
                     _pollBusy = false;
-                    _gameUp = up;
+                    _gameActivity = activity;
+                    _gameUp = activity == "MGS4";
+                    // Seen: the launch is over, whichever way it went. A runner that gave up (the exe was not
+                    // there, no window came) ends it too, rather than the pill saying Launching for a minute.
+                    if (activity != null) _launchedAt = DateTime.MinValue;
+                    else if (_runProc != null && _runProc.HasExited && _runProc.ExitCode != 0) _launchedAt = DateTime.MinValue;
                     RefreshState();
                 }));
             });
+        }
+
+        // The pill in the bottom bar. Grey, amber, green: the same three the Setup verdict and the speed tags use,
+        // so it reads at the size it is drawn at.
+        void PaintGameState()
+        {
+            if (_gameStateTag == null) return;
+            string text, dot, back, edge, tip;
+            if (_gameActivity != null)
+            {
+                text = _gameActivity == "MGS4" ? "Running" : _gameActivity + " running";
+                dot = "#62C98A"; back = "#142117"; edge = "#2E6B45";
+                tip = _gameActivity == "MGS4" ? "mgs4.exe is running"
+                    : _gameActivity == "MGS1" ? "The bundled MGS1 (mgs1.exe) is running"
+                    : "The Master Collection front-end is up; MGS4 starts from it";
+            }
+            else if (Launching())
+            {
+                text = "Launching"; dot = "#F2C14E"; back = "#2A2312"; edge = "#7A6220";
+                tip = "Launch was pressed; waiting for the game to appear (Steam is started first if it is not running)";
+            }
+            else
+            {
+                text = "Not running"; dot = "#6E6E77"; back = "#1C1C20"; edge = "#3A3A44";
+                tip = "mgs4.exe is not running";
+            }
+            if (_gameStateText.Text != text)
+            {
+                _gameStateText.Text = text;
+                _gameStateDot.Fill = Widgets.Brush(dot);
+                _gameStateTag.Background = Widgets.Brush(back);
+                _gameStateTag.BorderBrush = Widgets.Brush(edge);
+                _gameStateTag.ToolTip = tip;
+            }
         }
 
         public void Say(string text)

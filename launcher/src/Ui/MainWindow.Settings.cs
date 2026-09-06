@@ -456,6 +456,7 @@ namespace Mgs4Launcher
         void SaveSettings()
         {
             if (Checks.GameRunning()) { Say("close the game first - it owns both of these while it runs"); return; }
+            string musicWas = MusicSetting();     // so a save that did not touch the mode leaves the track alone
             var written = new List<string>();
             foreach (IniSource source in new[] { IniSource.Addon, IniSource.Game, IniSource.Launcher, IniSource.Renodx })
             {
@@ -487,8 +488,7 @@ namespace Mgs4Launcher
             Paths.ForgetConfig();
             ApplyPlayView(true);
             ApplySetupTab();
-            StopMusic();            // the track or the volume may have just changed; ApplyMusic picks the new one up
-            ApplyMusic();
+            MusicSettingsSaved(musicWas);   // a new mode moves the deck; a new volume rides the ramp; anything else leaves it be
             UpdateSaveButton();
             Say(written.Count > 0 ? "written: " + string.Join(", ", written) : "nothing to write");
             StartSetupRefresh();      // the Setup tab's view of the game's settings just changed

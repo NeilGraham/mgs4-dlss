@@ -62,7 +62,7 @@ namespace Mgs4Launcher
             _startAdvance.Unchecked += (s, e) => { UpdatePreview(); SavePrefs(); };
 
             _startLaunchBtn.Click += (s, e) => Launch();
-            _startStopBtn.Click += (s, e) => { Runner.StopGame(); Say("closed mgs4.exe"); RefreshState(); };
+            _startStopBtn.Click += (s, e) => StopGameFromWindow();
             _startShortcutBtn.Click += (s, e) => MakeShortcut();
 
             _viewSwitchBtn.Click += (s, e) => SwitchPlayView();
@@ -120,7 +120,7 @@ namespace Mgs4Launcher
         void LabelViewSwitch()
         {
             if (_viewSwitchBtn == null) return;
-            _viewSwitchBtn.Content = _simplePlay ? "All Scenes" : "Start Options";
+            SetHintedLabel(_viewSwitchBtn, _simplePlay ? "All Scenes" : "Start Options");
             _viewSwitchBtn.ToolTip = _simplePlay
                 ? "Every scene in the game, named and with a frame of itself - the story, spoiled"
                 : "Back to the three ways to start the game";
@@ -300,7 +300,7 @@ namespace Mgs4Launcher
         {
             _veilTitle.Text = title;
             _veilBody.Text = body;
-            _veilOkBtn.Content = okLabel;
+            SetHintedLabel(_veilOkBtn, okLabel);
             _veilAction = onOk;
             _veil.Visibility = Visibility.Visible;
             _veilOkBtn.Focus();         // Enter answers it and Escape backs out (WireKeys); the ring says which

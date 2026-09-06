@@ -74,6 +74,15 @@ namespace Mgs4Launcher
             _shared.Aim(sv, to, Tau);
         }
 
+        /// <summary>Where a scroller is heading, when a glide is still carrying it there. False once it has
+        /// landed - the entry goes the frame the easing settles - or when nothing is aimed at it.</summary>
+        public static bool Pending(ScrollViewer sv, out double target)
+        {
+            target = 0;
+            if (_shared == null || sv == null) return false;
+            return _shared._targets.TryGetValue(sv, out target);
+        }
+
         void Aim(ScrollViewer sv, double to, double tau)
         {
             if (to < 0) to = 0;

@@ -215,12 +215,12 @@ namespace Mgs4Launcher
                     e.Handled = true;
                     return;
                 }
-                if (!row.IsHeader) return;
-                _collapsed[row.ActKey] = !(_collapsed.ContainsKey(row.ActKey) && _collapsed[row.ActKey]);
+                if (!row.IsHeader) { _padLandedRow = null; return; }   // a click is the mouse's pick, not the pad's
                 e.Handled = true;
-                SavePrefs();
-                ApplyFilter();
+                ToggleAct(row.ActKey, false);
             };
+            // The wheel over the list means the pad's last landing may have scrolled away for real.
+            _sceneList.PreviewMouseWheel += (s, e) => _padLandedRow = null;
             // Double-clicking a scene starts it, the way double-clicking a file opens it. Act headers and the
             // star never get here: the handler above marks their clicks handled, so the ListBox never sees a
             // second one to pair into a double.
@@ -283,7 +283,7 @@ namespace Mgs4Launcher
             };
 
             _launchBtn.Click += (s, e) => Launch();
-            _stopBtn.Click += (s, e) => { Runner.StopGame(); Say("closed mgs4.exe"); RefreshState(); };
+            _stopBtn.Click += (s, e) => StopGameFromWindow();
             _shortcutBtn.Click += (s, e) => MakeShortcut();
 
             // Every act starts collapsed, so the window opens as a short list of acts rather than 400 rows.
@@ -329,6 +329,22 @@ namespace Mgs4Launcher
                 d = System.Windows.Media.VisualTreeHelper.GetParent(d);
             }
             return false;
+        }
+
+        // An act opened or shut, by a click on its header or the pad on it. ApplyFilter rebuilds the rows and puts
+        // the selection back on the picked scene; the pad wants to stay on the header it just pressed, so that
+        // header - a new row object after the rebuild - is found again by its key and selected.
+        void ToggleAct(string key, bool keepHeader)
+        {
+            _collapsed[key] = !(_collapsed.ContainsKey(key) && _collapsed[key]);
+            SavePrefs();
+            ApplyFilter();
+            if (!keepHeader) return;
+            SceneRow hdr = _sceneList.Items.OfType<SceneRow>().FirstOrDefault(r => r.IsHeader && r.ActKey == key);
+            if (hdr == null) return;
+            _sceneList.SelectedItem = hdr;
+            _sceneList.ScrollIntoView(hdr);
+            _padLandedRow = hdr;
         }
 
         void ToggleFavorite(string id)
@@ -565,10 +581,25 @@ namespace Mgs4Launcher
                 _runProc = Process.Start(new ProcessStartInfo(
                     System.Reflection.Assembly.GetExecutingAssembly().Location, string.Join(" ", cli))
                 { UseShellExecute = false, CreateNoWindow = true });
+                _launchedAt = DateTime.Now;     // "launching" until the game is seen - the pill and the music read it
                 StopMusic();        // the game is about to have the speakers; do not wait for the next poll
-                Say("launching: " + Options.Preview(CurrentOptions().ToCli()));
+                // The runner starts Steam itself when it has to (Steam.cs); the line here is so the wait has a
+                // name, since a scene that takes half a minute to appear otherwise looks like nothing happened.
+                Say((Steam.SignedIn() ? "launching: " : "starting Steam first, then launching: ")
+                    + Options.Preview(CurrentOptions().ToCli()));
             }
             catch (Exception e) { Say("could not launch: " + e.Message); }
+            RefreshState();
+        }
+
+        // Close the game: every process of its, then the window's own idea of a launch in flight.
+        void StopGameFromWindow()
+        {
+            Runner.StopGame();
+            _launchedAt = DateTime.MinValue;
+            _gameActivity = null;
+            _gameUp = false;
+            Say("closed mgs4.exe");
             RefreshState();
         }
 

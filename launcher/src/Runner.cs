@@ -85,6 +85,41 @@ namespace Mgs4Launcher
             return IntPtr.Zero;
         }
 
+        // What of the game is up, beyond mgs4.exe itself. The window's music and its status badge want the wider
+        // answer - the Master Collection front-end that @collection opens, and the bundled MGS1 that s04a05l runs,
+        // are both "the game has the screen" even though neither is mgs4.exe. Checks.GameRunning stays mgs4 alone,
+        // because that is the one that owns the ini files.
+        //
+        // "launcher" is too common a process name to trust on its own, so a launcher.exe only counts when it is
+        // the collection's: the one in the Launcher folder beside the game's, or - when its path cannot be read,
+        // which an elevated process refuses - one whose window is titled for the collection.
+        public static string GameActivity(string gameDir)
+        {
+            try
+            {
+                if (Process.GetProcessesByName("mgs4").Length > 0) return "MGS4";
+                if (Process.GetProcessesByName("mgs1").Length > 0) return "MGS1";
+                string want = string.IsNullOrEmpty(gameDir) ? null
+                              : Paths.Join(Path.GetDirectoryName(gameDir), "Launcher\\launcher.exe");
+                foreach (Process p in Process.GetProcessesByName("launcher"))
+                {
+                    string path = null;
+                    try { path = p.MainModule.FileName; } catch { }
+                    if (path != null)
+                    {
+                        if (want != null && string.Equals(Paths.Format(path), Paths.Format(want), StringComparison.OrdinalIgnoreCase))
+                            return "Master Collection";
+                        continue;
+                    }
+                    string title = "";
+                    try { title = p.MainWindowTitle ?? ""; } catch { }
+                    if (title.IndexOf("METAL GEAR", StringComparison.OrdinalIgnoreCase) >= 0) return "Master Collection";
+                }
+            }
+            catch { }
+            return null;
+        }
+
         public static void StopGame()
         {
             // "mgs1" is not a typo: s04a05l starts the bundled MGS1 (a separate mgs1.exe titled "METAL GEAR
@@ -216,6 +251,9 @@ namespace Mgs4Launcher
             if (opt.Restart)
             {
                 StopGame();
+                // Steam first. A Steam build started with no client running hands itself back to Steam, which
+                // relaunches the collection's front-end without any of these arguments - see Steam.cs.
+                Steam.EnsureRunning(say);
                 tail = new LogTail(addonLog);      // the add-on truncates its log at startup
                 var psi = new ProcessStartInfo(exe, args)
                 { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) };

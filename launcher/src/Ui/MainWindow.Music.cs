@@ -1,14 +1,18 @@
 // Playing the menu music. Music.cs finds and decodes it; this is when it starts, when it stops, how loud, what
 // comes next, and the deck in the bottom bar that shows all of that.
 //
-// Two rules the rest of the window relies on: the game gets the speakers to itself - the music stops the moment a
-// run is started and comes back when the game is gone - and nothing here ever blocks the window. Finding a track
-// means running a decoder, so that happens on a pool thread and only the playing comes back to the UI thread.
+// Two rules the rest of the window relies on: the game gets the speakers to itself - the music goes down the moment
+// a launch is started and comes back when the game is gone - and nothing here ever blocks the window. Finding a
+// track means running a decoder, so that happens on a pool thread and only the playing comes back to the UI thread.
 //
 // What plays is a *queue*: the order the tracks will go in, worked out ahead of time and walked with Next and
 // Back. Shuffle's queue is the whole iPod dealt once - every track is heard before any comes round again, and a
 // fresh deal is only cut when the last card has been played. Playlist's queue is the list as it was written,
 // and goes round. A single picked track has no queue at all: it loops, and its deck is pause alone.
+//
+// Nothing here cuts. A track change is a crossfade - the one leaving fades out under the one arriving - a stop is
+// a short fade, and pause and the volume ride the same ramp. One MediaPlayer is live; the ones on their way out
+// sit in a list until they are silent, and a timer of a few milliseconds walks them all.
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -27,7 +31,8 @@ namespace Mgs4Launcher
         MediaPlayer _music;
         string _musicPlaying;        // the track on the deck now, so a poll does not restart it every 1.5s
         bool _musicBusy;             // a decode is in flight; a second one would fight it for the same file
-        bool _musicPaused;
+        bool _musicPaused;           // asked for; the player is paused once its fade has reached silence
+        bool _pauseApplied;
 
         // The queue, the mode it was built for, and where in it the deck is. Rebuilt when the mode changes or the
         // playlist is edited; dealt again when Shuffle runs off the end.
@@ -36,24 +41,128 @@ namespace Mgs4Launcher
         int _queueAt = -1;
 
         StackPanel _transport;
-        Button _musicBackBtn, _musicPauseBtn, _musicNextBtn;
+        Button _musicBackBtn, _musicPauseBtn, _musicNextBtn, _muteBtn;
         TextBlock _musicLabel, _musicAt, _musicLen;
-        Slider _scrub;
+        Slider _scrub, _volume;
         bool _scrubbing;             // the slider is being moved by the timer, not the hand, so its change is not a seek
+        bool _volumeSyncing;         // same for the volume slider: a write from code is not a new volume
         DispatcherTimer _deckTimer;
         const double BackRestarts = 3.0;
 
+        // ------------------------------------------------------------------------------------------ the fades
+
+        // Everything on its way out: the player and how fast it goes, in volume per second.
+        class Retiring { public MediaPlayer Player; public double Rate; }
+        readonly List<Retiring> _retiring = new List<Retiring>();
+        DispatcherTimer _fadeTimer;
+        DateTime _fadeTickAt;
+        double _liveRate = 1 / CrossfadeSeconds;    // how fast the live player moves towards its target volume
+        const double CrossfadeSeconds = 1.6;        // one track under the next
+        const double FadeInSeconds = 0.7;           // a track starting over silence
+        const double StopSeconds = 0.4;             // the game is about to have the speakers
+        const double NudgeSeconds = 0.25;           // pause, mute, the volume slider
+
+        // Mute is the window's own, for the sitting: it is not written anywhere, and the slider keeps its place
+        // under it so unmuting comes back to the same level.
+        bool _muted;
+        // The slider's level before config.ini has caught up with it - the write is debounced, and the player
+        // should not wait for it.
+        double? _deckVolume;
+        DispatcherTimer _volumeWrite;
+
+        double TargetVolume()
+        {
+            if (_muted || _musicPaused) return 0;
+            return _deckVolume ?? MusicVolume();
+        }
+
+        void EnsureFadeTimer()
+        {
+            if (_fadeTimer == null)
+            {
+                _fadeTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(20) };
+                _fadeTimer.Tick += (s, e) => TickFades();
+            }
+            if (!_fadeTimer.IsEnabled) { _fadeTickAt = DateTime.Now; _fadeTimer.Start(); }
+        }
+
+        void TickFades()
+        {
+            DateTime now = DateTime.Now;
+            double dt = Math.Min(0.1, (now - _fadeTickAt).TotalSeconds);
+            _fadeTickAt = now;
+
+            for (int i = _retiring.Count - 1; i >= 0; i--)
+            {
+                Retiring r = _retiring[i];
+                double v = 0;
+                try { v = r.Player.Volume - r.Rate * dt; } catch { }
+                if (v <= 0.002)
+                {
+                    try { r.Player.Stop(); r.Player.Close(); } catch { }
+                    _retiring.RemoveAt(i);
+                }
+                else { try { r.Player.Volume = v; } catch { } }
+            }
+
+            bool settled = true;
+            if (_music != null)
+            {
+                try
+                {
+                    double t = TargetVolume(), v = _music.Volume, step = _liveRate * dt;
+                    if (Math.Abs(t - v) <= step) v = t; else v += Math.Sign(t - v) * step;
+                    if (Math.Abs(_music.Volume - v) > 0.0005) _music.Volume = v;
+                    settled = v == t;
+                    if (settled && _musicPaused && !_pauseApplied) { _music.Pause(); _pauseApplied = true; }
+                }
+                catch { }
+            }
+            if (_retiring.Count == 0 && settled && _fadeTimer != null) _fadeTimer.Stop();
+        }
+
+        // Point the live player at a new level, at a given pace, and get the timer going.
+        void AimVolume(double seconds)
+        {
+            _liveRate = 1 / Math.Max(0.05, seconds);
+            if (_music != null) EnsureFadeTimer();
+        }
+
+        // Hand the live player to the fade-out list. It keeps playing under whatever comes next until it is silent.
+        void RetireLive(double seconds)
+        {
+            if (_music == null) return;
+            MediaPlayer p = _music;
+            _music = null;
+            try
+            {
+                if (p.Volume <= 0.002 || _pauseApplied) { p.Stop(); p.Close(); return; }
+            }
+            catch { }
+            _retiring.Add(new Retiring { Player = p, Rate = 1 / Math.Max(0.05, seconds) });
+            EnsureFadeTimer();
+        }
+
         // ------------------------------------------------------------------------------------------ the deck
 
+        // The glyphs are Segoe MDL2 Assets, named by code point on purpose: they are private-use characters that
+        // show as nothing in most editors, and a rewrite of this file once turned every one of them into "".
+        const string GlyphBack = "", GlyphNext = "", GlyphPlay = "", GlyphPause = "";
+        const string GlyphMute = "", GlyphVol0 = "", GlyphVol1 = "", GlyphVol2 = "", GlyphVol3 = "";
+
         // The deck: the track's title, the three buttons under it the way iTunes draws them - bare glyphs, the
-        // play one larger - and under those the scrubber with the time either side of it.
+        // play one larger - and under those the scrubber with the time either side. The volume is not part of
+        // this block: it hangs off its right-hand side, in the bar's own right-hand column, so the deck sits on
+        // the window's centre line with or without it.
+        StackPanel _volumeBox;
+
         void WireMusic()
         {
             _transport = (StackPanel)Win.FindName("Transport");
             var deck = (Style)Win.FindResource("Deck");
-            _musicBackBtn = DeckButton("", 12, "Back to the start of this track - or, within three seconds of it starting, to the one before", (s, e) => MusicBack(), deck);
-            _musicPauseBtn = DeckButton("", 17, "Pause", (s, e) => MusicPause(), deck);
-            _musicNextBtn = DeckButton("", 12, "Next track", (s, e) => MusicNext(), deck);
+            _musicBackBtn = DeckButton(GlyphBack, 12, "Back to the start of this track - or, within three seconds of it starting, to the one before", (s, e) => MusicBack(), deck);
+            _musicPauseBtn = DeckButton(GlyphPause, 17, "Pause", (s, e) => MusicPause(), deck);
+            _musicNextBtn = DeckButton(GlyphNext, 12, "Next track", (s, e) => MusicNext(), deck);
 
             _musicLabel = Widgets.Text("", 11, "#ECECEE");
             _musicLabel.HorizontalAlignment = HorizontalAlignment.Center;
@@ -66,6 +175,28 @@ namespace Mgs4Launcher
             row.Children.Add(_musicBackBtn);
             row.Children.Add(_musicPauseBtn);
             row.Children.Add(_musicNextBtn);
+
+            // Mute is a click on the speaker; the slider beside it is the volume, and it writes MGS4_MUSIC_VOLUME
+            // for itself a moment after it stops moving. Mute writes nothing: it is for this sitting. The pair
+            // goes in the bottom bar's right-hand column, hard against the deck's edge, so it reads as the deck's
+            // and leaves the deck centred.
+            _muteBtn = DeckButton(GlyphVol2, 12, "Mute", (s, e) => ToggleMute(), deck);
+            _volume = new Slider
+            {
+                Style = (Style)Win.FindResource("Scrub"), Width = 84, Minimum = 0, Maximum = 100,
+                VerticalAlignment = VerticalAlignment.Center, ToolTip = "Music volume - written to config.ini as you set it",
+            };
+            _volume.ValueChanged += (s, e) => { if (!_volumeSyncing) VolumeMoved(_volume.Value); };
+            _volumeBox = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0),
+                Visibility = Visibility.Collapsed,
+            };
+            _volumeBox.Children.Add(_muteBtn);
+            _volumeBox.Children.Add(_volume);
+            var bar = _transport.Parent as Grid;
+            if (bar != null) { Grid.SetColumn(_volumeBox, 2); bar.Children.Add(_volumeBox); }
 
             // The scrubber. The timer moves it as the track plays; a hand on it seeks. The two are told apart by
             // the flag the timer raises round its own writes.
@@ -88,6 +219,9 @@ namespace Mgs4Launcher
             _deckTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
             _deckTimer.Tick += (s, e) => TickDeck();
 
+            _volumeWrite = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            _volumeWrite.Tick += (s, e) => { _volumeWrite.Stop(); WriteDeckVolume(); };
+
             WirePlaylistEditor();
         }
 
@@ -103,10 +237,11 @@ namespace Mgs4Launcher
             if (_transport == null) return;
             bool show = _musicPlaying != null;
             _transport.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            if (_volumeBox != null) _volumeBox.Visibility = _transport.Visibility;
             if (!show) { _deckTimer.Stop(); return; }
             bool queued = _queue != null && Music.IsQueued(MusicSetting());
             _musicBackBtn.Visibility = _musicNextBtn.Visibility = queued ? Visibility.Visible : Visibility.Collapsed;
-            _musicPauseBtn.Content = _musicPaused ? "" : "";
+            _musicPauseBtn.Content = _musicPaused ? GlyphPlay : GlyphPause;
             _musicPauseBtn.ToolTip = _musicPaused ? "Play" : "Pause";
             _musicLabel.Text = Music.Title(_musicPlaying);
             _musicNextBtn.IsEnabled = !_musicBusy;
@@ -114,8 +249,79 @@ namespace Mgs4Launcher
             // a track before it in the queue. At the head of the queue, freshly started, it has nothing - and
             // says so by going grey.
             _musicBackBtn.IsEnabled = !_musicBusy && (Position() > BackRestarts || _queueAt > 0);
+            PaintVolume();
             if (!_deckTimer.IsEnabled) _deckTimer.Start();
             TickDeck();
+        }
+
+        // The speaker says how loud, in the same steps Windows' own tray icon uses, and the slider follows the
+        // setting - unless a hand is on it, in which case it is the setting that follows.
+        void PaintVolume()
+        {
+            if (_volume == null) return;
+            double level = (_deckVolume ?? MusicVolume()) * 100;
+            if (!_volume.IsMouseCaptureWithin && Math.Abs(_volume.Value - level) > 0.5)
+            {
+                _volumeSyncing = true;
+                try { _volume.Value = level; } finally { _volumeSyncing = false; }
+            }
+            string glyph = _muted ? GlyphMute : level <= 0 ? GlyphVol0 : level < 34 ? GlyphVol1 : level < 67 ? GlyphVol2 : GlyphVol3;
+            _muteBtn.Content = glyph;
+            _muteBtn.ToolTip = _muted ? "Unmute" : "Mute (the volume setting is left as it is)";
+            _muteBtn.Foreground = Widgets.Brush(_muted ? "#F2C14E" : "#B8B8C2");
+            _volume.Opacity = _muted ? 0.45 : 1;
+        }
+
+        void ToggleMute()
+        {
+            _muted = !_muted;
+            AimVolume(NudgeSeconds);
+            PaintVolume();
+            Say(_muted ? "music muted" : "music on");
+        }
+
+        // The slider moved: the player follows now, the file a moment after the hand comes off.
+        void VolumeMoved(double value)
+        {
+            _deckVolume = Math.Max(0, Math.Min(100, value)) / 100.0;
+            if (_muted && value > 0) _muted = false;      // reaching for the volume is asking to hear it
+            AimVolume(NudgeSeconds);
+            PaintVolume();
+            _volumeWrite.Stop();
+            _volumeWrite.Start();
+        }
+
+        void WriteDeckVolume()
+        {
+            if (_deckVolume == null) return;
+            string v = ((int)Math.Round(_deckVolume.Value * 100)).ToString();
+            try
+            {
+                Checks.SetIni(Paths.EnsureConfig(), new List<KeyValuePair<string, string>>
+                {
+                    new KeyValuePair<string, string>("MGS4_MUSIC_VOLUME", v),
+                }, null);
+                Paths.ForgetConfig();
+                _deckVolume = null;             // config.ini says it now
+                SyncSettingsRow("MGS4_MUSIC_VOLUME", v);
+                Say("music volume " + v + " - kept in config.ini");
+            }
+            catch (Exception e) { Say("could not write the volume: " + e.Message); }
+        }
+
+        // A launcher setting written from outside the form - the deck's volume - is put into the form's own row,
+        // when that row has not been edited by hand, so Save does not light up over a change already on disk.
+        void SyncSettingsRow(string key, string value)
+        {
+            foreach (Binding b in _settingReaders)
+            {
+                if (b.Spec.Source != IniSource.Launcher || b.Spec.Key != key) continue;
+                if (!string.Equals(b.Read(), b.Original, StringComparison.Ordinal)) continue;   // the person is mid-edit
+                b.Original = value;
+                if (b.Write != null) b.Write(value);
+                b.Original = b.Read();
+            }
+            UpdateSaveButton();
         }
 
         double Position()
@@ -162,13 +368,21 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------------------ the queue
 
+        // Pause is a short fade to silence, then the player is paused; play is the player started and the same
+        // fade back up.
         void MusicPause()
         {
             if (_music == null || _musicPlaying == null) return;
             try
             {
-                if (_musicPaused) _music.Play(); else _music.Pause();
-                _musicPaused = !_musicPaused;
+                if (_musicPaused)
+                {
+                    _musicPaused = false;
+                    if (_pauseApplied) _music.Play();
+                    _pauseApplied = false;
+                }
+                else _musicPaused = true;
+                AimVolume(NudgeSeconds);
             }
             catch { }
             PaintTransport();
@@ -227,6 +441,12 @@ namespace Mgs4Launcher
             StartTrack(_queue[_queueAt]);
         }
 
+        static int IndexOfTrack(List<string> list, string track)
+        {
+            if (list == null || track == null) return -1;
+            return list.FindIndex(t => string.Equals(t, track, StringComparison.OrdinalIgnoreCase));
+        }
+
         // The playlist was edited: the queue is stale. Rebuilt on the spot when the deck is on it, so what plays
         // next is what the list now says - kept in step with the track playing where it is still in the list.
         void PlaylistChanged()
@@ -235,8 +455,47 @@ namespace Mgs4Launcher
             if (!Music.IsPlaylist(mode)) { _queue = null; return; }
             _queue = BuildQueue(mode, null);
             _queueMode = mode;
-            _queueAt = _queue != null && _musicPlaying != null ? _queue.IndexOf(_musicPlaying) : -1;
+            _queueAt = IndexOfTrack(_queue, _musicPlaying);
             PaintTransport();
+        }
+
+        /// <summary>Settings were saved. Only a change to the music *mode* moves the deck: the volume is picked up
+        /// by the ramp without a restart, and a save that touched neither leaves the track exactly where it was.
+        /// A new mode that still contains the track playing carries on from it rather than cutting to another.</summary>
+        void MusicSettingsSaved(string modeBefore)
+        {
+            string now = MusicSetting();
+            if (string.Equals(modeBefore ?? Music.Off, now, StringComparison.OrdinalIgnoreCase))
+            {
+                AimVolume(NudgeSeconds);
+                ApplyMusic();
+                PaintTransport();
+                return;
+            }
+            _queue = null; _queueMode = null; _queueAt = -1;
+            bool off = string.Equals(now, Music.Off, StringComparison.OrdinalIgnoreCase);
+            if (off || GameBusy() || _musicPlaying == null) { ApplyMusic(); return; }
+
+            if (Music.IsQueued(now))
+            {
+                _queue = BuildQueue(now, _musicPlaying);
+                _queueMode = now;
+                int at = IndexOfTrack(_queue, _musicPlaying);
+                if (at >= 0)
+                {
+                    // Shuffle's deal is fresh, so the track playing is moved to its head and the rest follows; a
+                    // written playlist keeps its order, and the deck is simply where that track sits in it.
+                    if (Music.IsShuffle(now) || Music.IsPlaylistShuffle(now)) { _queue.RemoveAt(at); _queue.Insert(0, _musicPlaying); at = 0; }
+                    _queueAt = at;
+                    PaintTransport();
+                    return;
+                }
+                _queueAt = -1;
+                MusicNext();
+                return;
+            }
+            if (!string.Equals(now, _musicPlaying, StringComparison.OrdinalIgnoreCase)) StartTrack(now);
+            else PaintTransport();
         }
 
         // Decode off the window's thread, play when it lands. Whatever was playing keeps going until then.
@@ -264,18 +523,17 @@ namespace Mgs4Launcher
         }
 
         /// <summary>Read the setting and make the deck agree with it. Called on the way up, whenever Settings is
-        /// saved, and whenever the game starts or stops.</summary>
+        /// saved, and on every poll of the game's state.</summary>
         void ApplyMusic()
         {
             string want = MusicSetting();
             bool off = string.Equals(want, Music.Off, StringComparison.OrdinalIgnoreCase);
-            // The playlist editor samples tracks whatever the setting says; the game still wins the speakers.
-            bool silent = (off && !PlaylistOpen)
-                          || _gameUp                                  // the game owns the speakers while it runs
-                          || (_runProc != null && !_runProc.HasExited);
+            // The playlist editor samples tracks whatever the setting says; the game still wins the speakers -
+            // from the moment Launch is pressed, through Steam coming up and the boot, until it is gone again.
+            bool silent = (off && !PlaylistOpen) || GameBusy();
 
             if (silent) { StopMusic(); return; }
-            if (_music != null) _music.Volume = MusicVolume();          // a volume change alone need not restart it
+            if (_music != null) EnsureFadeTimer();                      // a volume change alone rides the ramp
             if (_musicPlaying != null || _musicBusy) return;            // already playing, or on its way
             if (off) return;                                            // the editor is open with nothing sampled yet
 
@@ -298,39 +556,55 @@ namespace Mgs4Launcher
                 return;
             }
             // The setting may have been turned off, or the game started, while the decode was running.
-            if ((string.Equals(MusicSetting(), Music.Off, StringComparison.OrdinalIgnoreCase) && !PlaylistOpen) || _gameUp) return;
+            if ((string.Equals(MusicSetting(), Music.Off, StringComparison.OrdinalIgnoreCase) && !PlaylistOpen) || GameBusy()) return;
 
-            if (_music == null)
+            // The one playing goes out under the one coming in. A player that has already ended - the natural
+            // end of a track - has nothing left to fade, and the new one comes up over silence a little quicker.
+            bool wasPlaying = _music != null && _musicPlaying != null && !_pauseApplied && Position() < Length() - 0.5;
+            RetireLive(CrossfadeSeconds);
+
+            var player = new MediaPlayer();
+            // MGS4's tracks run three and a half minutes and a menu can outlast them: a picked track goes round
+            // again, and a queue moves on to what is next in it. Only the live player's word counts - one on its
+            // way out ending under a crossfade must not start yet another track.
+            player.MediaEnded += (s, e) =>
             {
-                _music = new MediaPlayer();
-                // MGS4's tracks run three and a half minutes and a menu can outlast them: a picked track goes
-                // round again, and a queue moves on to what is next in it.
-                _music.MediaEnded += (s, e) =>
-                {
-                    if (Music.IsQueued(MusicSetting())) { MusicNext(); return; }
-                    try { _music.Position = TimeSpan.Zero; _music.Play(); } catch { }
-                };
-                _music.MediaOpened += (s, e) => TickDeck();
-            }
+                if (s != _music) return;
+                if (Music.IsQueued(MusicSetting())) { MusicNext(); return; }
+                try { _music.Position = TimeSpan.Zero; _music.Play(); } catch { }
+            };
+            player.MediaOpened += (s, e) => { if (s == _music) TickDeck(); };
             try
             {
-                _music.Open(new Uri(wav));
-                _music.Volume = MusicVolume();
-                _music.Play();
+                player.Open(new Uri(wav));
+                player.Volume = 0;
+                player.Play();
+                _music = player;
                 _musicPlaying = track;
                 _musicPaused = false;
+                _pauseApplied = false;
+                AimVolume(wasPlaying ? CrossfadeSeconds : FadeInSeconds);
                 Say("music: " + Music.Title(track));
             }
-            catch { _musicPlaying = null; }
+            catch { _musicPlaying = null; try { player.Close(); } catch { } }
             PaintTransport();
         }
 
-        void StopMusic()
+        /// <summary>Take the music down. A short fade by default; immediate when the window is closing.</summary>
+        void StopMusic(bool fade = true)
         {
-            if (_music == null) return;
-            try { _music.Stop(); _music.Close(); } catch { }
+            if (_music == null && _retiring.Count == 0) return;
+            if (fade) RetireLive(StopSeconds);
+            else
+            {
+                if (_music != null) { try { _music.Stop(); _music.Close(); } catch { } _music = null; }
+                foreach (Retiring r in _retiring) { try { r.Player.Stop(); r.Player.Close(); } catch { } }
+                _retiring.Clear();
+                if (_fadeTimer != null) _fadeTimer.Stop();
+            }
             _musicPlaying = null;
             _musicPaused = false;
+            _pauseApplied = false;
             PaintTransport();
         }
 
@@ -397,7 +671,7 @@ namespace Mgs4Launcher
             SetPlaylistSide(false);
             if (_allTracks.Items.Count > 0 && _allTracks.SelectedIndex < 0) _allTracks.SelectedIndex = 0;
             _allTracks.Focus();
-            PaintGuide();
+            PaintPadHints();
         }
 
         // Done: the list is written to config.ini on the spot - it is a thing of its own rather than a row on the
@@ -417,7 +691,7 @@ namespace Mgs4Launcher
             if (!Changed()) BuildSettings();     // the Menu music list is built with the form; hearts may have moved
             PlaylistChanged();
             ApplyMusic();           // a sample playing under an Off setting stops here
-            PaintGuide();
+            PaintPadHints();
         }
 
         // The iPod list, favourites first. Rebuilt whenever a heart changes, keeping the pick where it was.
@@ -472,6 +746,7 @@ namespace Mgs4Launcher
             _playlistOnRight = right;
             _allTracksBox.BorderBrush = Widgets.Brush(right ? "#26262A" : "#7C9CFF");
             _playlistBox.BorderBrush = Widgets.Brush(right ? "#7C9CFF" : "#26262A");
+            PaintPadHints();        // A's badge moves to whichever of Add and Remove it now means
         }
 
         void PaintPlaylistHeads()

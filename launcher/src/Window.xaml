@@ -520,6 +520,16 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- A controller button's name in a small pill, put beside the thing the button does: ☰ on Launch, L1 and R1
+         either side of the tabs, ✕ on Add in the playlist editor. MainWindow.Pad.cs makes most of them in code
+         with the same look; the two by the tabs are the only ones declared here. -->
+    <Style x:Key="PadBadge" TargetType="Border">
+      <Setter Property="Background" Value="#26262C"/>
+      <Setter Property="BorderBrush" Value="#3F3F4A"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="4"/>
+      <Setter Property="Padding" Value="6,1,6,1"/>
+    </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
@@ -697,15 +707,29 @@
              Hard right, flush with the content edge the cards below line up on, and so under the caption buttons
              again: what keeps the two apart is size, the pills being half again as big as those and rounded.
              The bottom margin is set in code, with the logo's, so the row stays level with it. -->
-        <StackPanel x:Name="NavTabs" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right"
-                    VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
-          <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="&#xE768;" ToolTip="Play"
-                       IsChecked="True" GroupName="nav"/>
-          <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="&#xE713;" ToolTip="Settings"
-                       GroupName="nav"/>
-          <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="&#xE9D5;" ToolTip="Setup"
-                       Margin="5,0,0,0" GroupName="nav"/>
-        </StackPanel>
+        <Grid x:Name="NavTabs" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+              shell:WindowChrome.IsHitTestVisibleInChrome="True">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton x:Name="NavPlay" Style="{StaticResource Nav}" Content="&#xE768;" ToolTip="Play"
+                         IsChecked="True" GroupName="nav"/>
+            <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}" Content="&#xE713;" ToolTip="Settings"
+                         GroupName="nav"/>
+            <RadioButton x:Name="NavInstall" Style="{StaticResource Nav}" Content="&#xE9D5;" ToolTip="Setup"
+                         Margin="5,0,0,0" GroupName="nav"/>
+          </StackPanel>
+          <!-- The bumpers step the tabs, and the two badges say so where the tabs are: laid over the top outer
+               corner of the first and the last tab, taking no room in the row, so the tabs do not shift when a
+               pad arrives. Shown only while one is connected, in the pad's own names (LB / RB, L1 / R1) -
+               MainWindow.Pad.cs fills and shows them. -->
+          <Border x:Name="NavPrevHint" Style="{StaticResource PadBadge}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                  Margin="-4,-8,0,0" Visibility="Collapsed">
+            <TextBlock Text="LB" FontSize="10" FontWeight="SemiBold" Foreground="#ECECEE"/>
+          </Border>
+          <Border x:Name="NavNextHint" Style="{StaticResource PadBadge}" HorizontalAlignment="Right" VerticalAlignment="Top"
+                  Margin="0,-8,-4,0" Visibility="Collapsed">
+            <TextBlock Text="RB" FontSize="10" FontWeight="SemiBold" Foreground="#ECECEE"/>
+          </Border>
+        </Grid>
         </Grid>
       </Grid>
     </Border>
@@ -976,10 +1000,18 @@
         </Grid.ColumnDefinitions>
         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,14,0">
           <TextBlock x:Name="Status" FontSize="11" Foreground="{StaticResource Muted}" TextTrimming="CharacterEllipsis"/>
-          <!-- Which buttons do what on the tab that is up, while a controller is connected. The badges are the
-               pad's own names - A / START on an Xbox pad, the cross and OPTIONS on a DualSense - and the strip is
-               collapsed until one is plugged in. Filled by MainWindow.Pad.cs; wraps when the column is narrow. -->
-          <WrapPanel x:Name="PadGuide" Margin="0,6,0,0" Visibility="Collapsed"/>
+          <!-- Is the game up? A dot and a word under the status line: grey and Not running, amber and Launching
+               from the moment Launch is pressed until mgs4.exe (or the collection's front-end, or MGS1) is seen,
+               green and Running while it is. Painted by MainWindow.RefreshState from the same poll that gates Save
+               and the music. -->
+          <Border x:Name="GameStateTag" Background="#1C1C20" BorderBrush="#3A3A44" BorderThickness="1" CornerRadius="4"
+                  Padding="8,2,9,2" Margin="0,6,0,0" HorizontalAlignment="Left" ToolTip="Whether mgs4.exe is running">
+            <StackPanel Orientation="Horizontal">
+              <Ellipse x:Name="GameStateDot" Width="7" Height="7" Fill="#6E6E77" VerticalAlignment="Center" Margin="0,0,7,0"/>
+              <TextBlock x:Name="GameStateText" Text="Not running" FontSize="10" FontWeight="SemiBold" Foreground="#B8B8C2"
+                         VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
         </StackPanel>
         <!-- The music deck: the track's name over its buttons - back, pause, next under Shuffle, pause alone for
              a picked track. Built in MainWindow.Music.cs; collapsed until a track is on it. -->
