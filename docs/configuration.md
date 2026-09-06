@@ -4,7 +4,7 @@ Every setting of the add-on lives in `MGS4\mgs4_dlss.ini`, next to `mgs4.exe`. K
 
 ## The shipped ini
 
-This is the configuration v1.2.0 ships with and was verified on:
+This is the configuration v1.3.2 ships with and was verified on:
 
 ```ini
 [DLSS]

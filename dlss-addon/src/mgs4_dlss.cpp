@@ -3779,7 +3779,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.2.0 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v1.3.2 registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         install_file_trace();   // before everything else: the stage load runs ahead of device creation
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);

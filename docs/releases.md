@@ -6,6 +6,30 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
+## v1.3.2 (2026-09-06)
+
+The launcher starts Steam first, the music fades instead of cutting, and the project has a licence.
+
+- **Steam first.** `mgs4.exe` is a Steam build: started with no Steam client signed in it hands itself back to
+  Steam, which asks about the custom arguments and then launches the collection's front-end *without* them, so the
+  scene that was picked was lost. A launch that finds no Steam signed in now starts it (`steam.exe -silent`, from the
+  registry) and waits for it to sign in, up to a minute and a half, before the game is started; the status line
+  says so.
+- **The game's state, in the corner.** A grey **Not running**, an amber **Launching** from the moment Launch is
+  pressed until any of the game's programs is seen, and a green **Running**, or **Master Collection running** /
+  **MGS1 running**: the collection's front-end and the bundled MGS1 are watched for as well as `mgs4.exe`. The music
+  reads the same thing, and stays down through a launch and while any of the three is up.
+- **Nothing on the deck cuts.** A change of track is a crossfade, a track starting over silence fades in, a stop is
+  a short fade, and pause, mute and the volume ride a quarter-second ramp. A speaker and a volume slider sit off the
+  deck's right-hand edge: the slider writes `MGS4_MUSIC_VOLUME` a moment after it stops moving, the speaker mutes for
+  the sitting and writes nothing. Saving the Settings form leaves the track where it was unless the *mode* changed.
+- **The pad walks more of the window.** The d-pad steps through the act headers as well as the scenes, and A on a
+  header opens or shuts the act; the run-option walk reaches the Launch button at its foot; Start Options' row of
+  buttons is reachable; holding a direction repeats at thirteen a second, judged against where a glide is going
+  rather than the drawn offset. Button legends sit beside the controls they drive instead of in a bottom-bar guide.
+- The project is released under the MIT licence (`LICENSE`), with the vendored pieces' own licences listed in
+  `THIRD_PARTY_NOTICES.md`. The README has a **Known issues** section.
+
 ## v1.3.1 (2026-09-04)
 
 The mission briefings get their vectors back in the window.

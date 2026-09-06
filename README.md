@@ -5,7 +5,7 @@ per-object motion vectors, frame generation, and full compatibility with **DLSS 
 add-on, with a launcher that installs it, checks it, edits every setting as a form, and starts the game at any of
 its 400+ scenes.
 
-**Current release: v1.2.0** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
+**Current release: v1.3.2** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
 [release notes](docs/releases.md) · [install](docs/install.md)
 
 Supported DLSS features:
@@ -108,6 +108,9 @@ Things that are wrong today and are being worked on. If you hit something not li
 | [docs/releases.md](docs/releases.md) | release notes |
 
 ## Credits and licences
+
+This project is released under the [MIT licence](LICENSE). The vendored pieces keep their own licences, listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 The add-on is built on the [ReShade](https://reshade.me/) add-on API (BSD-3), [MinHook](https://github.com/TsudaKageyu/minhook)
 (BSD-2, vendored), the NVIDIA DLSS and Streamline SDK headers (NVIDIA's licences, in `third_party/`), and works alongside

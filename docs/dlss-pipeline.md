@@ -2,20 +2,6 @@
 
 Reverse-engineering notes on the port itself are in [renderer-notes.md](renderer-notes.md); this page is what the add-on does with them, feature by feature. Configuration keys are in [configuration.md](configuration.md).
 
-## Status
-
-| Step | State |
-|---|---|
-| Route A — run the port on bgfx's built-in Direct3D 12 backend | **Done** — the game has a native renderer option (Options -> Graphics, `api=dx12` in `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`) |
-| Phase 0 — map the frame (scene target, depth, composite draw) | **Done** — see docs |
-| Phase 1a — NGX DLSS (DLAA) created + evaluated every frame, NGX add-ons can hook it | **Done** — `dlss-addon/` (v1: zero jitter / zero motion vectors) |
-| Phase 1b — camera jitter + camera-only motion vectors | **Done** — see below |
-| In-overlay controls (ReShade Add-ons tab) | **Done** |
-| Frame generation (Streamline DLSS-G: 2x/3x/4x, dynamic target fps, Reflex; live switching) | **Done** — `dlss-addon/src/fg.cpp` |
-| Phase 2 — per-object motion vectors (stream-out of the game's vertex shaders) | **Done, on by default** (`ObjectMV=1`) — one stream-out draw per object, ~0.1 ms GPU / ~0.2 ms CPU per frame at 4K, no frame-rate cost |
-| Dynamic resolution handling (the port upscales its scene sub-rect before the composite; depth/vectors brought to the full grid) | **Done** — `DRS=1` |
-| Phase 3 — real upscaling (internal res < output res) | **Done** — `Mode=Quality/Balanced/Performance/UltraPerformance` (with jitter and object vectors these are real DLSS modes) |
-
 ## The insertion
 
 A ReShade add-on (API 20, D3D12 only) that creates a real NGX DLSS Super Resolution feature (DLAA, preset K) and evaluates it every frame:

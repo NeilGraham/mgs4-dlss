@@ -520,6 +520,56 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- The same line stood on end, for the deck's volume: it takes the deck's height and a thumb's width, so the
+         bottom bar's right-hand column keeps it clear of the tab's buttons at any window width. The filled part
+         is the lower one, the level rising from the bottom. -->
+    <Style x:Key="ScrubV" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
+      <Setter Property="Orientation" Value="Vertical"/>
+      <Setter Property="Width" Value="16"/>
+      <Setter Property="Height" Value="48"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Background="Transparent">
+              <Border Width="3" CornerRadius="1.5" Background="#2A2A30" HorizontalAlignment="Center" Margin="0,5"/>
+              <Track x:Name="PART_Track" Orientation="Vertical">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
+                    <RepeatButton.Template>
+                      <ControlTemplate TargetType="RepeatButton">
+                        <Grid Background="Transparent">
+                          <Border Width="3" CornerRadius="1.5" Background="#8A8A96" HorizontalAlignment="Center" Margin="0,0,0,5"/>
+                        </Grid>
+                      </ControlTemplate>
+                    </RepeatButton.Template>
+                  </RepeatButton>
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Width="10" Height="10" Focusable="False">
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Ellipse x:Name="e" Fill="#DCE2FF"/>
+                        <ControlTemplate.Triggers>
+                          <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#FFFFFF"/>
+                          </Trigger>
+                          <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="e" Property="Fill" Value="#7C9CFF"/>
+                          </Trigger>
+                        </ControlTemplate.Triggers>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Opacity="0"/>
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <!-- A controller button's name in a small pill, put beside the thing the button does: ☰ on Launch, L1 and R1
          either side of the tabs, ✕ on Add in the playlist editor. MainWindow.Pad.cs makes most of them in code
          with the same look; the two by the tabs are the only ones declared here. -->

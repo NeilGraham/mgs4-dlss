@@ -408,7 +408,8 @@ iTunes draws its own, and under those a scrubber with the time either side - dra
 A single picked track loops and gets pause alone; the queued modes get back and next as well. Back within three
 seconds of a track starting goes to the one before it, later than that to the top of the one playing, and at the
 head of a queue with nowhere to go it is greyed out. Off the deck's right-hand edge - in the bar's own right-hand
-column, so the deck stays on the window's centre line - are a speaker and a volume slider: the slider is
+column, so the deck stays on the window's centre line - are a speaker and a volume slider standing on end, the
+deck's height, so it takes no width from the tab's buttons at the window's narrowest: the slider is
 `MGS4_MUSIC_VOLUME` and writes itself to `config.ini` a moment after it stops moving (the Settings form's own row
 follows), while the speaker mutes for this sitting and writes nothing - the slider keeps its place under it, and
 moving the slider unmutes.
@@ -582,7 +583,7 @@ The file list, the verified versions and the download links are one data file, `
 checks in `launcher\src\Checks.cs` only render it. A copy goes into the exe at build time and is used when that
 folder is not there; with neither, Setup says so in a card and the rest of the window carries on.
 
-The shipped ini is the configuration v1.2.0 ships with and was verified on: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
+The shipped ini is the configuration v1.3.2 ships with and was verified on: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
 ## Direct stage boot (what the Play tab does)
 

@@ -3,7 +3,7 @@
     "The install, in the order you do it. Each group is one download and one instruction, and every row is a path",
     "relative to the folder holding mgs4.exe. launcher/src/Checks.cs reads this and renders it as the Setup tab",
     "the Setup tab and as --report, and its drag-and-drop uses 'accepts' to know what a dropped file is for.",
-    "Versions match the 'setup this was verified on' table in README.md - change both together.",
+    "Versions match the 'setup this was verified on' table in docs/install.md - change both together.",
     "",
     "  required        a missing file in this group is a failure; files[].optional and files[].required override it",
     "  url / urlLabel  where this group's files come from, as a button above them",

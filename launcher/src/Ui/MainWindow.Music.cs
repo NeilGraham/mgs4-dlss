@@ -179,11 +179,13 @@ namespace Mgs4Launcher
             // Mute is a click on the speaker; the slider beside it is the volume, and it writes MGS4_MUSIC_VOLUME
             // for itself a moment after it stops moving. Mute writes nothing: it is for this sitting. The pair
             // goes in the bottom bar's right-hand column, hard against the deck's edge, so it reads as the deck's
-            // and leaves the deck centred.
+            // and leaves the deck centred. The slider stands on end, the deck's height and a thumb wide: laid
+            // flat it was the one thing in that column with a width of its own, and at the window's minimum
+            // width it ran into the tab's buttons on the column's far side.
             _muteBtn = DeckButton(GlyphVol2, 12, "Mute", (s, e) => ToggleMute(), deck);
             _volume = new Slider
             {
-                Style = (Style)Win.FindResource("Scrub"), Width = 84, Minimum = 0, Maximum = 100,
+                Style = (Style)Win.FindResource("ScrubV"), Minimum = 0, Maximum = 100,
                 VerticalAlignment = VerticalAlignment.Center, ToolTip = "Music volume - written to config.ini as you set it",
             };
             _volume.ValueChanged += (s, e) => { if (!_volumeSyncing) VolumeMoved(_volume.Value); };
