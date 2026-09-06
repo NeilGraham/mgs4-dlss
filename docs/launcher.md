@@ -455,11 +455,12 @@ the first time it runs: that is this program reaching out to the internet, and i
 have one? `MGS4_VGMSTREAM` in `config.ini` names it, and a `vgmstream-cli.exe` on PATH is found too. With no
 decoder the setting still shows and says what is missing.
 
-**Nothing of Konami's is copied into this repo or into a release.** The banks are read from the install the person
+**No file from the game is copied into this repo or into a release.** The banks are read from the install the person
 already owns, decoded into a cache under their own `%LOCALAPPDATA%\mgs4-dlss-launcher\music`, and played there —
-the same rule the window already follows for the key art and the game's icon. The cache keeps the four
-most-recently-used tracks and drops the rest; a decode is a third of a second and a WAV is 40 MB, so keeping every
-track anyone ever tried would be paying gigabytes to save nothing.
+the same rule the window already follows for the key art and the game's icon. The only pictures of the game that
+ship are the scene thumbnails, and those are screenshots taken while playing, not files out of it. The cache keeps
+the four most-recently-used tracks and drops the rest; a decode is a third of a second and a WAV is 40 MB, so
+keeping every track anyone ever tried would be paying gigabytes to save nothing.
 
 - **Display** and **Quality** — *the game's own*, out of `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`, the
   same file its in-game menu writes: renderer (`api`), display index, vsync, frame limiter, the four quality levels

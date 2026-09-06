@@ -77,6 +77,24 @@ is documented in **[docs/configuration.md](docs/configuration.md)**.
 - Aiming in third and first person is jittery with mouse look in the native game too; DLSS reconstructs what it is
   given and frame generation interpolates it faithfully.
 
+## Known issues
+
+Things that are wrong today and are being worked on. If you hit something not listed here, please
+[open an issue](https://github.com/NeilGraham/mgs4-dlss/issues) with the scene and your `MGS4\logs\mgs4_dlss.log`.
+
+- **Depth-of-field blur can flicker.** The separated blur layer occasionally flickers for a frame or two where the
+  game's own focus changes.
+- **HUD and menu elements can smear under frame generation.** With `FrameGen` on, UI drawn over the scene sometimes
+  leaves artifacts while the camera or the player is moving. Frame generation off removes it.
+- **Mission Briefing: the camera window flickers.** Geometry in the Nomad's CCTV / Metal Gear Mk. II window can
+  flicker between frames.
+- **Mission Briefing: vectors off the monitor.** The video call's 3D scene (Naomi's message, Campbell's) is rendered
+  as its own view and shown on the Nomad's monitor; its motion vectors are still mapped across the whole main view
+  rather than only where the monitor is on screen, so the picture around it can reproject wrongly while the call is up.
+- **Cutscene to gameplay: the camera can end wider than gameplay's.** On some transitions the view stays at the
+  cutscene's wider framing for a moment after control returns. This may be the port's own behaviour rather than the
+  add-on's; it is still being checked.
+
 ## Documentation
 
 | page | what it covers |
@@ -93,5 +111,6 @@ is documented in **[docs/configuration.md](docs/configuration.md)**.
 
 The add-on is built on the [ReShade](https://reshade.me/) add-on API (BSD-3), [MinHook](https://github.com/TsudaKageyu/minhook)
 (BSD-2, vendored), the NVIDIA DLSS and Streamline SDK headers (NVIDIA's licences, in `third_party/`), and works alongside
-[RenoDX](https://github.com/clshortfuse/renodx)'s DLSS 5 add-on. The launcher reads the game's own artwork and icon from
-the machine it runs on; none of Konami's assets are in this repository or its releases.
+[RenoDX](https://github.com/clshortfuse/renodx)'s DLSS 5 add-on. The launcher reads the game's own artwork, icon and
+music from the machine it runs on; no file from the game is copied into this repository or its releases. The scene
+thumbnails are screenshots taken while playing.

@@ -11,7 +11,7 @@
 // vgmstream's own GitHub release, once, on request, into %LOCALAPPDATA%, and the release stays the single exe it
 // has always been.
 //
-// **Nothing of Konami's is copied into this repo or into a release.** The banks are read from the install the
+// **No file from the game is copied into this repo or into a release.** The banks are read from the install the
 // person already owns, decoded to a cache under their own %LOCALAPPDATA%, and played there - the same rule the
 // window already follows for the key art and the game's icon. There is no path here that puts the game's audio
 // anywhere it could be handed on.

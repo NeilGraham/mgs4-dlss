@@ -1,6 +1,7 @@
-// The game's own artwork, from Steam's cache on this machine, and its icon out of mgs4.exe. None of it is in this
-// repo: it is Konami's, and it is already on the machine of anyone who owns the game. Every piece falls back to
-// plain text when it is not there.
+// The game's own artwork, from Steam's cache on this machine, and its icon out of mgs4.exe. None of those files is
+// in this repo: they are Konami's, and they are already on the machine of anyone who owns the game. (The scene
+// thumbnails, Thumbs.cs, are the one picture of the game that ships, and they are screenshots taken while playing.)
+// Every piece falls back to plain text when it is not there.
 using System;
 using System.Collections.Generic;
 using System.IO;
