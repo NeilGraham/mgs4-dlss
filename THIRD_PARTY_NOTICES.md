@@ -16,6 +16,7 @@ The NVIDIA DLSS and Streamline runtimes (`nvngx_dlss.dll`, `nvngx_dlssg.dll`, `s
 itself and RenoDX's `renodx-dlss5` add-on are not in this repository or its releases; the launcher's Setup tab guides
 the download of each from its own source, and each is used under its own terms.
 
-The scene thumbnails in `tools/thumbs` are screenshots of *Metal Gear Solid 4* taken while playing. Metal Gear Solid
-is a trademark of Konami Digital Entertainment, and the game's artwork belongs to Konami; the launcher reads the
-game's key art, icon and music from the player's own installation and copies none of them.
+The scene thumbnails in `tools/thumbs` and the header banner in `tools/art` are screenshots of *Metal Gear Solid 4*
+taken while playing. Metal Gear Solid is a trademark of Konami Digital Entertainment, and the game's artwork belongs
+to Konami; the launcher reads the game's key art, icon and music from the player's own installation and copies none
+of them.

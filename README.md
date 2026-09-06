@@ -116,4 +116,4 @@ The add-on is built on the [ReShade](https://reshade.me/) add-on API (BSD-3), [M
 (BSD-2, vendored), the NVIDIA DLSS and Streamline SDK headers (NVIDIA's licences, in `third_party/`), and works alongside
 [RenoDX](https://github.com/clshortfuse/renodx)'s DLSS 5 add-on. The launcher reads the game's own artwork, icon and
 music from the machine it runs on; no file from the game is copied into this repository or its releases. The scene
-thumbnails are screenshots taken while playing.
+thumbnails and the banner behind the header are screenshots taken while playing.

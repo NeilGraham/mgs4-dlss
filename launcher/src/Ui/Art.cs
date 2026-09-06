@@ -1,7 +1,7 @@
 // The game's own artwork, from Steam's cache on this machine, and its icon out of mgs4.exe. None of those files is
-// in this repo: they are Konami's, and they are already on the machine of anyone who owns the game. (The scene
-// thumbnails, Thumbs.cs, are the one picture of the game that ships, and they are screenshots taken while playing.)
-// Every piece falls back to plain text when it is not there.
+// in this repo: they are Konami's, and they are already on the machine of anyone who owns the game. (The banner
+// behind the header and the scene thumbnails, Thumbs.cs, are the pictures of the game that do ship, and they are
+// screenshots taken while playing.) Every piece falls back to plain text when it is not there.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -55,6 +55,39 @@ namespace Mgs4Launcher
                 if (art.ContainsKey("Hero") && art.ContainsKey("Logo")) break;
             }
             return art;
+        }
+
+        // The banner behind the header: the title screen's Snake, cut at 4K from the sweep's recording of it by
+        // tools\make_banner.py into tools\art\banner.jpg and built into the exe. It is a screenshot taken while
+        // playing - with the scene thumbnails, the only pictures of the game that ship - and Steam's key art
+        // (1920x620, the same face at a third of the size) is the fallback for a build without it. The logo
+        // stays Steam's. The file wins over the built-in copy, the way tools\ data does everywhere here.
+        static BitmapImage LoadBanner()
+        {
+            string path = Path.Combine(Paths.Root, "tools\\art\\banner.jpg");
+            if (Paths.Exists(path))
+            {
+                BitmapImage fromFile = Load(path);
+                if (fromFile != null) return fromFile;
+            }
+            try
+            {
+                using (Stream s = Paths.DataStream("banner.jpg"))
+                {
+                    if (s == null) return null;
+                    var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    ms.Position = 0;
+                    var bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.StreamSource = ms;
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    return bmp;
+                }
+            }
+            catch { return null; }
         }
 
         public static BitmapImage Load(string path)
@@ -127,7 +160,7 @@ namespace Mgs4Launcher
                 titleText.Visibility = Visibility.Collapsed;
             }
 
-            BitmapImage hero = Load(heroPath);
+            BitmapImage hero = LoadBanner() ?? Load(heroPath);
             double aspect = 0;
             if (hero != null && hero.PixelHeight > 0)
             {
@@ -154,7 +187,10 @@ namespace Mgs4Launcher
                 artBand.Height = band;
                 artBand.OpacityMask = Fade(h / band);
                 if (aspect <= 0) return;
-                double push = band * aspect * 0.32;          // clear of the face, over the shoulder
+                // Snake's face fills the band's height and, hair and all, is about a quarter wider than it is
+                // tall, so the band's height and a quarter clears it whatever the art's own width. Steam's key
+                // art, the fallback, cuts the face tighter and gets a little more room than it needs.
+                double push = band * 1.25;                   // clear of the face, over the shoulder
                 double lift = (h - Caption) * 0.12;          // a little above the center line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);

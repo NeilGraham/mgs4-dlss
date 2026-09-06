@@ -101,6 +101,14 @@ $resources = @(
 $resources += @("install_manifest.json", "scenes.csv", "scene_info.json") |
               ForEach-Object { "/resource:" + (Join-Path $repo "tools\$_") }
 
+# The banner behind the header: tools\art\banner.jpg, the title screen's Snake cut at 4K from the sweep's recording
+# of it (tools\make_banner.py). Optional, like the thumbnails: without it the window wears Steam's key art.
+$banner = Join-Path $repo "tools\art\banner.jpg"
+if (Test-Path -LiteralPath $banner) {
+    $resources += "/resource:$banner"
+    Write-Host ("embedding banner.jpg (" + [math]::Round((Get-Item -LiteralPath $banner).Length / 1KB) + " KB)")
+}
+
 # One frame per scene, for the banner on each row and beside the description: tools\thumbs\<id>.jpg, kept as
 # individual files in the repo so a re-pick changes one file, zipped here into the single resource Thumbs.cs
 # reads. Optional: a checkout with no pictures just gets a launcher whose rows have no banner.
