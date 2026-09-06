@@ -144,7 +144,7 @@ namespace Mgs4Launcher
         // Where Snake sits, as fractions of the band's height: how much taller than the band the art is drawn,
         // how far up it is lifted (the top of the bandana leaves, the mouth arrives), and the gap from the left.
         const double ArtScale = 1.12;
-        const double ArtLift = 0.20;
+        const double ArtLift = 0.16;
         const double ArtInset = 0;      // hard against the window's edge: any gap reads as the picture's own edge
 
         public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText, Panel navTabs,
