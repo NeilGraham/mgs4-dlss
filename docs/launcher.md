@@ -80,8 +80,10 @@ in place of the title and the game's icon on the window and the taskbar, both re
 and it is already on the machine of anyone who owns the game. Behind the header band is Snake's face from the title
 screen, cut at the game's full 4K from the catalog sweep's recording of it (`tools\make_banner.py`, into
 `tools\art\banner.jpg`) and built into the exe: a screenshot taken while playing, like the scene thumbnails. It
-sits on the left at the band's full height with the logo pushed past the face; a build without it wears Steam's
-key art, the same face at a third of the size. Every piece falls back to plain text if it is not there.
+is placed rather than fitted - a little taller than the band, lifted so the mouth is in the band and the top of
+the bandana is not, set in from the left edge - with the logo pushed past the face; the three numbers are the
+`Art*` constants at the top of `Art.cs`. A build without it wears Steam's key art, the same face at a third of
+the size. Every piece falls back to plain text if it is not there.
 
 **Scrolling.** WPF gives a wheel notch three "lines" and applies it in one jump - and in a `ListBox` a "line" is a
 whole row, so the scene list moved three scenes at a time. Three things fix that:

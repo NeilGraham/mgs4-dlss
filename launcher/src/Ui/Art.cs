@@ -141,6 +141,11 @@ namespace Mgs4Launcher
         // dissolving into the window instead of stopping on a line.
         const double Bleed = 64;        // how far past the header the art carries on, before it has faded away
         const double Caption = 32;      // the strip at the top that used to be the system title bar
+        // Where Snake sits, as fractions of the band's height: how much taller than the band the art is drawn,
+        // how far up it is lifted (the top of the bandana leaves, the mouth arrives), and the gap from the left.
+        const double ArtScale = 1.12;
+        const double ArtLift = 0.20;
+        const double ArtInset = 0.14;
 
         public static void ApplyHeader(Window win, Image logoArt, TextBlock titleText, Panel navTabs,
                                        System.Windows.Shapes.Rectangle heroArt, Border headerBar, Grid artBand)
@@ -168,11 +173,14 @@ namespace Mgs4Launcher
                 {
                     Stretch = Stretch.Uniform,
                     AlignmentX = AlignmentX.Left,
-                    AlignmentY = AlignmentY.Center,
+                    AlignmentY = AlignmentY.Top,
                 };
                 brush.Freeze();
                 heroArt.Fill = brush;
                 heroArt.Visibility = Visibility.Visible;
+                heroArt.HorizontalAlignment = HorizontalAlignment.Left;
+                heroArt.VerticalAlignment = VerticalAlignment.Top;
+                artBand.ClipToBounds = true;             // the art is drawn taller than the band, on purpose
                 aspect = (double)hero.PixelWidth / hero.PixelHeight;
             }
 
@@ -187,11 +195,18 @@ namespace Mgs4Launcher
                 artBand.Height = band;
                 artBand.OpacityMask = Fade(h / band);
                 if (aspect <= 0) return;
-                // The banner is cut bandana to chin, so Snake's face fills the band's height and is a shade wider
-                // than it is tall, with the hair fading to black past that; the band's height and a bit clears
-                // the face whatever the art's own width, and the logo lands on the fade. Steam's key art, the
-                // fallback, frames the face the same way.
-                double push = band * 1.15;                   // clear of the face, over the shoulder
+                // The art is placed rather than fitted: a little taller than the band, lifted so the top of the
+                // bandana goes out of the band and the mouth comes up into the part that is not fading, and set
+                // in from the left edge. The banner is cut bandana to chin with black below (make_banner.py), so
+                // what falls out at the foot is the shoulder, already faded in the file; the band's own fade and
+                // its clip take the rest. Steam's key art, the fallback, is framed the same way and comes out the
+                // same. The face is a shade wider than it is tall, so its clearance for the logo rides on the
+                // band's height like everything else here, and the logo lands on the hair's fade.
+                double inset = band * ArtInset;
+                heroArt.Height = band * ArtScale;
+                heroArt.Width = band * ArtScale * aspect;
+                heroArt.Margin = new Thickness(inset, -band * ArtLift, 0, 0);
+                double push = inset + band * 1.15;           // clear of the face, over the shoulder
                 double lift = (h - Caption) * 0.12;          // a little above the center line of the bar's content
                 logoArt.Margin = new Thickness(push, 0, 0, lift);
                 titleText.Margin = new Thickness(push, 0, 0, lift);
