@@ -1,4 +1,4 @@
-// The install check, as a library: which required and optional files are in place, what the settings say, and what
+﻿// The install check, as a library: which required and optional files are in place, what the settings say, and what
 // the add-on reported on its last run. A port of tools/install_checks.ps1, reading the same
 // tools/install_manifest.json - the file list, the verified versions and the download links live there, not here.
 using System;
@@ -24,7 +24,14 @@ namespace Mgs4Launcher
     class FileSpec
     {
         public string Path, Detail, Verified, Url;
+        // Another name the same file has gone by - RenoDX's add-on was renodx-dlss5.addon64 before it was
+        // renodx-dlss.addon64 - so either satisfies the check, and both at once is called out.
+        public string Alt;
         public bool Optional, Required, OptionalIfDriverOverride;
+        // The builds this add-on was verified with, by SHA-256 of the file, each with a label for the row. Only for
+        // files whose version resource says nothing (RenoDX's add-on reports 0.0.0.0): any other file is an
+        // untested build and is said so.
+        public List<KeyValuePair<string, string>> Builds = new List<KeyValuePair<string, string>>();
     }
 
     class Section
@@ -46,6 +53,23 @@ namespace Mgs4Launcher
         public string LogPath, Addon, Ngx, DlssDll, NvngxProxy, Nr, Insertion, Fg, FgTarget, Reflex,
                       Sl, DlssG, FgSupported, Driver, DriverMin, Evaluations, Feature, NrRuntime, NrFeature;
         public bool FgNoStreamline, NrCreated, HasReShadeAddonSupport, ReShadeAddonSupport;
+        // The current RenoDX build says where it ran NR: on this add-on's DLAA output (the contract), or on the
+        // whole backbuffer inside frame generation or at present - which on a wide display takes in the
+        // pillarbox, and reads the image as linear colour.
+        public bool NrOnBackbuffer;
+        public string NrSourceSize;
+        // RenoDX's Hook Method as ReShade.ini has it, and the swapchain and DLSS output sizes of the run: NR on the
+        // backbuffer is the same image as the DLAA output when the two are one size, and the pillarbox too when
+        // the swapchain is wider.
+        public string NrHook;
+        public int SwapW, SwapH, OutW, OutH;
+        // The current RenoDX build binds its NR runtime lazily. With Streamline in the process it has been seen
+        // never getting there on its own - this many "BindDevice rejected unavailable runtime state" lines - until
+        // a setting in its tab was changed.
+        public int NrRejections;
+        // Whether ReShade's init_device reached RenoDX at all - it never did for the game's own device in any run
+        // here, so this add-on raises it once more with a WARP device (NrKick), and RenoDX attaches its runtime then.
+        public bool NrInitDevice, NrKicked;
         public TimeSpan LogAge;
         public List<string> ReShadeAddons = new List<string>();
     }
@@ -102,6 +126,17 @@ namespace Mgs4Launcher
             var p = (s ?? "").Split('.').ToList();
             while (p.Count > 3 && p[p.Count - 1] == "0") p.RemoveAt(p.Count - 1);
             return string.Join(".", p);
+        }
+
+        public static string Sha256(string path)
+        {
+            try
+            {
+                using (var h = System.Security.Cryptography.SHA256.Create())
+                using (var s = File.OpenRead(path))
+                    return BitConverter.ToString(h.ComputeHash(s)).Replace("-", "").ToLowerInvariant();
+            }
+            catch { return null; }
         }
 
         public static string IniValue(string path, string key)
@@ -252,16 +287,24 @@ namespace Mgs4Launcher
                     foreach (object fObj in (object[])d["files"])
                     {
                         var f = (Dictionary<string, object>)fObj;
-                        sec.Files.Add(new FileSpec
+                        var fs = new FileSpec
                         {
                             Path = Str(f, "path"),
+                            Alt = Str(f, "alt"),
                             Detail = Str(f, "detail"),
                             Verified = Str(f, "verified"),
                             Url = Str(f, "url"),
                             Optional = Bool(f, "optional"),
                             Required = Bool(f, "required"),
                             OptionalIfDriverOverride = Bool(f, "optionalIfDriverOverride"),
-                        });
+                        };
+                        if (f.ContainsKey("builds"))
+                            foreach (object bObj in (object[])f["builds"])
+                            {
+                                var b = (Dictionary<string, object>)bObj;
+                                fs.Builds.Add(new KeyValuePair<string, string>(Str(b, "sha256").ToLowerInvariant(), Str(b, "label")));
+                            }
+                        sec.Files.Add(fs);
                     }
                 list.Add(sec);
             }
@@ -297,6 +340,7 @@ namespace Mgs4Launcher
             if (!Paths.Exists(log)) return r;
             r.LogPath = log;
             r.LogAge = DateTime.Now - new FileInfo(log).LastWriteTime;
+            r.NrHook = IniValue(Paths.Join(game, "ReShade.ini"), "DirectNeuralRenderingHookPoint");
             string[] text;
             try { text = File.ReadAllLines(log); } catch { return r; }
             foreach (string line in text)
@@ -307,6 +351,9 @@ namespace Mgs4Launcher
                 if ((m = Regex.Match(line, "nvngx_dlss\\.dll (loaded|not loaded), _nvngx (\\S+), DLSS5 add-on (loaded|absent)")).Success)
                 { r.DlssDll = m.Groups[1].Value; r.NvngxProxy = m.Groups[2].Value; r.Nr = m.Groups[3].Value; }
                 if ((m = Regex.Match(line, "insertion: (.+?) \\(PrePost=")).Success) r.Insertion = m.Groups[1].Value;
+                if (line.Contains("NrKick: WARP D3D12 device created")) r.NrKicked = true;
+                if ((m = Regex.Match(line, "swapchain (?:created|resized): (\\d+)x(\\d+)")).Success) { r.SwapW = int.Parse(m.Groups[1].Value); r.SwapH = int.Parse(m.Groups[2].Value); }
+                if ((m = Regex.Match(line, "injecting: .*-> output (\\d+)x(\\d+)")).Success) { r.OutW = int.Parse(m.Groups[1].Value); r.OutH = int.Parse(m.Groups[2].Value); }
                 if ((m = Regex.Match(line, "frame generation: (.+?), target fps (\\d+), Reflex (\\d)")).Success)
                 { r.Fg = m.Groups[1].Value; r.FgTarget = m.Groups[2].Value; r.Reflex = m.Groups[3].Value; }
                 if (line.Contains("frame generation off at startup: Streamline not loaded")) r.FgNoStreamline = true;
@@ -335,6 +382,17 @@ namespace Mgs4Launcher
                     m = Regex.Match(line, "feature 18 created .* for NR input (\\S+) -> output (\\S+)");
                     if (m.Success) r.NrFeature = m.Groups[1].Value;
                     if (line.Contains("NGX feature create intercepted: feature=18")) r.NrCreated = true;
+                    // The current build (renodx-dlss.addon64, "DLSS-NR direct"): its own NGX feature, and a line
+                    // per source it evaluated. A DLSS-G evaluate it stepped into is the backbuffer path.
+                    m = Regex.Match(line, "CreateFeature\\(Reserved18\\) succeeded: handle=\\S+ size=(\\d+x\\d+)");
+                    if (m.Success) { r.NrCreated = true; r.NrFeature = m.Groups[1].Value; }
+                    if (Regex.IsMatch(line, "DLSS-NR direct: attached snippet .*nvngx_dlssnr")) { if (string.IsNullOrEmpty(r.NrRuntime)) r.NrRuntime = "direct"; }
+                    m = Regex.Match(line, "source evaluation completed: source=\\d+ .*size=(\\d+x\\d+)");
+                    if (m.Success) r.NrSourceSize = m.Groups[1].Value;
+                    if (line.Contains("ngx_evaluate.dlssg_observed") || line.Contains("ngx_evaluate.dlssg_copyback") || line.Contains("source-role=Backbuffer"))
+                        r.NrOnBackbuffer = true;
+                    if (line.Contains("BindDevice rejected unavailable runtime state")) r.NrRejections++;
+                    if (line.Contains("RenoDX DLSS init_device begin")) r.NrInitDevice = true;
                 }
             }
             return r;
@@ -359,6 +417,9 @@ namespace Mgs4Launcher
                 {
                     string full = Paths.Join(game, f.Path);
                     bool present = Paths.Exists(full);
+                    string name = f.Path;
+                    bool altPresent = !string.IsNullOrEmpty(f.Alt) && Paths.Exists(Paths.Join(game, f.Alt));
+                    if (!present && altPresent) { full = Paths.Join(game, f.Alt); present = true; name = f.Alt; }
                     string detail = f.Detail, value = "not found", status;
                     if (present)
                     {
@@ -377,6 +438,22 @@ namespace Mgs4Launcher
                             value = bytes >= 1024
                                 ? string.Format(CultureInfo.InvariantCulture, "{0:n0} KB", Math.Round(bytes / 1024.0))
                                 : bytes + " bytes";
+                        }
+                        // A file whose version says nothing is known by its hash: one of the verified builds, or not.
+                        if (f.Builds.Count > 0)
+                        {
+                            string sha = Sha256(full);
+                            string label = sha == null ? null : f.Builds.Where(b => b.Key == sha).Select(b => b.Value).FirstOrDefault();
+                            if (label != null) value = label;
+                            else
+                            {
+                                status = "warn";
+                                value = "untested build";
+                                detail = "not one of the builds this add-on was verified with (" + string.Join("; ", f.Builds.Select(b => b.Value)) +
+                                    "). RenoDX changes where it applies NR and how it starts between builds, so the last-run rows below say what this one did" +
+                                    (sha != null ? ". SHA-256 " + sha.Substring(0, 12) : "") + ", " +
+                                    string.Format(CultureInfo.InvariantCulture, "{0:n0} KB", Math.Round(new FileInfo(full).Length / 1024.0));
+                            }
                         }
                     }
                     else
@@ -400,7 +477,9 @@ namespace Mgs4Launcher
                         detail = "ReShade loaded but never searched for add-ons - this looks like the build WITHOUT add-on support";
                     }
                     string ownUrl = (!string.IsNullOrEmpty(f.Url) && f.Url != spec.Url) ? f.Url : null;
-                    sec.Rows.Add(new Row(status, f.Path, detail, value, ownUrl));
+                    sec.Rows.Add(new Row(status, name, detail, value, ownUrl));
+                    if (present && altPresent && name == f.Path)
+                        sec.Rows.Add(new Row("warn", f.Alt, "an older build of the same add-on next to the current one: two versions of RenoDX's DLSS add-on hooking the same NGX calls - ReShade loads both. Keep " + f.Path + " and remove this one", "also present", null));
                 }
                 sections.Add(sec);
             }
@@ -491,6 +570,32 @@ namespace Mgs4Launcher
                 if (up != null && up != "0")
                     sec.Rows.Add(new Row("warn", "RenoDX: NREnableUpscaling",
                         "on, on top of this add-on's own DLAA - two upscalers in a row", up, null));
+                // The current RenoDX build chooses where it applies NR. Left to Auto it has been seen taking the
+                // frame-generation path - the whole backbuffer, pillarbox and all on a wide display, read as
+                // linear colour. Upscaled is this add-on's DLAA output, the contract the two were built on.
+                if (Paths.Exists(Paths.Join(game, "renodx-dlss.addon64")))
+                {
+                    // RenoDX's list starts with Off: 0 Off, 1 Auto (its default), 2 Upscaled, 3 FrameGen, 4 Present.
+                    string hook = IniValue(rini, "DirectNeuralRenderingHookPoint") ?? "1";
+                    string[] hookNames = { "Off", "Auto", "Upscaled", "FrameGen", "Present" };
+                    int hi; string hookName = int.TryParse(hook.Trim(), out hi) && hi >= 0 && hi < hookNames.Length ? hookNames[hi] : hook;
+                    if (hook.Trim() == "0")
+                        sec.Rows.Add(new Row("warn", "RenoDX: Hook Method", "Off - RenoDX applies no NR. Upscaled takes this add-on's DLAA output. Settings, Neural Rendering", "Off", null));
+                    else if (hook.Trim() != "2")
+                        sec.Rows.Add(new Row("warn", "RenoDX: Hook Method",
+                            "NR is applied where RenoDX chooses: with frame generation on, the whole backbuffer inside frame generation - the pillarbox too on a wide display - with its status left at Waiting, and off again when the window loses focus. Upscaled takes this add-on's DLAA output. Settings, Neural Rendering",
+                            hookName, null));
+                    else
+                        sec.Rows.Add(new Row("ok", "RenoDX: Hook Method", "NR is applied to this add-on's DLAA output", "Upscaled", null));
+                    string req = IniValue(rini, "DirectNeuralRenderingRequireDlss");
+                    if (req != null && req.Trim() == "0")
+                        sec.Rows.Add(new Row("warn", "RenoDX: Require DLSS",
+                            "off lets RenoDX fall back to the presentation path with dummy temporal inputs - on, and it waits for this add-on's DLSS inputs", "off", null));
+                    string enc = IniValue(rini, "DirectNeuralRenderingEncoding") ?? "0";
+                    if (enc.Trim() == "0")
+                        sec.Rows.Add(new Row("info", "RenoDX: Encoding",
+                            "Auto reads a DLSS output as linear colour; this add-on's DLAA output is sRGB, so if the image looks grey pick sRGB in RenoDX's own tab", "Auto", null));
+                }
             }
 
             // A frame limiter is not part of this install - it fights a port whose physics are tied to 60 fps -
@@ -557,16 +662,52 @@ namespace Mgs4Launcher
             }
             // "it loaded" is only worth its own row when it did not go on to do anything.
             bool nrRan = !string.IsNullOrEmpty(run.NrRuntime) || run.NrCreated;
-            if (run.Nr == "loaded" && !nrRan)
-                sec.Rows.Add(new Row("warn", "Neural Rendering add-on", "renodx-dlss5 loaded but no NR pass followed", "loaded", null));
+            if (run.Nr == "loaded" && !nrRan && run.NrRejections > 0)
+                sec.Rows.Add(new Row("warn", "Neural Rendering add-on",
+                    "RenoDX loaded but never attached its NR runtime - " + run.NrRejections + " rejected passes. This build attaches it from ReShade's init_device, which never reached it here, " +
+                    "or from a change in its own tab; this add-on raises init_device once more for it (NrKick=1 in the ini)" + (run.NrKicked ? ", which this run did without RenoDX attaching" : ", which this run did not get to") +
+                    ". Until then: open the ReShade overlay, RenoDX DLSS, flip one setting and back",
+                    "never attached", null));
+            else if (run.Nr == "loaded" && !nrRan)
+                sec.Rows.Add(new Row("warn", "Neural Rendering add-on", "RenoDX loaded but no NR pass followed", "loaded", null));
             else if (run.Nr == "absent")
                 sec.Rows.Add(new Row("info", "Neural Rendering add-on", "not present - DLAA runs before the HUD instead", "absent", null));
-            if (nrRan)
+            if (nrRan && run.NrOnBackbuffer && !string.IsNullOrEmpty(run.NrSourceSize))
+                // Both: the DLAA output as asked, and then the backbuffer again inside DLSS-G - RenoDX's own
+                // experimental frame-generation path, which ignores the game-image rectangle this add-on tags.
+                sec.Rows.Add(new Row("warn", "Neural Rendering",
+                    "RenoDX ran NR on the " + run.NrSourceSize + " DLAA output, as set - and then again on the whole backbuffer inside frame generation " +
+                    "(its own experimental path, which ignores the game-image rectangle this add-on tags): that second pass is the noise in the " +
+                    "pillarbox on a wide display, and a second NR over the image. RenoDX's to fix; frame generation off sidesteps it",
+                    "DLAA output + backbuffer", null));
+            else if (nrRan && run.NrOnBackbuffer)
+            {
+                // Only the backbuffer path ran. Whether that matters is the swapchain's shape: one size with the
+                // DLAA output and it is the same image; wider, and it is the pillarbox too. Whether it can be
+                // steered is Hook Method: on Upscaled RenoDX went this way anyway (its own choice, seen when its
+                // runtime attached from inside the DLSS-G evaluate), on Auto it is what Auto picks here.
+                bool sameSize = run.SwapW > 0 && run.OutW > 0 && run.SwapW == run.OutW && run.SwapH == run.OutH;
+                bool upscaledSet = (run.NrHook ?? "").Trim() == "2";
+                string where = "RenoDX ran NR on the backbuffer inside frame generation" + (upscaledSet ? ", although its Hook Method is Upscaled" : "") + ". ";
+                if (sameSize)
+                    sec.Rows.Add(new Row("info", "Neural Rendering",
+                        where + "The swapchain is " + run.SwapW + "x" + run.SwapH + ", one size with this add-on's DLAA output, so it is the same image and looks the same" +
+                        (upscaledSet ? "; its status reads Waiting for the path it did not take" : "") + ".",
+                        "backbuffer, same image", null));
+                else
+                    sec.Rows.Add(new Row("warn", "Neural Rendering",
+                        where + "The swapchain is " + (run.SwapW > 0 ? run.SwapW + "x" + run.SwapH : "wider than the image") +
+                        " against a " + (run.OutW > 0 ? run.OutW + "x" + run.OutH : "16:9") + " image, so that pass takes in the pillarbox and reads the whole thing as linear colour. " +
+                        (upscaledSet ? "RenoDX's own path choice; frame generation off keeps it to the DLAA output" : "Set RenoDX's Hook Method to Upscaled - Settings, Neural Rendering"),
+                        "backbuffer", null));
+            }
+            else if (nrRan)
             {
                 string d = "RenoDX created its NR feature (NGX feature 18) after the DLAA one";
-                if (!string.IsNullOrEmpty(run.NrFeature)) d = "NR ran on the " + run.NrFeature + " DLAA output (NGX feature 18)";
+                string size = !string.IsNullOrEmpty(run.NrSourceSize) ? run.NrSourceSize : run.NrFeature;
+                if (!string.IsNullOrEmpty(size)) d = "NR ran on the " + size + " DLAA output (NGX feature 18)";
                 sec.Rows.Add(new Row("ok", "Neural Rendering", d,
-                    !string.IsNullOrEmpty(run.NrRuntime) ? "nvngx_dlssnr " + run.NrRuntime : "active", null));
+                    !string.IsNullOrEmpty(run.NrRuntime) ? (run.NrRuntime == "direct" ? "nvngx_dlssnr, direct" : "nvngx_dlssnr " + run.NrRuntime) : "active", null));
             }
             else if (run.Nr == "loaded")
                 sec.Rows.Add(new Row("warn", "Neural Rendering",

@@ -10,13 +10,14 @@
 //    DLSS render resolution, viewports/scissors of draws into shrunk targets are scaled, DLSS upscales the shrunk final
 //    texture into a full-size output, and the composite draw's SRV descriptor is rewritten to point at that output.
 //    Needs InternalRes in the ini (auto-detected and written on the first run) and a restart to change Mode.
-//  * NGX-hooking add-ons (renodx-dlss5) install hooks when nvngx_dlss.dll loads (inside our first CreateFeature), so the
+//  * NGX-hooking add-ons (RenoDX's DLSS add-on: renodx-dlss.addon64, renodx-dlss5.addon64 in older builds) install hooks when nvngx_dlss.dll loads (inside our first CreateFeature), so the
 //    feature is re-created once after a few frames to let them capture CreateFeature.
 //  * Still zero motion vectors and zero jitter (camera jitter + camera-only MVs are the next step).
 // Log: <game>\logs\mgs4_dlss.log. Config: <game>\mgs4_dlss.ini (Enabled/Sharpness/DebugMode live-reloaded).
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d12.h>
+#include <dxgi1_4.h>   // IDXGIFactory4::EnumWarpAdapter (NrKick)
 #include <imgui.h>
 #include <reshade.hpp>
 #include <nvsdk_ngx.h>
@@ -481,6 +482,26 @@ static int g_cfgPrePostMode = -1;            // -1 auto (pre-post unless the DLS
 static int g_cfgPrePost = 1;                 // effective: DLAA runs before the post-process/HUD passes
 static bool g_nrAddonLoaded = false;         // one of the CompositeIfLoaded modules is present in the process
 static char g_nrAddonName[64] = "";          // which one
+// NrPreload (default 1): with RenoDX's DLSS add-on in the process, load NVIDIA's nvngx_dlssnr.dll from the game
+// folder ourselves, once, as soon as the add-on is seen. RenoDX binds its NR runtime lazily and, with Streamline
+// present, has been seen never getting round to it on its own (BindDevice "unavailable runtime state" every frame
+// until a setting was changed in its tab); it hooks module loads and says its NGX hooks attach "when
+// reconstruction modules appear", so the snippet appearing is the nudge this tries. Harmless when it is not:
+// RenoDX loads the same file itself when it does attach.
+static int g_cfgNrPreload = 1;
+static bool g_nrPreloadDone = false;
+// NrKick (default 1): RenoDX's DLSS add-on only attaches its Neural Rendering runtime (nvngx_dlssnr.dll) from three
+// places - its own load (too early: no device, no settings), ReShade's init_device event (which it never received
+// in any run here) and a change in its settings tab. Until then every NR evaluation is refused with "BindDevice
+// rejected unavailable runtime state", so NR did nothing until the user flipped a setting. The kick creates a
+// WARP D3D12 device through ReShade's hooked D3D12CreateDevice once the game's swapchain exists: ReShade raises
+// init_device for it, RenoDX's handler runs its attach with the settings loaded, and the runtime binds to the
+// game's device on the next evaluation. The WARP device is kept alive for the whole run (RenoDX resets its runtime
+// state on destroy_device) and this add-on ignores it.
+static int g_cfgNrKick = 1;
+static bool g_nrKickDone = false;
+static bool g_nrKickInProgress = false;
+static ID3D12Device* g_nrKickDevice = nullptr;
 // Phase 2: dynamic-object mask. Draws whose constants do not carry the camera VP at c[0] (characters, props) are replayed
 // into a private depth buffer; the MV pass turns that into DLSS's bias-current-color mask (and optionally zero motion).
 static int g_cfgDynMask = 0;
@@ -1662,7 +1683,7 @@ static void release_dlss_resources(device* dev)
     g_dofW = g_dofH = 0; g_dofCocReadyThisFrame = false;
 }
 
-// Whether an NGX-hooking add-on (renodx-dlss5) has detoured the NGX D3D12 CreateFeature export: Detours rewrites the
+// Whether an NGX-hooking add-on (RenoDX's DLSS add-on) has detoured the NGX D3D12 CreateFeature export: Detours rewrites the
 // function's first bytes with a jump. Such add-ons capture their "DLSS contract" from CreateFeature, so the first
 // create must happen after their hooks exist.
 static int ngx_create_hooked()
@@ -1691,7 +1712,7 @@ static bool create_feature(command_list* cmd, uint32_t w, uint32_t h, uint32_t o
     cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_DepthInverted;
     ID3D12GraphicsCommandList* native = reinterpret_cast<ID3D12GraphicsCommandList*>(cmd->get_native());
     NVSDK_NGX_Handle* handle = nullptr;
-    logmsg("NGX CreateFeature DLSS: cmd %p (%s), nvngx_dlss.dll %s, _nvngx %p, DLSS5 add-on %s", (void*)native, fg::inside_streamline() ? "inside SL?" : "game", GetModuleHandleA("nvngx_dlss.dll") ? "loaded" : "not loaded", (void*)GetModuleHandleA("_nvngx.dll"), GetModuleHandleA("renodx-dlss5.addon64") ? "loaded" : "absent");
+    logmsg("NGX CreateFeature DLSS: cmd %p (%s), nvngx_dlss.dll %s, _nvngx %p, DLSS5 add-on %s", (void*)native, fg::inside_streamline() ? "inside SL?" : "game", GetModuleHandleA("nvngx_dlss.dll") ? "loaded" : "not loaded", (void*)GetModuleHandleA("_nvngx.dll"), g_nrAddonLoaded ? "loaded" : "absent");
     const int hookedBefore = ngx_create_hooked();
     NVSDK_NGX_Result r = NGX_D3D12_CREATE_DLSS_EXT(native, 1, 1, &handle, g_ngxParams, &cp);
     const int hookedAfter = ngx_create_hooked();
@@ -2614,18 +2635,23 @@ static void probe_analyze(int stage, uint32_t slot)
     }
 }
 
-// One warm-up step on a frame without a 3D scene: create the resources + the DLSS feature at the swapchain size (DLAA)
-// and run an evaluation on our own scratch textures. The game's state is restored afterwards (the draw goes on as usual).
+// One warm-up step on a frame without a 3D scene: create the resources + the DLSS feature at the size the scene will
+// have (DLAA: InternalRes, the game's render size - the swapchain's only when that is not known yet) and run an
+// evaluation on our own scratch textures. The game's state is restored afterwards (the draw goes on as usual).
+// Not the swapchain's size by default: on a display wider than the game's 16:9 the swapchain is the whole panel
+// (7680x2160 on a 32:9), and a feature built at that size is thrown away at the first real frame - a stall for
+// nothing, and a 7680-wide "DLSS output" that an NGX-hooking add-on has been seen taking for the one to process.
 static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
 {
     if (g_scaling || g_bbW == 0 || g_bbH == 0) { g_warmDone = true; return; }   // only the DLAA layout is known in advance
+    const uint32_t pw = g_internalW ? g_internalW : g_bbW, ph = g_internalH ? g_internalH : g_bbH;
     if (!ngx_init(dev)) { logmsg("pre-warm: NGX init failed - giving up"); g_warmDone = true; return; }   // with Streamline, NGX is not initialized at device creation
     LARGE_INTEGER f, t0, t1; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t0);
     const format fmt = g_dlssFmt != format::unknown ? g_dlssFmt : format::r8g8b8a8_unorm;
     if (!g_dlss) {
-        if (!ensure_resources(dev, cmd, g_bbW, g_bbH, g_bbW, g_bbH, fmt)) { logmsg("pre-warm: feature creation failed - giving up"); g_warmDone = true; return; }
+        if (!ensure_resources(dev, cmd, pw, ph, pw, ph, fmt)) { logmsg("pre-warm: feature creation failed - giving up"); g_warmDone = true; return; }
         QueryPerformanceCounter(&t1);
-        logmsg("pre-warm: DLSS feature created on a no-3D frame (f%u, %.0f ms)", g_frame, double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
+        logmsg("pre-warm: DLSS feature created on a no-3D frame at %ux%u (f%u, %.0f ms)", pw, ph, g_frame, double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart));
         restore_state(dev, cmd, s);
         return;   // the evaluations start next frame (NGX skips the create frame anyway)
     }
@@ -3354,6 +3380,37 @@ static unsigned parse_key(const char* k)
     return 0;
 }
 
+// Which of the CompositeIfLoaded modules (RenoDX's DLSS add-on by default) is in the process, if any.
+static void nr_detect()
+{
+    char list[512] = ""; GetPrivateProfileStringA("DLSS", "CompositeIfLoaded", "renodx-dlss.addon64,renodx-dlss5.addon64", list, sizeof(list), g_iniPath);
+    g_nrAddonLoaded = false; g_nrAddonName[0] = 0;
+    for (char* tok = strtok(list, ";,"); tok; tok = strtok(nullptr, ";,")) {
+        while (*tok == ' ') ++tok;
+        if (*tok && GetModuleHandleA(tok) != nullptr) { g_nrAddonLoaded = true; strncpy_s(g_nrAddonName, tok, _TRUNCATE); break; }
+    }
+}
+// The NrKick (see g_cfgNrKick): one WARP device, created through ReShade's D3D12CreateDevice hook once the game's
+// device and swapchain exist, so that init_device reaches RenoDX with its settings loaded. Runs from on_present
+// until it has happened, before the pre-warm evaluations, so the first NR pass is on the first scene frame.
+static void nr_kick()
+{
+    if (!g_cfgNrKick || g_nrKickDone || !g_bbW || !g_d3d) return;
+    if (!g_nrAddonLoaded) {
+        if (g_frame < 600) { nr_detect(); if (g_nrAddonLoaded) reload_config(); }   // seen now: the insertion point and NrPreload follow at once
+        else g_nrKickDone = true;   // no NGX add-on in the process this run: stop looking
+        if (!g_nrAddonLoaded) return;
+    }
+    g_nrKickDone = true;
+    IDXGIFactory4* factory = nullptr; IDXGIAdapter* warp = nullptr; ID3D12Device* dev = nullptr;
+    HRESULT hr = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&warp));
+    if (SUCCEEDED(hr)) { g_nrKickInProgress = true; hr = D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&dev)); g_nrKickInProgress = false; }
+    if (SUCCEEDED(hr)) { g_nrKickDevice = dev; logmsg("NrKick: WARP D3D12 device created (%p) at frame %u so ReShade raises init_device again and %s attaches its NR runtime (NrKick=0 in the ini turns this off)", (void*)dev, g_frame, g_nrAddonName); }
+    else logmsg("NrKick: WARP device creation failed (0x%08X) - %s attaches its NR runtime only from its settings tab", (unsigned)hr, g_nrAddonName);
+    if (warp) warp->Release();
+    if (factory) factory->Release();
+}
 static void reload_config()
 {
     g_cfgEnabled = GetPrivateProfileIntA("DLSS", "Enabled", 1, g_iniPath);
@@ -3377,15 +3434,20 @@ static void reload_config()
     {
         char pp[16] = "auto"; GetPrivateProfileStringA("DLSS", "PrePost", "auto", pp, sizeof(pp), g_iniPath);
         g_cfgPrePostMode = (_stricmp(pp, "auto") == 0 || strcmp(pp, "-1") == 0) ? -1 : (atoi(pp) != 0 ? 1 : 0);
-        // Add-ons that post-process DLSS's output (the DLSS 5 Neural Rendering add-on renodx-dlss5 is the known one)
-        // need the final image, so when one of the listed modules is loaded we insert at the composite. Without any,
-        // pre-post gives the cleanest AA (vignette/HUD outside DLSS). Extend the list in the ini for other tools.
-        char list[512] = ""; GetPrivateProfileStringA("DLSS", "CompositeIfLoaded", "renodx-dlss5.addon64", list, sizeof(list), g_iniPath);
-        g_nrAddonLoaded = false; g_nrAddonName[0] = 0;
-        for (char* tok = strtok(list, ";,"); tok; tok = strtok(nullptr, ";,")) {
-            while (*tok == ' ') ++tok;
-            if (*tok && GetModuleHandleA(tok) != nullptr) { g_nrAddonLoaded = true; strncpy_s(g_nrAddonName, tok, _TRUNCATE); break; }
+        // Add-ons that post-process DLSS's output (RenoDX's DLSS 5 Neural Rendering add-on is the known one: shipped
+        // as renodx-dlss.addon64 since its September 2026 builds, renodx-dlss5.addon64 before) need the final image,
+        // so when one of the listed modules is loaded we insert at the composite. Without any, pre-post gives the
+        // cleanest AA (vignette/HUD outside DLSS). Extend the list in the ini for other tools.
+        nr_detect();
+        g_cfgNrPreload = GetPrivateProfileIntA("DLSS", "NrPreload", 1, g_iniPath);
+        if (g_nrAddonLoaded && g_cfgNrPreload && !g_nrPreloadDone) {
+            g_nrPreloadDone = true;
+            wchar_t path[MAX_PATH]; swprintf_s(path, L"%s\\nvngx_dlssnr.dll", g_gameDirW);
+            if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) logmsg("NrPreload: no nvngx_dlssnr.dll next to mgs4.exe - nothing to load for %s", g_nrAddonName);
+            else if (GetModuleHandleW(L"nvngx_dlssnr.dll")) logmsg("NrPreload: nvngx_dlssnr.dll is already in the process");
+            else { HMODULE h = LoadLibraryW(path); logmsg("NrPreload: nvngx_dlssnr.dll %s for %s (NrPreload=0 in the ini turns this off)", h ? "loaded" : "failed to load", g_nrAddonName); }
         }
+        g_cfgNrKick = GetPrivateProfileIntA("DLSS", "NrKick", 1, g_iniPath);
         const int eff = g_cfgPrePostMode < 0 ? (g_nrAddonLoaded ? 0 : 1) : g_cfgPrePostMode;
         if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS post-processing add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? g_nrAddonName : "not loaded");
         g_cfgPrePost = eff;
@@ -3593,6 +3655,7 @@ static void frame_rollover()
 }
 static void on_present(command_queue* queue, swapchain* sc, const rect*, const rect*, uint32_t, const rect*)
 {
+    nr_kick();
     if (g_cfgProbe && g_probeReady && queue && sc) {   // every presented frame, generated ones included
         command_list* icl = queue->get_immediate_command_list();
         if (icl) { resource bb = sc->get_current_back_buffer(); if (bb.handle) probe_dispatch(icl, bb, resource_usage::present, 3); }
@@ -3613,6 +3676,7 @@ static void on_init_swapchain(swapchain* sc, bool resize)
 static void on_destroy_swapchain(swapchain*, bool) { g_backbuffers.clear(); }
 static void on_init_device(device* dev)
 {
+    if (g_nrKickInProgress) { logmsg("device created: the NrKick WARP device - ignored"); return; }
     logmsg("device created: api=%u (d3d12=%u)", (unsigned)dev->get_api(), (unsigned)device_api::d3d12);
     if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (set Options -> Graphics -> API to DirectX 12)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
@@ -3622,7 +3686,7 @@ static void on_init_device(device* dev)
     if (g_cfgFgMode != 0) { fg::init(g_d3d, g_gameDirW, logmsg); fg::set_frame_callback(frame_rollover); }   // before the game creates its swapchain
     else {
         logmsg("frame generation off at startup: Streamline not loaded (set FrameGen in the ini / overlay and restart to use it)");
-        // Without Streamline nothing loads NGX before our first CreateFeature, and NGX-hooking add-ons (renodx-dlss5)
+        // Without Streamline nothing loads NGX before our first CreateFeature, and NGX-hooking add-ons (RenoDX's)
         // install their hooks when _nvngx.dll loads: initialize NGX now so the first create is already hooked.
         if (g_cfgEnabled && ngx_init(dev)) logmsg("NGX initialized at device creation (no Streamline): NGX-hooking add-ons can hook before the first CreateFeature");
     }
@@ -3633,6 +3697,7 @@ static void on_init_device(device* dev)
 }
 static void on_destroy_device(device* dev)
 {
+    if (g_nrKickDevice && dev->get_native() == reinterpret_cast<uint64_t>(g_nrKickDevice)) return;   // the NrKick WARP device, not the game's
     release_dlss_resources(dev);
     if (g_mvCb) { g_mvCb->Unmap(0, nullptr); g_mvCb->Release(); g_mvCb = nullptr; g_mvCbPtr = nullptr; }
     if (g_dummyUav) { g_dummyUav->Release(); g_dummyUav = nullptr; }
@@ -3810,7 +3875,7 @@ static void draw_settings(effect_runtime*)
     if (ImGui::Checkbox("Enable MGS4 DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
     ImGui::TextDisabled("mgs4_dlss v" MGS4_DLSS_VERSION "  -  DLSS / DLAA, per-object motion vectors, frame generation, DoF after DLSS");
     if (g_dlss) ImGui::Text("%s  %ux%u -> %ux%u, preset %s%s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K",
-                            GetModuleHandleA("renodx-dlss5.addon64") ? ", DLSS 5 NR add-on loaded" : "");
+                            g_nrAddonLoaded ? ", DLSS 5 NR add-on loaded" : "");
     else ImGui::Text("NGX: %s", g_ngxReady ? "ready, no feature yet" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
     ImGui::TextDisabled("Every setting is on the MGS4 DLSS tab, and in the launcher's Settings.");
 }

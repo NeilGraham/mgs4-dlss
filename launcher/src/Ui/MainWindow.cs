@@ -418,10 +418,22 @@ namespace Mgs4Launcher
         // it did, which left Close the game pressable with nothing to close. The header used to carry a
         // idle/running/driving badge as well; the pill in the bottom bar is its successor, next to the status
         // line, small enough to be glanced at rather than read.
+        bool? _setupSawRunning;      // the running state the Setup tab's rows were last built for
+
         void RefreshState()
         {
             bool running = _gameUp;
             bool busy = RunnerBusy();
+
+            // The Setup tab's action rows - Install the add-on, Set them for me - are built with the running
+            // state baked in, since the files they write are the game's while it runs. When the game comes or
+            // goes the rows are rebuilt, which also reads the run that just ended.
+            if (_setupSawRunning != running)
+            {
+                bool first = _setupSawRunning == null;
+                _setupSawRunning = running;
+                if (!first && _sections != null) StartSetupRefresh();
+            }
 
             _stopBtn.IsEnabled = _startStopBtn.IsEnabled = _gameActivity != null || busy;
             UpdateSaveButton();

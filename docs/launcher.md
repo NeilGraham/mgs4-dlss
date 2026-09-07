@@ -550,7 +550,7 @@ What it reports, beyond whether a file exists:
      pins), extracted straight into the folder with `mgs4.exe`. That one zip carries `nvngx_dlss.dll`,
      `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set already matched to each other — the NVIDIA and
      Streamline SDKs are not needed separately.
-  4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss5.addon64`, next to
+  4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss.addon64` (`renodx-dlss5.addon64` in older pins), next to
      `mgs4.exe`. Nothing to configure; this add-on notices it.
   5. **This add-on** — `mgs4_dlss.addon64` next to `mgs4.exe`, last, so it loads with the rest already in place.
      This is the one group with an **Install the add-on** button, because it is the one group that ships with the
@@ -563,7 +563,7 @@ What it reports, beyond whether a file exists:
   worth knowing about: above 60 it gets a warning row.
 
   **Drag and drop does most of it.** The Setup tab has a drop area naming exactly what it takes —
-  `ReShade_Setup_*.exe`, `DLSS*-Streamline*.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, read
+  `ReShade_Setup_*.exe`, `DLSS*-Streamline*.zip`, `renodx-dlss.addon64`, `mgs4_dlss.addon64`, read
   straight out of the manifest so the two cannot drift. Drop any of them anywhere on the tab: archives are unpacked
   into the game folder keeping
   the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the

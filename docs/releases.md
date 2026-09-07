@@ -23,6 +23,26 @@ launcher that built itself on first run.
 - **The game's settings under the game's names.** DirectX 11 / 12, Display 1 to N for the monitors Windows has,
   Max frame rate 30 / 40 / 60, the quality levels as Low / Medium / High / Highest, the screen modes as Full Screen
   / Borderless Window / Windowed.
+- **RenoDX's current build.** Its DLSS add-on is `renodx-dlss.addon64` now, keeps its settings under
+  `[RENODX-DLSS]`, and chooses for itself where it applies NR. Left to Auto (its default, `HookPoint=1` - its list
+  starts with Off, so Upscaled is 2) it takes the whole backbuffer inside frame generation whenever frame
+  generation is on - pillarbox and all on a wide display, read as linear colour, its status stuck at Waiting, and
+  gone the moment the window loses focus. Set to Upscaled it takes this add-on's DLAA output, before frame
+  generation, focus or not. The add-on recognises the new file name (`CompositeIfLoaded` lists both) and inserts at
+  the composite for it as before; the Setup tab accepts either name, warns when both are present, reads the new
+  build's log to say which image NR ran on, and warns when RenoDX's Hook Method is not Upscaled; Settings, Neural
+  Rendering shows the new build's keys - Hook method, Require DLSS, Encoding, UI correction - or the old build's,
+  by which file is there.
+- **NR from the first frame.** The current RenoDX build only attaches its Neural Rendering runtime from ReShade's
+  `init_device` event - which never reached it here - or from a change in its own settings tab, and refuses every
+  NR pass until then ("BindDevice rejected unavailable runtime state"): NR did nothing until a setting was
+  touched. The add-on now raises `init_device` once more for it by creating one WARP D3D12 device through ReShade
+  on the first presented frame (`NrKick=1`); RenoDX attaches at once, and the first DLSS evaluation of the run
+  already carries NR. The WARP device is kept for the run and ignored by everything else.
+- **RenoDX builds by hash.** RenoDX's add-on reports no version, so the Setup tab knows it by its SHA-256: the
+  two builds this add-on was verified with (renodx-dlss of 2026-09-05, the older renodx-dlss5) are named as such,
+  any other file is called an untested build, and both files together are called out as two versions of the same
+  add-on.
 - **The Setup cards say whose they are.** Game, ReShade, NVIDIA, RenoDX and MGS4 DLSS badges, the same ones the
   Settings groups wear.
 - **One resolution setting.** The Play tab's *Set the render resolution* box and Settings' *Resolution* row were two

@@ -13,7 +13,7 @@ Supported DLSS features:
 - **Super Resolution** - DLAA, Quality, Balanced, Performance, Ultra Performance (presets K and J)
 - **Frame Generation** - DLSS-G / Multi-Frame Generation, 2x, 3x, 4x or dynamic to a target frame rate
 - **NVIDIA Reflex** - low latency, with boost, through Streamline
-- **DLSS 5 Neural Rendering** - through RenoDX's `renodx-dlss5` add-on, which this add-on detects and feeds the final image
+- **DLSS 5 Neural Rendering** - through RenoDX's `renodx-dlss` add-on, which this add-on detects and feeds the final image
 
 ## How it works
 
@@ -40,7 +40,7 @@ Each stage is taken apart, feature by feature, in **[docs/dlss-pipeline.md](docs
    put it anywhere. It is the whole mod in one file: the launcher, with the add-on and its settings built in.
 2. Run it (nothing to install - it runs on the .NET Framework that is part of Windows). It opens on **Setup**.
 3. Follow the cards in order: put the game on DirectX 12 with one button, drop the ReShade setup, the Streamline zip
-   and `renodx-dlss5.addon64` on the tab, press **Install the add-on**, re-check, play.
+   and `renodx-dlss.addon64` on the tab, press **Install the add-on**, re-check, play.
 
 **Play** opens on the three ways to start the game and nothing else. The scene list — every cutscene in MGS4, named
 and with a frame of itself, in the order the story tells them — is behind **Show all scenes** in the bottom bar,
@@ -55,7 +55,7 @@ The full walk-through, the manual route and the versions this was verified on ar
 - An NVIDIA RTX GPU. Frame generation needs an RTX 40 series or newer and a display faster than 60 Hz.
 - [ReShade](https://reshade.me/) **with add-on support**.
 - The DLSS / Streamline runtimes (the Streamline zip, `DLSS310.8.0-Streamline2.13.zip` at the time of writing) and,
-  optionally, `renodx-dlss5.addon64`, both from the
+  optionally, `renodx-dlss.addon64`, both from the
   [RenoDX Discord](https://discord.gg/renodx). They are NVIDIA's and RenoDX's files and are not redistributed here.
 
 Verified on an RTX 5090 at 3840x2160, DLAA preset K, DLSS 5 NR, dynamic frame generation to 240 fps.
@@ -99,6 +99,10 @@ Things that are wrong today and are being worked on. If you hit something not li
   draws, including ones behind other surfaces of the same model. Where a hidden part moves differently from the
   surface in front of it - the gun models in first-person view are the clearest case - DLSS can be handed the
   hidden vertex's vector, and the surface can ghost or shimmer. `DebugMode=9` (or the debug key, below) shows it.
+- **RenoDX's NR may not start on its own.** With the current `renodx-dlss.addon64` and frame generation on, RenoDX
+  has been seen never binding its NR runtime at startup - the image is DLAA only until any setting in its own tab
+  is changed (open the ReShade overlay, RenoDX DLSS, flip one setting and back). The Setup tab says when a run went
+  like that. Without frame generation it binds at once. Reported upstream.
 - **DLSS 5 Neural Rendering is not applied to pre-recorded video yet.** Some of the game's most intense sequences
   are played back as video rather than rendered by the engine (the launcher's scene list marks them *Video*). NR
   runs on what the engine renders, so those play as the port ships them.

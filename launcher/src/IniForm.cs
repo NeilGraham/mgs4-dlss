@@ -192,6 +192,26 @@ namespace Mgs4Launcher
                 "off: this add-on already runs DLAA on the final image, so NR only denoises and uplifts it",
                 null, null, IniSource.Renodx),
 
+            // The current RenoDX build - renodx-dlss.addon64, from September 2026 - keeps its settings under
+            // [RENODX-DLSS] and chooses for itself where NR is applied. Applies() shows this set or the one above,
+            // by which file is in the game folder. The values are the numbers RenoDX's own tab writes: a choice's
+            // place in its list, from 0. Hook Method's list starts with Off (its status table: 0 Off, 1 Auto,
+            // 2 Upscaled, 3 FrameGen, 4 Present), so Upscaled is 2 - 1, the default, is Auto.
+            new IniKey("Neural Rendering", "DirectNeuralRenderingHookPoint", "choice", "Hook method",
+                "where RenoDX applies NR. Upscaled is what this add-on was built for: NR on its DLAA output, before frame generation, and it stays on when the window loses focus. Auto takes the whole backbuffer inside frame generation whenever frame generation is on - the pillarbox too on a wide display - and its status stays at Waiting",
+                new[] { "0", "1", "2", "3", "4" },
+                new[] { "Off - RenoDX applies nothing", "Auto - RenoDX decides: the backbuffer while frame generation is on", "Upscaled - this add-on's DLAA output", "FrameGen - the backbuffer, inside frame generation", "Present - the backbuffer, at present" },
+                IniSource.Renodx) { Section = "RENODX-DLSS", Fallback = "1" },
+            new IniKey("Neural Rendering", "DirectNeuralRenderingRequireDlss", "bool", "Require DLSS",
+                "on: RenoDX waits for this add-on's DLSS inputs rather than falling back to the presentation path with dummy ones",
+                null, null, IniSource.Renodx) { Section = "RENODX-DLSS", Fallback = "1" },
+            new IniKey("Neural Rendering", "DirectNeuralRenderingEncoding", "int", "Encoding",
+                "how RenoDX reads the image it is given, as the number of the entry in its own tab. 0 is Auto, which takes a DLSS output for linear colour and greys this add-on's sRGB output - pick sRGB there and the number lands here",
+                null, null, IniSource.Renodx) { Section = "RENODX-DLSS", Fallback = "0" },
+            new IniKey("Neural Rendering", "DirectNeuralRenderingUiCorrectionMode", "int", "UI correction",
+                "0 is Auto: off for a DLAA source, on for the swapchain",
+                null, null, IniSource.Renodx) { Section = "RENODX-DLSS", Fallback = "0" },
+
             new IniKey("Diagnostics", "DebugMode", "choice", "Debug view", "costs frames; 0 for normal play",
                 new[] { "0", "1", "2", "3", "4", "5", "9" },
                 new[] { "off", "magenta path test", "bypass DLSS (A/B)", "trace 3 frames", "draw constants",
@@ -267,6 +287,25 @@ namespace Mgs4Launcher
 
         public static string IniPath(string gameDir) { return Paths.Join(gameDir, "mgs4_dlss.ini"); }
 
+        // The RenoDX rows come in two sets, one per build of that add-on, told apart by the file in the game
+        // folder: renodx-dlss.addon64 keeps [RENODX-DLSS], renodx-dlss5.addon64 kept [RenoDX.DLSS5]. With both
+        // there, or neither, the current build's set is the one shown.
+        public static bool Applies(IniKey spec, string gameDir)
+        {
+            if (spec.Source != IniSource.Renodx) return true;
+            bool current = Paths.Exists(Paths.Join(gameDir, "renodx-dlss.addon64"));
+            bool old = Paths.Exists(Paths.Join(gameDir, "renodx-dlss5.addon64"));
+            bool wantOld = old && !current;
+            return string.Equals(spec.Section, "RenoDX.DLSS5", StringComparison.OrdinalIgnoreCase) ? wantOld : !wantOld;
+        }
+
+        // The file a key is written to, with its section where the file has one - what a card's blurb says.
+        public static string FileLabel(IniKey spec)
+        {
+            return spec.Source == IniSource.Renodx && !string.IsNullOrEmpty(spec.Section)
+                ? "ReShade.ini [" + spec.Section + "]" : SourceLabel(spec.Source);
+        }
+
         // The file a key is written to. The game's is found by searching the save folder, so it is resolved once
         // and handed around rather than re-searched per row.
         public static string PathFor(IniSource source, string gameDir)
@@ -281,7 +320,7 @@ namespace Mgs4Launcher
         {
             if (source == IniSource.Addon) return "mgs4_dlss.ini";
             if (source == IniSource.Launcher) return "config.ini";
-            if (source == IniSource.Renodx) return "ReShade.ini [RenoDX.DLSS5]";
+            if (source == IniSource.Renodx) return "ReShade.ini";
             return "mgs4.savedsettings";
         }
 
@@ -340,13 +379,13 @@ namespace Mgs4Launcher
         {
             var outp = new List<string>();
             string addonIni = IniPath(gameDir), gameIni = PathFor(IniSource.Game, gameDir);
-            foreach (var group in Spec.GroupBy(k => k.Group))
+            foreach (var group in Spec.Where(k => Applies(k, gameDir)).GroupBy(k => k.Group))
             {
                 var files = new List<string>();
                 foreach (IniKey spec in group)
                 {
                     string file = PathFor(spec.Source, gameDir);
-                    string line = SourceLabel(spec.Source) + ": " + (string.IsNullOrEmpty(file) ? "not found" : file);
+                    string line = FileLabel(spec) + ": " + (string.IsNullOrEmpty(file) ? "not found" : file);
                     if (!files.Contains(line)) files.Add(line);
                 }
                 outp.Add("");
@@ -373,30 +412,32 @@ namespace Mgs4Launcher
                 say("mgs4.exe is running - it rewrites these through the profile API and would undo this. Close it first.");
                 return 1;
             }
-            var byFile = new Dictionary<IniSource, List<KeyValuePair<string, string>>>();
+            // Grouped by file and, within ReShade.ini, by section: the two RenoDX builds keep different ones.
+            var byFile = new List<Tuple<IniSource, string, List<KeyValuePair<string, string>>>>();
             foreach (string set in sets)
             {
                 Match m = Regex.Match(set, "^\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(.*)$");
                 if (!m.Success) { say("not a Key=Value: " + set); return 1; }
                 IniKey spec = Find(m.Groups[1].Value);
                 IniSource source = spec != null ? spec.Source : IniSource.Addon;
-                if (!byFile.ContainsKey(source)) byFile[source] = new List<KeyValuePair<string, string>>();
-                byFile[source].Add(new KeyValuePair<string, string>(m.Groups[1].Value, m.Groups[2].Value.Trim()));
+                string section = spec != null ? spec.Section : null;
+                var bucket = byFile.Find(t => t.Item1 == source && string.Equals(t.Item2, section, StringComparison.OrdinalIgnoreCase));
+                if (bucket == null) { bucket = Tuple.Create(source, section, new List<KeyValuePair<string, string>>()); byFile.Add(bucket); }
+                bucket.Item3.Add(new KeyValuePair<string, string>(m.Groups[1].Value, m.Groups[2].Value.Trim()));
             }
             foreach (var kv in byFile)
             {
-                string file = PathFor(kv.Key, gameDir);
-                if (kv.Key == IniSource.Launcher) file = Paths.EnsureConfig();
+                string file = PathFor(kv.Item1, gameDir);
+                if (kv.Item1 == IniSource.Launcher) file = Paths.EnsureConfig();
                 if (string.IsNullOrEmpty(file) || !Paths.Exists(file))
                 {
-                    say("no " + SourceLabel(kv.Key) + " to write to" +
-                        (kv.Key == IniSource.Game ? " - run the game once and it writes one" : ""));
+                    say("no " + SourceLabel(kv.Item1) + " to write to" +
+                        (kv.Item1 == IniSource.Game ? " - run the game once and it writes one" : ""));
                     return 1;
                 }
-                IniKey first = Find(kv.Value[0].Key);
-                try { Checks.SetIni(file, kv.Value, first != null ? first.Section : null); }
+                try { Checks.SetIni(file, kv.Item3, kv.Item2); }
                 catch (Exception e) { say(e.Message); return 1; }
-                foreach (var set in kv.Value) say(set.Key + "=" + set.Value);
+                foreach (var set in kv.Item3) say(set.Key + "=" + set.Value);
                 say("written to " + file);
             }
             return 0;

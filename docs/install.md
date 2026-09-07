@@ -24,7 +24,8 @@ add-on. None of those can be redistributed here.
      It is named for the versions it carries (`DLSS310.8.0-Streamline2.13.zip` at the time of writing; older pins
      called it `streamline.zip`), and holds `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll`
      set, matched to each other. Any zip name is fine: what is taken out of it is decided by the file names inside.
-   - **`renodx-dlss5.addon64`** from the same Pinned Messages: drop it on the tab. Optional, and the reason to bother -
+   - **`renodx-dlss.addon64`** from the same Pinned Messages (older pins named it `renodx-dlss5.addon64`; either works,
+     but keep only one): drop it on the tab. Optional, and the reason to bother -
      with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength.
    - **This add-on**: press **Install the add-on**. It writes the `mgs4_dlss.addon64` and `mgs4_dlss.ini` built into
      the launcher next to `mgs4.exe` (an ini already there is kept).
@@ -51,7 +52,9 @@ In order, with the game closed:
    `DLSS310.8.0-Streamline2.13.zip` at the time of writing, `streamline.zip` in older pins): extract everything in it
    straight into `MGS4\` (the folder with `mgs4.exe`). If the NVIDIA app's DLSS override is on for this game it supplies
    `nvngx_dlss.dll` instead, which is fine.
-4. **`renodx-dlss5.addon64`** from the same Pinned Messages, next to `mgs4.exe`. Optional; auto-detected.
+4. **`renodx-dlss.addon64`** from the same Pinned Messages, next to `mgs4.exe` (`renodx-dlss5.addon64` in older pins;
+   keep one of the two). Optional; auto-detected. In RenoDX's own tab set **Hook Method** to *Upscaled*, so NR takes
+   this add-on's DLAA output rather than the whole backbuffer - the launcher's Settings tab has the same row.
 5. **`mgs4_dlss.addon64`** and **`mgs4_dlss.ini`** from the release, next to `mgs4.exe`, last, so the add-on loads with
    the rest in place. Keep an ini you already have: it holds your settings and the `InternalRes` the first run wrote.
 6. Start the game. The first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the
@@ -75,7 +78,7 @@ from Off needs a restart.
 | ReShade with add-on support | `dxgi.dll` | 6.8.0 |
 | DLSS / DLSS-G / DLSS NR | `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` | 310.8.0 |
 | Streamline | `sl.interposer.dll` and the other `sl.*.dll` | 2.13.0 (2.12.129 through the NVIDIA app's override) |
-| DLSS 5 Neural Rendering add-on | `renodx-dlss5.addon64` | the RenoDX Discord's current build |
+| DLSS 5 Neural Rendering add-on | `renodx-dlss.addon64` | the RenoDX Discord's current build (`renodx-dlss5.addon64` before September 2026) |
 
 These are also the versions `tools\install_manifest.json` checks against, so change both together.
 

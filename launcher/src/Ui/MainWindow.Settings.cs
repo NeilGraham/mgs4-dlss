@@ -263,11 +263,12 @@ namespace Mgs4Launcher
             // Grouped first, so a card can say every file its rows write - Display writes two of them.
             foreach (var group in IniForm.Spec.GroupBy(k => k.Group))
             {
-                var keys = group.ToList();
+                var keys = group.Where(k => IniForm.Applies(k, _gameDir)).ToList();
+                if (keys.Count == 0) continue;
                 var files = new List<string>();
                 foreach (IniKey spec in keys)
                 {
-                    string label = IniForm.SourceLabel(spec.Source);
+                    string label = IniForm.FileLabel(spec);
                     if (!files.Contains(label)) files.Add(label);
                 }
                 bool missing = GroupMissing(keys, _gameDir);
@@ -461,27 +462,32 @@ namespace Mgs4Launcher
             var written = new List<string>();
             foreach (IniSource source in new[] { IniSource.Addon, IniSource.Game, IniSource.Launcher, IniSource.Renodx })
             {
-                var values = new List<KeyValuePair<string, string>>();
-                string section = null;
+                // One write per section within a file: ReShade.ini holds a section per RenoDX build.
+                var bySection = new Dictionary<string, List<KeyValuePair<string, string>>>(StringComparer.OrdinalIgnoreCase);
                 foreach (Binding row in _settingReaders)
                 {
                     if (row.Spec.Source != source) continue;
                     string v = row.Read();
                     if (v == null) continue;
-                    section = row.Spec.Section;
-                    values.Add(new KeyValuePair<string, string>(row.Spec.Key, v));
+                    string section = row.Spec.Section ?? "";
+                    if (!bySection.ContainsKey(section)) bySection[section] = new List<KeyValuePair<string, string>>();
+                    bySection[section].Add(new KeyValuePair<string, string>(row.Spec.Key, v));
                 }
-                if (values.Count == 0) continue;
+                if (bySection.Count == 0) continue;
                 string file = IniForm.PathFor(source, _gameDir);
                 if (string.IsNullOrEmpty(file)) continue;
                 if (source == IniSource.Launcher) file = Paths.EnsureConfig();
                 if (!Paths.Exists(file)) continue;
-                try
+                foreach (var kv in bySection)
                 {
-                    Checks.SetIni(file, values, section);
-                    written.Add(values.Count + " to " + IniForm.SourceLabel(source));
+                    string where = IniForm.SourceLabel(source) + (kv.Key.Length > 0 ? " [" + kv.Key + "]" : "");
+                    try
+                    {
+                        Checks.SetIni(file, kv.Value, kv.Key.Length > 0 ? kv.Key : null);
+                        written.Add(kv.Value.Count + " to " + where);
+                    }
+                    catch (Exception e) { Say("could not write " + where + ": " + e.Message); return; }
                 }
-                catch (Exception e) { Say("could not write " + IniForm.SourceLabel(source) + ": " + e.Message); return; }
             }
             foreach (Binding b in _settingReaders) b.Original = b.Read();   // what is on screen is what is on disk
             // config.ini was read once and kept, and some of what was just written lives in it - the Play tab's
