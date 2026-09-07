@@ -6,7 +6,7 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
-## v1.3.2 (2026-09-06)
+## v1.3.2 (2026-09-07)
 
 The launcher starts Steam first, the music fades instead of cutting, and the project has a licence.
 
