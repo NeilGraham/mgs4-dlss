@@ -200,6 +200,9 @@ namespace Mgs4Launcher
             {
                 if (!Paths.Exists(path)) { log.Add("gone: " + path); continue; }
                 string name = Path.GetFileName(path);
+                // Known by hash before anything is done with it: the verified download, or an untested one.
+                string verdict = Verified(name, path);
+                if (verdict != null) log.Add(verdict);
 
                 if (Like(name, "ReShade_Setup*.exe")) { log.AddRange(RunReShadeSetup(path, gameDir)); continue; }
 
@@ -239,6 +242,20 @@ namespace Mgs4Launcher
                 catch (Exception e) { log.Add("could not copy " + name + ": " + e.Message); }
             }
             return log;
+        }
+
+        // The manifest's downloads, by hash. Null when the name is not one the list knows about at all - a zip or
+        // exe it has no hash for is not called untested, only the files it has verified copies of.
+        static string Verified(string name, string path)
+        {
+            List<DownloadSpec> known = Checks.Downloads.Where(d => Like(name, d.Name)).ToList();
+            if (known.Count == 0) return null;
+            string sha = Checks.Sha256(path);
+            if (sha == null) return null;
+            DownloadSpec hit = known.FirstOrDefault(d => d.Sha256 == sha);
+            if (hit != null) return name + ": the verified download (" + hit.Label + ")";
+            return name + ": not one of the verified downloads (" + string.Join("; ", known.Select(d => d.Label).ToArray()) +
+                   ") - an untested build, SHA-256 " + sha.Substring(0, 12) + "; it goes in all the same";
         }
 
         // ReShade's setup is scriptable, so the one step of the install that looks un-droppable is not: the target

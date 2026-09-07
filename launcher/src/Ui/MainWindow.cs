@@ -161,6 +161,10 @@ namespace Mgs4Launcher
             // anything that costs a third of a second is started for it.
             Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
                                        new Action(ApplyMusic));
+            // The daily look at GitHub for a newer launcher and a newer file list - on its own thread, after
+            // everything the window needs on screen, and only when a day has passed since the last one.
+            Win.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                                       new Action(delegate { StartUpdateCheck(false); }));
             Win.Closing += (s, e) => { StopMusic(false); SavePrefs(); };
         }
 

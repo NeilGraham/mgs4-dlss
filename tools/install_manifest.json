@@ -11,7 +11,48 @@
     "  accepts         file names this group takes by drag-and-drop; a .zip is unpacked into the game folder",
     "  bundled         this group's files ship with the app - built into the release exe - so Setup can install them itself (Install.BundledAddon)",
     "  drop            the headline file to drag in, named in the drop area; accepts is the full match list",
-    "  files[].path    relative to the game folder - the row's label"
+    "  files[].path    relative to the game folder - the row's label",
+    "  files[].builds  SHA-256 of the builds verified, for a file whose version resource says nothing",
+    "  revision        the date this list last changed; the launcher fetches the copy on master when it is newer",
+    "  downloads       the downloads the install was verified with, by SHA-256: a dropped file is matched here"
+  ],
+  "revision": "2026-09-07",
+  "downloads": [
+    {
+      "name": "ReShade_Setup_6.8.0_Addon.exe",
+      "sha256": "afe4c8f13048306307983b8b3d41d5bf00a86820440b0e57dea10950e1176445",
+      "label": "ReShade 6.8.0 with add-on support",
+      "source": "https://reshade.me/downloads/ReShade_Setup_6.8.0_Addon.exe",
+      "sourceLabel": "reshade.me"
+    },
+    {
+      "name": "DLSS310.8.0-Streamline2.13.zip",
+      "sha256": "3fdb7cb25250259332550f419dbac516a2eba778d8592da75cb2fe8abfc781d8",
+      "label": "DLSS 310.8.0 + Streamline 2.13 zip, the RenoDX Discord pin of 2026-09-07",
+      "source": "https://discord.gg/renodx",
+      "sourceLabel": "RenoDX Discord, Pinned Messages (the CDN link expires; the pin is the address)"
+    },
+    {
+      "name": "renodx-dlss.addon64",
+      "sha256": "1d855cf226857dce890cffbf7206ba9b6497ce1d471b217c1c8b44b6cd5d27e9",
+      "label": "renodx-dlss build 2026-09-05, the pin of 2026-09-07",
+      "source": "https://discord.gg/renodx",
+      "sourceLabel": "RenoDX Discord, Pinned Messages"
+    },
+    {
+      "name": "renodx-dlss5.addon64",
+      "sha256": "245c06137ad13b1ca03afaad5100c1e8f0dce8c11fe50a9272ea562f33cea601",
+      "label": "renodx-dlss5 as downloaded on 2026-08-31, the build this add-on ran with through August",
+      "source": "https://discord.gg/renodx",
+      "sourceLabel": "RenoDX Discord, Pinned Messages"
+    },
+    {
+      "name": "renodx-dlss5.addon64",
+      "sha256": "d5adf82eb44b065f4c590ac91fe824bab07afea0eb9f994bde936710c8593952",
+      "label": "renodx-dlss5 as pinned on 2026-09-07 (a later build than August's; not run here)",
+      "source": "https://discord.gg/renodx",
+      "sourceLabel": "RenoDX Discord, Pinned Messages"
+    }
   ],
   "sections": [
     {
@@ -136,7 +177,8 @@
           "detail": "the Neural Rendering add-on (renodx-dlss5.addon64 in older builds)",
           "builds": [
             { "sha256": "1d855cf226857dce890cffbf7206ba9b6497ce1d471b217c1c8b44b6cd5d27e9", "label": "build 2026-09-05, verified" },
-            { "sha256": "245c06137ad13b1ca03afaad5100c1e8f0dce8c11fe50a9272ea562f33cea601", "label": "renodx-dlss5 build of Aug 2026, verified" }
+            { "sha256": "245c06137ad13b1ca03afaad5100c1e8f0dce8c11fe50a9272ea562f33cea601", "label": "renodx-dlss5 build of Aug 2026, verified" },
+            { "sha256": "d5adf82eb44b065f4c590ac91fe824bab07afea0eb9f994bde936710c8593952", "label": "renodx-dlss5 pin of 2026-09-07, not run here" }
           ]
         }
       ]

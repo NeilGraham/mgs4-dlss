@@ -70,6 +70,8 @@ namespace Mgs4Launcher
             catch (Exception e) { Say(e.Message); return 2; }
 
             if (opt.Action == "help") { Say(Options.HelpText); return 0; }
+            if (opt.Action == "version") { Say("mgs4-dlss-launcher v" + Updates.CurrentVersion); return 0; }
+            if (opt.Action == "check-updates") { foreach (string line in Updates.Report()) Say(line); return 0; }
 
             string gameDir = opt.GameDir;
             if (string.IsNullOrEmpty(gameDir))

@@ -89,6 +89,27 @@ $refs += @("PresentationFramework.dll", "PresentationCore.dll", "WindowsBase.dll
          ForEach-Object { "/reference:" + (Join-Path $wpf $_) }
 
 $sources = @(Get-ChildItem -Path $src -Recurse -Filter *.cs | ForEach-Object { $_.FullName })
+
+# The version: MGS4_DLSS_VERSION in the add-on's source is the one number a release has, and the exe wears it too,
+# as its file version (Explorer, the Setup tab) and as the informational version Updates.cs compares with the
+# newest GitHub release. Stamped through a generated source file; a build without the define says 0.0.0.
+$versionSrc = Join-Path $repo "dlss-addon\src\mgs4_dlss.cpp"
+$version = "0.0.0"
+if (Test-Path -LiteralPath $versionSrc) {
+    $m = [regex]::Match((Get-Content -LiteralPath $versionSrc -Raw), '#define\s+MGS4_DLSS_VERSION\s+"([0-9.]+)"')
+    if ($m.Success) { $version = $m.Groups[1].Value }
+}
+$versionFile = Join-Path ([IO.Path]::GetTempPath()) "mgs4_launcher_version.cs"
+@(
+    "using System.Reflection;",
+    "[assembly: AssemblyTitle(""MGS4 DLSS Launcher"")]",
+    "[assembly: AssemblyProduct(""mgs4-dlss"")]",
+    "[assembly: AssemblyVersion(""$version.0"")]",
+    "[assembly: AssemblyFileVersion(""$version.0"")]",
+    "[assembly: AssemblyInformationalVersion(""$version"")]"
+) | Set-Content -LiteralPath $versionFile -Encoding ASCII
+$sources += $versionFile
+Write-Host "version $version (MGS4_DLSS_VERSION)"
 # No explicit resource name: csc names a resource after the file, which is exactly "Window.xaml". Passing the
 # name after a comma made PowerShell hand csc a third comma-separated field it read as a visibility keyword.
 # The tools files go in too. Paths.DataText reads tools\<name> when it is there and this copy when it is not, so
@@ -136,3 +157,4 @@ if ($LASTEXITCODE -ne 0) { throw "csc failed ($LASTEXITCODE)" }
 $size = [math]::Round((Get-Item -LiteralPath $Out).Length / 1KB)
 Write-Host "built $Out ($size KB)"
 Remove-Item -LiteralPath $ico -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $versionFile -ErrorAction SilentlyContinue

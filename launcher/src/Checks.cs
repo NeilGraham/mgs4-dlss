@@ -34,6 +34,13 @@ namespace Mgs4Launcher
         public List<KeyValuePair<string, string>> Builds = new List<KeyValuePair<string, string>>();
     }
 
+    // One download the install was verified with: the file as it came from its source, by SHA-256. A dropped file
+    // that matches is the tested one; one that does not is said to be untested and goes in all the same.
+    class DownloadSpec
+    {
+        public string Name, Sha256, Label, Source, SourceLabel;
+    }
+
     class Section
     {
         public string Id, Title, Blurb, Url, UrlLabel, Guide, SavedSettings;
@@ -85,13 +92,48 @@ namespace Mgs4Launcher
 
         public static string ManifestSource = "";    // what was actually read, for the footer and the report
         public static string ManifestError = "";     // empty unless there is no file list at all
+        public static string ManifestRevision = "";  // the list's "revision" (a date), for the update check
+        public static List<DownloadSpec> Downloads = new List<DownloadSpec>();
 
+        // The "revision" of a file list, read cheaply: it is what decides whether a fetched copy is newer.
+        public static string RevisionOf(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return "";
+            Match m = Regex.Match(json, "\"revision\"\\s*:\\s*\"([^\"]+)\"");
+            return m.Success ? m.Groups[1].Value.Trim() : "";
+        }
+
+        public static void ForgetManifest() { _manifest = null; }
+
+        // The list built into the exe, or the tools\ file in a checkout - and, when the update check has fetched a
+        // newer revision from master, that copy instead of the built-in one. A checkout's own file is never
+        // overruled: it is the one being edited.
         static string ManifestText()
         {
             string text = Paths.DataText(ManifestResource, out ManifestSource);
             if (text == null)
+            {
                 ManifestError = "no file list to check against: neither " + ManifestPath +
                                 " nor a copy inside the launcher could be read.";
+                return text;
+            }
+            if (!Paths.IsCheckout)
+            {
+                try
+                {
+                    string cached = Updates.CachedManifestPath;
+                    if (Paths.Exists(cached))
+                    {
+                        string fetched = File.ReadAllText(cached);
+                        if (string.CompareOrdinal(RevisionOf(fetched), RevisionOf(text)) > 0)
+                        {
+                            ManifestSource = "the copy fetched from GitHub on " + File.GetLastWriteTime(cached).ToString("yyyy-MM-dd");
+                            text = fetched;
+                        }
+                    }
+                }
+                catch { }
+            }
             return text;
         }
 
@@ -266,6 +308,19 @@ namespace Mgs4Launcher
 
             var ser = new JavaScriptSerializer { MaxJsonLength = 16 * 1024 * 1024 };
             var root = (Dictionary<string, object>)ser.DeserializeObject(json);
+            ManifestRevision = Str(root, "revision");
+            // The downloads the install was verified with, by hash: what a dropped file is compared against.
+            Downloads = new List<DownloadSpec>();
+            if (root.ContainsKey("downloads"))
+                foreach (object dObj in (object[])root["downloads"])
+                {
+                    var d = (Dictionary<string, object>)dObj;
+                    Downloads.Add(new DownloadSpec
+                    {
+                        Name = Str(d, "name"), Sha256 = Str(d, "sha256").ToLowerInvariant(), Label = Str(d, "label"),
+                        Source = Str(d, "source"), SourceLabel = Str(d, "sourceLabel"),
+                    });
+                }
             var list = new List<Section>();
             foreach (object secObj in (object[])root["sections"])
             {

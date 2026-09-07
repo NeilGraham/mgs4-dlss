@@ -182,6 +182,125 @@ namespace Mgs4Launcher
         // Checks.Run is file reads, PE version stamps and a driver lookup - thirty-five milliseconds with the disk
         // warm and a good deal more without. None of it touches a control, so it runs off the window's thread and
         // hands the result back to be compared where controls may be touched.
+        // ------------------------------------------------------------------------------------------- updates
+
+        Updates.Result _update;          // the last check's answer, from this run or the state file
+        bool _updateBusy, _updating;
+
+        // "Launcher  v1.3.3 - up to date, checked today 16:20" with the buttons that act on it. Painted from
+        // what is known; a check in flight says so and repaints the card when it lands.
+        Border UpdateRow()
+        {
+            if (_update == null) _update = Updates.LastKnown();
+            var row = new Border { Padding = new Thickness(18, 4, 18, 10) };
+            Grid g = Widgets.Columns("Auto", "*", "Auto");
+            TextBlock label = Widgets.Text("Launcher", 12, "#97979F");
+            label.VerticalAlignment = VerticalAlignment.Center;
+            label.Margin = new Thickness(0, 0, 14, 0);
+            g.Children.Add(label);
+
+            string text, color = "#B8B8C2";
+            string when = _update != null && _update.CheckedAt > DateTime.MinValue
+                ? (_update.CheckedAt.Date == DateTime.Today ? "today " : _update.CheckedAt.ToString("yyyy-MM-dd ")) + _update.CheckedAt.ToString("HH:mm")
+                : null;
+            if (_updateBusy) text = "v" + Updates.CurrentVersion + "  -  checking GitHub...";
+            else if (_update == null) text = "v" + Updates.CurrentVersion + "  -  not checked yet (it looks once a day when the window opens)";
+            else if (!_update.Ok) { text = "v" + Updates.CurrentVersion + "  -  " + _update.Error; color = "#FFB454"; }
+            else if (_update.Newer) { text = "v" + Updates.CurrentVersion + "  -  v" + _update.Latest.TrimStart('v') + " is out" + (when != null ? ", seen " + when : ""); color = "#7CE8A0"; }
+            else text = "v" + Updates.CurrentVersion + "  -  up to date" + (when != null ? ", checked " + when : "");
+            string listLine = "File list: revision " + (string.IsNullOrEmpty(Checks.ManifestRevision) ? "unknown" : Checks.ManifestRevision) +
+                              (string.IsNullOrEmpty(Checks.ManifestSource) ? "" : ", " + Checks.ManifestSource);
+            var lines = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            lines.Children.Add(Widgets.Text(text, 12, color));
+            TextBlock list = Widgets.Text(listLine, 11, "#97979F");
+            list.Margin = new Thickness(0, 2, 0, 0);
+            lines.Children.Add(list);
+            Grid.SetColumn(lines, 1);
+            g.Children.Add(lines);
+
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            if (_update != null && _update.Ok && _update.Newer)
+            {
+                var get = new Button
+                {
+                    Content = Updates.CanSelfUpdate ? "Update to v" + _update.Latest.TrimStart('v') : "Open the release",
+                    Style = Widgets.PrimaryStyle,
+                    Margin = new Thickness(0, 0, 8, 0),
+                    IsEnabled = !_updating,
+                    ToolTip = Updates.CanSelfUpdate
+                        ? "Downloads the release exe, checks it against the SHA-256 GitHub publishes, swaps it in and restarts. The add-on inside it is installed from the Setup tab afterwards."
+                        : "This launcher is a checkout: pull and rebuild. Opens the release page.",
+                };
+                get.Click += (s, e) => { if (Updates.CanSelfUpdate) UpdateNow(); else Widgets.Open(string.IsNullOrEmpty(_update.Page) ? Updates.ReleasesPage : _update.Page); };
+                buttons.Children.Add(get);
+                var notes = new Button { Content = "What's new", Style = Widgets.FlatStyle, Margin = new Thickness(0, 0, 8, 0), ToolTip = "The release notes on GitHub" };
+                notes.Click += (s, e) => Widgets.Open(string.IsNullOrEmpty(_update.Page) ? Updates.ReleasesPage : _update.Page);
+                buttons.Children.Add(notes);
+            }
+            var check = new Button
+            {
+                Content = "Check for updates",
+                Style = Widgets.FlatStyle,
+                IsEnabled = !_updateBusy,
+                ToolTip = "Asks GitHub for the newest release and the newest file list now, rather than at the daily look",
+            };
+            check.Click += (s, e) => StartUpdateCheck(true);
+            buttons.Children.Add(check);
+            Grid.SetColumn(buttons, 2);
+            g.Children.Add(buttons);
+            row.Child = g;
+            return row;
+        }
+
+        // Once a day on its own, or on the button. The answer repaints the Setup tab when it is showing, and a
+        // newer file list re-runs the install check against it.
+        void StartUpdateCheck(bool force)
+        {
+            if (_updateBusy) return;
+            if (!force && !Updates.Due()) return;
+            _updateBusy = true;
+            if (_installView.Visibility == Visibility.Visible && _sections != null) PaintSetup();
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                Updates.Result r;
+                try { r = Updates.Check(); }
+                catch (Exception e) { r = new Updates.Result { Current = Updates.CurrentVersion, Error = e.Message, CheckedAt = DateTime.Now }; }
+                Win.Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    _updateBusy = false;
+                    _update = r;
+                    if (r.ManifestNewer) { _sections = null; StartSetupRefresh(); }
+                    else if (_installView.Visibility == Visibility.Visible && _sections != null) PaintSetup();
+                    Say(r.Ok && r.Newer ? "v" + r.Latest.TrimStart('v') + " of the launcher is out - Setup tab" : "update check: " + r.Summary());
+                }));
+            });
+        }
+
+        void UpdateNow()
+        {
+            if (_updating || _update == null) return;
+            _updating = true;
+            Updates.Result r = _update;
+            if (_installView.Visibility == Visibility.Visible && _sections != null) PaintSetup();
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                string error = null;
+                try
+                {
+                    string exe = Updates.Download(r, t => Win.Dispatcher.BeginInvoke(new Action(delegate { Say(t); })));
+                    Updates.Apply(exe);
+                }
+                catch (Exception e) { error = e.Message; }
+                Win.Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (error == null) { Say("restarting into v" + r.Latest.TrimStart('v')); System.Windows.Application.Current.Shutdown(); return; }
+                    _updating = false;
+                    Say("update: " + error);
+                    if (_installView.Visibility == Visibility.Visible && _sections != null) PaintSetup();
+                }));
+            });
+        }
+
         void StartSetupRefresh()
         {
             if (string.IsNullOrEmpty(_gameDir))
@@ -400,6 +519,7 @@ namespace Mgs4Launcher
             g.Children.Add(buttons);
             row.Child = g;
             body.Children.Add(row);
+            body.Children.Add(UpdateRow());
             body.Children.Add(DropArea());
             return card;
         }

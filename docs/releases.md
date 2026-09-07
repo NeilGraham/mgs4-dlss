@@ -39,6 +39,13 @@ launcher that built itself on first run.
   touched. The add-on now raises `init_device` once more for it by creating one WARP D3D12 device through ReShade
   on the first presented frame (`NrKick=1`); RenoDX attaches at once, and the first DLSS evaluation of the run
   already carries NR. The WARP device is kept for the run and ignored by everything else.
+- **Updates.** The launcher looks at GitHub once a day when the window opens (or on *Check for updates*, Setup
+  tab) for a newer release of itself - the add-on and ini ride inside it - and for a newer file list on master
+  (`tools\install_manifest.json`, by its `revision` date), kept under `%LOCALAPPDATA%` when it is. A newer
+  release is one button: downloaded, checked against GitHub's SHA-256, swapped in and restarted. The exe now
+  carries its version (`--version`; Explorer's Details), stamped from `MGS4_DLSS_VERSION`. `--check-updates`
+  prints the same check. Files dropped on the Setup tab are hashed against the downloads the install was
+  verified with (`downloads` in the manifest) and called the verified one or an untested build.
 - **RenoDX builds by hash.** RenoDX's add-on reports no version, so the Setup tab knows it by its SHA-256: the
   two builds this add-on was verified with (renodx-dlss of 2026-09-05, the older renodx-dlss5) are named as such,
   any other file is called an untested build, and both files together are called out as two versions of the same

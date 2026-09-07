@@ -609,6 +609,41 @@ folder is not there; with neither, Setup says so in a card and the rest of the w
 
 The shipped ini is the configuration v1.3.2 ships with and was verified on: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
+## Updates
+
+Three things move at their own pace, and the launcher looks after each:
+
+- **The launcher itself**, released on GitHub. The newest release is asked for (`api.github.com/repos/NeilGraham/mgs4-dlss/releases/latest`)
+  and its tag compared with this exe's version, which is `MGS4_DLSS_VERSION` in `dlss-addon\src\mgs4_dlss.cpp`,
+  stamped into the exe by `launcher\build.ps1` (Explorer's Details tab shows it too; so does `--version`). A newer
+  one shows on the Setup tab's head card - *v1.3.4 is out* - with **Update to v1.3.4**: the release exe is
+  downloaded to `%LOCALAPPDATA%\mgs4-dlss-launcher\update\`, checked against the SHA-256 GitHub publishes for the
+  asset, swapped in by a script that waits for the window to close (the old exe is kept as `.old`), and started
+  again. A checkout is never replaced - it is built from source - so there the button opens the release page.
+- **The add-on and its ini** ride inside the release exe, so a new release is a new add-on: after the update, the
+  Setup tab's *Install the add-on* copies the new one next to `mgs4.exe`, and the install check says when the one
+  in the game folder is older than the one built in.
+- **The file list** (`tools\install_manifest.json`: what an install needs, the verified versions, the SHA-256 of
+  the builds and downloads this add-on was tested with) can change without a release. Its `revision` is a date;
+  the copy on the master branch is fetched with the same check and, when its revision is newer than the one built
+  into the exe, kept under `%LOCALAPPDATA%\mgs4-dlss-launcher\install_manifest.json` and used from then on. A
+  checkout's own `tools\install_manifest.json` is never overruled.
+
+When: once a day, on its own, after the window is up - counted from the last check that reached GitHub, so a
+machine that was offline looks again next time - or whenever **Check for updates** on the Setup tab is pressed.
+The state (when, what was found) is `%LOCALAPPDATA%\mgs4-dlss-launcher\updates.json`. From a terminal,
+`mgs4-dlss-launcher --check-updates` runs the same check and prints the answer.
+
+What a dropped file is: the manifest's `downloads` carry the SHA-256 of each download the install was verified
+with (the ReShade setup, the DLSS + Streamline zip, RenoDX's add-on by build), and a file dropped on the Setup tab
+is hashed before it is used - *the verified download* or *not one of the verified downloads ... an untested
+build*, which still goes in. The Discord CDN links those files come from expire within a day (the `ex=` in the
+URL), so the manifest names the pin (`https://discord.gg/renodx`, Pinned Messages) rather than a link.
+
+While the repository is private, GitHub answers the unauthenticated check with 403 and the card says so; a token
+in `MGS4_GITHUB_TOKEN` (environment or `config.ini`) lets it through for testing. Once the repository is public no
+token is needed. The check is one request an hour at most (GitHub allows 60 unauthenticated).
+
 ## Direct stage boot (what the Play tab does)
 
 `mgs4.exe --stage <name>` skips the Master Collection screen and the menus: `s00title_1` (OTC intro), `s00a00l` (cemetery opening),

@@ -53,6 +53,8 @@ namespace Mgs4Launcher
                 else if (Is(a, "^--(setup|install|check|check-install)$")) { o.Action = "install"; took = false; }
                 else if (Is(a, "^--install-addon$")) { o.Action = "install-addon"; took = false; }
                 else if (Is(a, "^--report$")) { o.Action = "report"; took = false; }
+                else if (Is(a, "^--check-updates$")) { o.Action = "check-updates"; took = false; }
+                else if (Is(a, "^(--version|-v)$")) { o.Action = "version"; took = false; }
                 else if (Is(a, "^--stop$")) { o.Action = "stop"; took = false; }
                 else if (Is(a, "^--main$")) { o.Stage = "@main"; took = false; }
                 else if (Is(a, "^--collection$")) { o.Stage = "@collection"; took = false; }
@@ -144,6 +146,8 @@ namespace Mgs4Launcher
   mgs4-dlss-launcher --setup                 the window, opened on Setup: the game folder and the install check
                                                  (the first run opens there anyway; later ones open on Play)
   mgs4-dlss-launcher --report                the install check as text, for pasting into an issue
+  mgs4-dlss-launcher --check-updates         ask GitHub for the newest release and file list, as text
+  mgs4-dlss-launcher --version               this launcher's version
   mgs4-dlss-launcher --install-addon         copy the add-on that ships here next to mgs4.exe
   mgs4-dlss-launcher <id> --shortcut <file>  save that scene, with the run options given, as a .lnk
   mgs4-dlss-launcher --settings              the window, opened on Settings: what the add-on is set to
