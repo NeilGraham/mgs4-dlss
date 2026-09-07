@@ -41,7 +41,7 @@ namespace Mgs4Launcher
         int _queueAt = -1;
 
         StackPanel _transport;
-        Button _musicBackBtn, _musicPauseBtn, _musicNextBtn, _muteBtn;
+        Button _musicBackBtn, _musicPauseBtn, _musicNextBtn, _muteBtn, _heartBtn;
         TextBlock _musicLabel, _musicAt, _musicLen;
         Slider _scrub, _volume;
         bool _scrubbing;             // the slider is being moved by the timer, not the hand, so its change is not a seek
@@ -154,6 +154,8 @@ namespace Mgs4Launcher
         const string GlyphBack = "", GlyphNext = "", GlyphPlay = "", GlyphPause = "";
         const string GlyphMute = "", GlyphVol0 = "", GlyphVol1 = "", GlyphVol2 = "", GlyphVol3 = "";
 
+        const string GlyphHeart = "", GlyphHeartFill = "";
+
         // The deck: the track's title, the buttons under it the way iTunes draws them - bare glyphs, the play one
         // larger, the speaker at the end of the row - and under those the scrubber with the time either side.
         // The volume slider is not in the bar at all: it is on a flyout that opens beside the speaker while the
@@ -179,11 +181,13 @@ namespace Mgs4Launcher
             _musicLabel.MaxWidth = 300;
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 1, 0, 1) };
-            // The speaker hangs off the row's right-hand end, and a blank of exactly its width heads the row, so
-            // the play button stays on the deck's centre line - under the title and over the scrubber - with the
-            // speaker there or not. Hidden rather than Collapsed: it has to keep its width.
-            var speakerBlank = new Border { Visibility = Visibility.Hidden };
-            row.Children.Add(speakerBlank);
+            // A heart heads the row, the speaker's twin at the other end: a click hearts the track on the deck,
+            // or takes its heart off, the same heart the playlist editor and the Menu music list show. The two are
+            // the same size with the same gap to the play buttons, so the row is symmetrical and the play button
+            // sits on the deck's centre line, under the title and over the scrubber.
+            _heartBtn = DeckButton(GlyphHeart, 12, "Heart this track", (s, e) => HeartPlaying(), deck);
+            _heartBtn.Margin = new Thickness(0, 0, 6, 0);
+            row.Children.Add(_heartBtn);
             row.Children.Add(_musicBackBtn);
             row.Children.Add(_musicPauseBtn);
             row.Children.Add(_musicNextBtn);
@@ -206,7 +210,6 @@ namespace Mgs4Launcher
                 e.Handled = true;
             };
             _muteBtn.PreviewMouseWheel += stepVolume;
-            _muteBtn.SizeChanged += (s, e) => speakerBlank.Width = _muteBtn.ActualWidth + _muteBtn.Margin.Left;
             row.Children.Add(_muteBtn);
 
             _volume = new Slider
@@ -306,6 +309,7 @@ namespace Mgs4Launcher
             // a track before it in the queue. At the head of the queue, freshly started, it has nothing - and
             // says so by going grey.
             _musicBackBtn.IsEnabled = !_musicBusy && (Position() > BackRestarts || _queueAt > 0);
+            PaintHeart();
             PaintVolume();
             if (!_deckTimer.IsEnabled) _deckTimer.Start();
             TickDeck();
@@ -327,6 +331,26 @@ namespace Mgs4Launcher
             _muteBtn.Foreground = Widgets.Brush(_muted ? "#F2C14E" : "#B8B8C2");
             _volume.Opacity = _muted ? 0.45 : 1;
             _volumePct.Text = _muted ? "off" : ((int)Math.Round(level)).ToString();
+        }
+
+        // The heart on the deck says whether the track playing is hearted, in the editor's pink.
+        void PaintHeart()
+        {
+            if (_heartBtn == null) return;
+            bool on = _musicPlaying != null && Music.Favorites.Contains(_musicPlaying);
+            _heartBtn.Content = on ? GlyphHeartFill : GlyphHeart;
+            _heartBtn.Foreground = Widgets.Brush(on ? "#F27E9A" : "#B8B8C2");
+            _heartBtn.ToolTip = on ? "Hearted - click to take the heart off" : "Heart this track - hearted tracks head every list";
+        }
+
+        // The deck's heart: the same toggle the editor's hearts are, on the track playing. The Menu music list
+        // is built with the Settings form and wears the hearts, so it is rebuilt when nothing on it is mid-edit.
+        void HeartPlaying()
+        {
+            if (_musicPlaying == null) return;
+            ToggleMusicFavorite(_musicPlaying);
+            if (!Changed()) BuildSettings();
+            PaintHeart();
         }
 
         void ShowVolume()
@@ -475,6 +499,11 @@ namespace Mgs4Launcher
         List<string> BuildQueue(string mode, string avoidFirst)
         {
             if (Music.IsShuffle(mode)) return Music.Shuffled(Music.Tracks(_gameDir), avoidFirst);
+            if (Music.IsFavoritesShuffle(mode))
+            {
+                List<string> hearts = Music.Hearted(_gameDir);
+                return hearts.Count == 0 ? null : Music.Shuffled(hearts, avoidFirst);
+            }
             if (Music.IsPlaylist(mode))
             {
                 List<string> list = Music.ReadPlaylist(_gameDir);
@@ -497,14 +526,16 @@ namespace Mgs4Launcher
             }
             if (_queue == null || _queue.Count == 0)
             {
-                Say("the playlist is empty - Settings, Launcher, Playlist");
+                Say(Music.IsFavoritesShuffle(mode)
+                    ? "nothing is hearted yet - heart some tracks in Settings, Launcher, Edit playlist"
+                    : "the playlist is empty - Settings, Launcher, Playlist");
                 return;
             }
             if (_queueAt + 1 >= _queue.Count)
             {
-                // Off the end. Shuffle deals again, with the first card of the new deal never the one just
+                // Off the end. A dealt mode deals again, with the first card of the new deal never the one just
                 // heard; a playlist simply goes round.
-                if (Music.IsShuffle(mode) || Music.IsPlaylistShuffle(mode)) _queue = BuildQueue(mode, _musicPlaying);
+                if (Music.IsDealt(mode)) _queue = BuildQueue(mode, _musicPlaying);
                 _queueAt = -1;
             }
             _queueAt++;
@@ -531,15 +562,25 @@ namespace Mgs4Launcher
             return list.FindIndex(t => string.Equals(t, track, StringComparison.OrdinalIgnoreCase));
         }
 
-        // The playlist was edited: the queue is stale. Rebuilt on the spot when the deck is on it, so what plays
-        // next is what the list now says - kept in step with the track playing where it is still in the list.
-        void PlaylistChanged()
+        // The playlist was edited, or a heart moved: a queue built from either is stale. Rebuilt on the spot when
+        // the deck is on it, so what plays next is what the list now says. A written playlist keeps its order and
+        // the deck is where the track playing sits in it; a dealt list is dealt afresh with that track at its
+        // head, so nothing cuts and the rest follows in a new order.
+        void PlaylistChanged() { QueueSourceChanged(false); }
+
+        void QueueSourceChanged(bool hearts)
         {
             string mode = MusicSetting();
-            if (!Music.IsPlaylist(mode)) { _queue = null; return; }
+            bool stale = hearts ? Music.IsFavoritesShuffle(mode) : Music.IsPlaylist(mode);
+            if (!stale) { if (!hearts) _queue = null; return; }
             _queue = BuildQueue(mode, null);
             _queueMode = mode;
             _queueAt = IndexOfTrack(_queue, _musicPlaying);
+            if (_queue != null && Music.IsDealt(mode) && _musicPlaying != null)
+            {
+                if (_queueAt >= 0) _queue.RemoveAt(_queueAt);
+                if (_queueAt >= 0 || hearts) { _queue.Insert(0, _musicPlaying); _queueAt = 0; }
+            }
             PaintTransport();
         }
 
@@ -567,9 +608,9 @@ namespace Mgs4Launcher
                 int at = IndexOfTrack(_queue, _musicPlaying);
                 if (at >= 0)
                 {
-                    // Shuffle's deal is fresh, so the track playing is moved to its head and the rest follows; a
+                    // A dealt list is fresh, so the track playing is moved to its head and the rest follows; a
                     // written playlist keeps its order, and the deck is simply where that track sits in it.
-                    if (Music.IsShuffle(now) || Music.IsPlaylistShuffle(now)) { _queue.RemoveAt(at); _queue.Insert(0, _musicPlaying); at = 0; }
+                    if (Music.IsDealt(now)) { _queue.RemoveAt(at); _queue.Insert(0, _musicPlaying); at = 0; }
                     _queueAt = at;
                     PaintTransport();
                     return;
@@ -924,6 +965,8 @@ namespace Mgs4Launcher
             if (string.IsNullOrEmpty(file)) return;
             if (!Music.Favorites.Remove(file)) Music.Favorites.Add(file);
             SavePrefs();
+            QueueSourceChanged(true);       // Hearted, shuffled plays the hearts, and they just changed
+            PaintHeart();
             FillIpod(file);
             int pick = _playlistTracks.SelectedIndex;
             for (int i = 0; i < _playlist.Count; i++)

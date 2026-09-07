@@ -1,4 +1,4 @@
-// The Setup tab: the verdict, the game folder everything is checked against, a drop area that says what it takes,
+﻿// The Setup tab: the verdict, the game folder everything is checked against, a drop area that says what it takes,
 // and one card per group of the install with a row per file.
 using System;
 using System.Collections.Generic;
@@ -83,6 +83,22 @@ namespace Mgs4Launcher
                 catch (Exception ex) { Say("drop failed: " + ex.Message); }
                 ShowSetup();
             };
+        }
+
+        // Whose thing each Setup card is, as a badge left of its title - the same badges the Settings groups wear,
+        // so a card here and a group there that concern the same file read as the same owner. The verdict and
+        // last-run cards are this window's own reading and wear none.
+        static string[] SetupBadges(string sectionId)
+        {
+            switch (sectionId)
+            {
+                case "game":     return new[] { "Game" };
+                case "reshade":  return new[] { "ReShade" };
+                case "runtimes": return new[] { "NVIDIA" };
+                case "nr":       return new[] { "RenoDX" };
+                case "addon":    return new[] { "MGS4 DLSS" };
+            }
+            return null;
         }
 
         // The chip in the warn family, since what it shows is the amber and the red: lit like a Play chip when on.
@@ -286,7 +302,7 @@ namespace Mgs4Launcher
                 if (sec.Rows.Count == 0) { kind = "info"; label = "nothing to check"; }
 
                 StackPanel body;
-                Border card = Widgets.Card(sec.Title, sec.Blurb, kind, label, null, "setup:" + sec.Id, out body);
+                Border card = Widgets.Card(sec.Title, sec.Blurb, kind, label, SetupBadges(sec.Id), "setup:" + sec.Id, out body);
                 var info = new SetupCard { Card = card, Title = sec.Title };
                 _setupCards.Add(info);
                 _setupRail.Add(sec.Title, Widgets.Status[kind].Fg, card, sec.Title + " - " + label);

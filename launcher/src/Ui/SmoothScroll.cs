@@ -1,4 +1,4 @@
-// Wheel notches and trackpad deltas both ease toward a target offset; only the time constant differs.
+﻿// Wheel notches and trackpad deltas both ease toward a target offset; only the time constant differs.
 //
 // WPF gives a notch three "lines" and applies it in one jump - and in a ListBox a "line" is a whole row, so the
 // scene list moved three scenes at a time. Hence a notch measured in pixels, and an easing to carry it.
@@ -162,6 +162,9 @@ namespace Mgs4Launcher
             if (OwnsWheel(e.OriginalSource)) return;
             ScrollViewer sv = HostFor(e.OriginalSource) ?? OnlyScroller(_win);
             if (sv == null) return;             // nothing here scrolls - leave the event alone
+            // A scroller that counts in items rather than pixels is left to WPF: the easing below thinks in
+            // pixels, and a notch's worth of those is a hundred items. None of the window's own lists is one.
+            if (sv.CanContentScroll) return;
             e.Handled = true;
 
             double gap = _since.Elapsed.TotalMilliseconds;

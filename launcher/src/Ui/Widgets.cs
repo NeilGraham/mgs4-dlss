@@ -1,4 +1,4 @@
-// The pieces every tab is built from: text, cards, rows, and the status colors. Built in code rather than XAML
+﻿// The pieces every tab is built from: text, cards, rows, and the status colors. Built in code rather than XAML
 // because the content is data - a card per manifest group, a row per file - and the XAML holds the chrome.
 using System;
 using System.Collections.Generic;
@@ -83,6 +83,9 @@ namespace Mgs4Launcher
             { "MGS4 DLSS", new StatusStyle { Bg = "#161B2A", Br = "#33436E", Fg = "#9FB6FF" } },
             { "Debug",     new StatusStyle { Bg = "#2A2312", Br = "#7A6220", Fg = "#F2C14E" } },
             { "RenoDX",    new StatusStyle { Bg = "#1E1E23", Br = "#45454F", Fg = "#B3B3BE" } },
+            // The Setup tab's other two owners: ReShade in the same neutral grey as RenoDX, NVIDIA in its green.
+            { "ReShade",   new StatusStyle { Bg = "#1E1E23", Br = "#45454F", Fg = "#B3B3BE" } },
+            { "NVIDIA",    new StatusStyle { Bg = "#14201A", Br = "#2E6B45", Fg = "#8FDC9F" } },
             // This window's own settings, as against the game's and the add-on's: the violet the scene list
             // already spends on what is watched rather than played.
             { "Launcher",  new StatusStyle { Bg = "#1D1A28", Br = "#463E6B", Fg = "#B7A6EE" } },

@@ -1,4 +1,4 @@
-# Configuration
+﻿# Configuration
 
 Every setting of the add-on lives in `MGS4\mgs4_dlss.ini`, next to `mgs4.exe`. Keys marked *live* are re-read about once a second while the game runs; the others need a restart. The ReShade overlay (Home key, Add-ons tab) edits the same file, and the launcher's Settings tab shows every key as a form - it also holds the game's own settings and RenoDX's, so it is the one place to change all three. Do not edit the ini by hand while the game runs: the add-on rewrites it through the Windows profile API and an outside edit is lost.
 
@@ -17,6 +17,8 @@ Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=0          ; 0 = never re-create the feature (NGX-hooking add-ons are detected and handled automatically)
 DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyze draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
+DebugKey=none            ; live: a key (F1..F12, or a letter) that switches DebugMode between 0 and DebugKeyMode in the game, with no overlay
+DebugKeyMode=9           ; live: the view the debug key switches on
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
 JitterSignX=1            ; NDC sign conventions (defaults follow the DLSS/Unreal convention)
 JitterSignY=-1
@@ -127,4 +129,11 @@ checkbox: with it off the "Game dynamic resolution" line should climb back to fu
 | 11 | PostDof: blur coverage |
 | 12 | PostDof: the overlay mask |
 
-All of them are in the overlay's Debug combo.
+All of them are in the overlay's Debug combo, which is on the add-on's own **MGS4 DLSS** tab in ReShade's window
+(and, in shorter form, under the add-on's entry on the Add-ons page).
+
+**The debug key.** `DebugKey` names a key - `F1` to `F12`, or a single letter - that switches `DebugMode` between
+`0` and `DebugKeyMode` (`9`, the vectors over the image, unless set otherwise) while the game has the keyboard, with
+no overlay open. It is for showing someone the motion vectors: press it, the field appears over the image, press it
+again and it is gone. The switch is written to the ini like a change from the overlay, so the overlay, the launcher's
+Settings tab (Diagnostics, **Debug key**) and the key all agree. `none`, the default, leaves the keyboard alone.

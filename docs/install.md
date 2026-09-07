@@ -1,4 +1,4 @@
-# Installing
+﻿# Installing
 
 Two ways to the same result. The launcher does the whole thing and tells you what is missing; the manual route is the
 same steps by hand. Either way the game must be on **DirectX 12** and you need **ReShade with add-on support**, plus
@@ -20,8 +20,10 @@ add-on. None of those can be redistributed here.
    - **ReShade with add-on support**: download the setup marked *with full add-on support* from
      [reshade.me](https://reshade.me/) and drop it on the tab. It is run headless against `mgs4.exe`, installs as
      `dxgi.dll`, and takes no shader packs.
-   - **`streamline.zip`** from the [RenoDX Discord](https://discord.gg/renodx), Pinned Messages: drop it on the tab. It
-     carries `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set, matched to each other.
+   - **The Streamline zip** from the [RenoDX Discord](https://discord.gg/renodx), Pinned Messages: drop it on the tab.
+     It is named for the versions it carries (`DLSS310.8.0-Streamline2.13.zip` at the time of writing; older pins
+     called it `streamline.zip`), and holds `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll`
+     set, matched to each other. Any zip name is fine: what is taken out of it is decided by the file names inside.
    - **`renodx-dlss5.addon64`** from the same Pinned Messages: drop it on the tab. Optional, and the reason to bother -
      with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength.
    - **This add-on**: press **Install the add-on**. It writes the `mgs4_dlss.addon64` and `mgs4_dlss.ini` built into
@@ -45,7 +47,8 @@ In order, with the game closed:
    support*. Run it, point it at `MGS4\mgs4.exe`, choose the Direct3D 10/11/12 renderer, tick no shader packs. It
    installs itself as `MGS4\dxgi.dll`. A ReShade build without add-on support looks correct on disk and silently loads
    nothing.
-3. **`streamline.zip`** from the [RenoDX Discord](https://discord.gg/renodx) (Pinned Messages): extract everything in it
+3. **The Streamline zip** from the [RenoDX Discord](https://discord.gg/renodx) (Pinned Messages;
+   `DLSS310.8.0-Streamline2.13.zip` at the time of writing, `streamline.zip` in older pins): extract everything in it
    straight into `MGS4\` (the folder with `mgs4.exe`). If the NVIDIA app's DLSS override is on for this game it supplies
    `nvngx_dlss.dll` instead, which is fine.
 4. **`renodx-dlss5.addon64`** from the same Pinned Messages, next to `mgs4.exe`. Optional; auto-detected.

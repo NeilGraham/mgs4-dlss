@@ -413,7 +413,8 @@ as `bgm_*` cues, and its cutscene music under `ww\bank\default`. Two of those ar
 iTunes draws its own, and under those a scrubber with the time either side - drag it or click along it to seek.
 A single picked track loops and gets pause alone; the queued modes get back and next as well. Back within three
 seconds of a track starting goes to the one before it, later than that to the top of the one playing, and at the
-head of a queue with nowhere to go it is greyed out. A speaker ends the row: a click mutes for this sitting and
+head of a queue with nowhere to go it is greyed out. A heart heads the row - a click hearts the track playing, or
+takes its heart off, the same heart the playlist editor shows - and a speaker ends it: a click mutes for this sitting and
 writes nothing, the wheel over it steps the volume by five, and while the pointer is on it a flyout opens beside
 it with the volume slider and the number, and goes a beat after the pointer has left both. The slider is
 `MGS4_MUSIC_VOLUME` and writes itself to `config.ini` a moment after it stops moving (the Settings form's own row
@@ -430,7 +431,9 @@ carries on from it (a fresh Shuffle deal is cut with that track at its head) rat
 **Shuffle** (`MGS4_MUSIC=shuffle`; a `config.ini` still saying `random` means the same) is the iPod on the Nomad:
 the whole list dealt into a random order once, walked to its end before a fresh deal is cut, and the first card of
 the new deal never the track that just finished. **Playlist** (`playlist`) plays a list of your own in order and
-goes round; **Playlist, shuffled** (`playlist-shuffle`) deals that list the same way. The list itself is
+goes round; **Playlist, shuffled** (`playlist-shuffle`) deals that list the same way; **Hearted, shuffled**
+(`favorites-shuffle`) deals the hearted tracks, and follows the hearts as they change - a heart put on or taken off
+while it plays redeals from the track playing. The list itself is
 `MGS4_PLAYLIST` in `config.ini`, file names comma-separated in play order, and is edited from the Launcher card's
 **Edit playlist...** row: the iPod on the left, the list on the right with its rows numbered in play order.
 Double-click a track or press Enter to add it, or drag it across and drop it where it should go; Delete takes one
@@ -479,16 +482,21 @@ the four most-recently-used tracks and drops the rest; a decode is a third of a 
 keeping every track anyone ever tried would be paying gigabytes to save nothing.
 
 - **Display** and **Quality** — *the game's own*, out of `mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings`, the
-  same file its in-game menu writes: renderer (`api`), display index, vsync, frame limiter, the four quality levels
-  and FXAA. Four of them are what the add-on needs set a particular way, and the Setup tab keeps its one-click
-  **Set them for me** for exactly those four.
+  same file its in-game menu writes, under the names that menu uses: DirectX version (`api`), Display (one choice per
+  monitor Windows has, numbered from 1 as the game numbers them), vsync, Max frame rate (30, 40, 60), the four
+  quality levels as Low / Medium / High / Highest, and FXAA. The game's own *Custom* graphics quality is its reading
+  of three levels set apart from the preset, not a value in the file, so there is no row for it. Four of these are
+  what the add-on needs set a particular way, and the Setup tab keeps its one-click **Set them for me** for exactly
+  those four. The game's Screen Mode and Resolution are not in this file, or in any file found so far.
 - **Display** also holds two keys that are this app's rather than the game's, in `config.ini`: **Resolution**
-  (`MGS4_RES`, a list of the game's 16:9 sizes: 720p, 1080p, 1440p, 2160p) and **Mode** (`MGS4_WINDOWING`). The game has no setting for either - it takes
-  `--res_width` / `--res_height` / `--windowing` on the command line - so these are what a scene boot passes it.
-  Empty means "let the game choose". The Play tab's own resolution box wins for the run it is ticked on, and
-  `--res` on the command line wins over both. **Mode is the unreliable one**: the port has been seen ignoring
-  `--windowing` on a `--stage` boot, and the Master Collection launcher's own display settings are where the window
-  mode really lives.
+  (`MGS4_RES`, a list of the game's 16:9 sizes: 720p, 1080p, 1440p, 2160p) and **Screen mode** (`MGS4_WINDOWING`:
+  Full Screen, Borderless Window, Windowed). The game has no file setting for either - it takes `--res_width` /
+  `--res_height` / `--windowing` on the command line - so these are what a scene boot passes it. Empty means "let
+  the game choose". The Play tab's **Set the render resolution** box is the same `MGS4_RES`: ticking it writes the
+  pick there, unticking it clears it, and the Settings row follows on the spot (and the other way round on Save).
+  `--res` on the command line wins over it for that run. **Screen mode is the unreliable one**: the port has been
+  seen ignoring `--windowing` on a `--stage` boot, and the Master Collection launcher's own display settings are
+  where the window mode really lives.
 - **DLSS**, **Frame generation**, **Image**, **Diagnostics** — the add-on's own `MGS4\mgs4_dlss.ini`.
 - **Neural Rendering** — RenoDX's, out of `[RenoDX.DLSS5]` in `MGS4\ReShade.ini`: neural uplift, intensity, style,
   local tone and structure, skin structure, and NR upscaling. They are read from that file and written back into
@@ -538,7 +546,8 @@ What it reports, beyond whether a file exists:
      add-on support* and drop it on the tab: it is run **headless against `mgs4.exe`**, installs as `dxgi.dll`, and
      takes no shader packs — none are used. Running it by hand still works.
   3. **DLSS and Streamline runtimes** — the [RenoDX Discord](https://discord.gg/renodx), Pinned Messages:
-     **`streamline.zip`**, extracted straight into the folder with `mgs4.exe`. That one zip carries `nvngx_dlss.dll`,
+     **the Streamline zip** (`DLSS310.8.0-Streamline2.13.zip` at the time of writing, `streamline.zip` in older
+     pins), extracted straight into the folder with `mgs4.exe`. That one zip carries `nvngx_dlss.dll`,
      `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll` set already matched to each other — the NVIDIA and
      Streamline SDKs are not needed separately.
   4. **DLSS 5 Neural Rendering add-on** — the same Pinned Messages: the newest `renodx-dlss5.addon64`, next to
@@ -554,7 +563,7 @@ What it reports, beyond whether a file exists:
   worth knowing about: above 60 it gets a warning row.
 
   **Drag and drop does most of it.** The Setup tab has a drop area naming exactly what it takes —
-  `ReShade_Setup_*.exe`, `streamline.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, read
+  `ReShade_Setup_*.exe`, `DLSS*-Streamline*.zip`, `renodx-dlss5.addon64`, `mgs4_dlss.addon64`, read
   straight out of the manifest so the two cannot drift. Drop any of them anywhere on the tab: archives are unpacked
   into the game folder keeping
   the folders that matter (anything the zip already put in `scripts\`, and any `.asi`, lands in `scripts\`), the

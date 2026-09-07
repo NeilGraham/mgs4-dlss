@@ -1,4 +1,4 @@
-# MGS4 DLSS
+﻿# MGS4 DLSS
 
 Real DLSS for the PC port of *Metal Gear Solid 4* (Master Collection Vol. 2): DLAA and the upscaling modes, camera and
 per-object motion vectors, frame generation, and full compatibility with **DLSS 5 Neural Rendering** - as a ReShade
@@ -39,8 +39,8 @@ Each stage is taken apart, feature by feature, in **[docs/dlss-pipeline.md](docs
 1. Download `mgs4-dlss-launcher.exe` from the [latest release](https://github.com/NeilGraham/mgs4-dlss/releases) and
    put it anywhere. It is the whole mod in one file: the launcher, with the add-on and its settings built in.
 2. Run it (nothing to install - it runs on the .NET Framework that is part of Windows). It opens on **Setup**.
-3. Follow the cards in order: put the game on DirectX 12 with one button, drop the ReShade setup, `streamline.zip` and
-   `renodx-dlss5.addon64` on the tab, press **Install the add-on**, re-check, play.
+3. Follow the cards in order: put the game on DirectX 12 with one button, drop the ReShade setup, the Streamline zip
+   and `renodx-dlss5.addon64` on the tab, press **Install the add-on**, re-check, play.
 
 **Play** opens on the three ways to start the game and nothing else. The scene list — every cutscene in MGS4, named
 and with a frame of itself, in the order the story tells them — is behind **Show all scenes** in the bottom bar,
@@ -54,7 +54,8 @@ The full walk-through, the manual route and the versions this was verified on ar
 - The Steam version of Metal Gear Solid 4 (Master Collection Vol. 2), set to **DirectX 12** in its graphics options.
 - An NVIDIA RTX GPU. Frame generation needs an RTX 40 series or newer and a display faster than 60 Hz.
 - [ReShade](https://reshade.me/) **with add-on support**.
-- The DLSS / Streamline runtimes (`streamline.zip`) and, optionally, `renodx-dlss5.addon64`, both from the
+- The DLSS / Streamline runtimes (the Streamline zip, `DLSS310.8.0-Streamline2.13.zip` at the time of writing) and,
+  optionally, `renodx-dlss5.addon64`, both from the
   [RenoDX Discord](https://discord.gg/renodx). They are NVIDIA's and RenoDX's files and are not redistributed here.
 
 Verified on an RTX 5090 at 3840x2160, DLAA preset K, DLSS 5 NR, dynamic frame generation to 240 fps.
@@ -94,6 +95,13 @@ Things that are wrong today and are being worked on. If you hit something not li
 - **Cutscene to gameplay: the camera can end wider than gameplay's.** On some transitions the view stays at the
   cutscene's wider framing for a moment after control returns. This may be the port's own behaviour rather than the
   add-on's; it is still being checked.
+- **Motion vectors from hidden geometry.** The per-object motion vectors are written for every vertex the game
+  draws, including ones behind other surfaces of the same model. Where a hidden part moves differently from the
+  surface in front of it - the gun models in first-person view are the clearest case - DLSS can be handed the
+  hidden vertex's vector, and the surface can ghost or shimmer. `DebugMode=9` (or the debug key, below) shows it.
+- **DLSS 5 Neural Rendering is not applied to pre-recorded video yet.** Some of the game's most intense sequences
+  are played back as video rather than rendered by the engine (the launcher's scene list marks them *Video*). NR
+  runs on what the engine renders, so those play as the port ships them.
 
 ## Documentation
 

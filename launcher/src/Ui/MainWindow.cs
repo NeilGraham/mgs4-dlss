@@ -584,6 +584,7 @@ namespace Mgs4Launcher
             // the saved resolution ("ResPick"; older files carried ResW / ResH as two numbers) - a size the list does not have keeps the default
             string savedRes = str("ResPick") ?? (str("ResW") != null && str("ResH") != null ? str("ResW") + "x" + str("ResH") : null);
             if (savedRes != null) SelectRes(savedRes);
+            ApplyResFromConfig();       // config.ini's MGS4_RES is the setting; the box shows it
             string stage = str("Stage");
             if (!string.IsNullOrEmpty(_opt.Stage)) stage = _opt.Stage;
             if (!string.IsNullOrEmpty(stage)) _pickedId = stage;

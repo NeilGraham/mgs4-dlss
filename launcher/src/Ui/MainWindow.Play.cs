@@ -1,4 +1,4 @@
-// The Play tab: every launchable scene, grouped by act, with the automation the tests use and the command line
+﻿// The Play tab: every launchable scene, grouped by act, with the automation the tests use and the command line
 // that does the same thing. Rows are act headers and scenes in one list - the item template shows whichever half
 // the row says it is, which keeps the grouping without a DataTemplateSelector.
 using System;
@@ -253,6 +253,11 @@ namespace Mgs4Launcher
             }
             _holdSecs.TextChanged += (s, e) => UpdatePreview();
             _resPick.SelectionChanged += (s, e) => UpdatePreview();
+            // The box and the Settings tab's Resolution row are one setting, MGS4_RES in config.ini: ticking the
+            // box writes the pick there, unticking it clears it, and the row follows on the spot.
+            _optRes.Checked += (s, e) => ResOptionChanged();
+            _optRes.Unchecked += (s, e) => ResOptionChanged();
+            _resPick.SelectionChanged += (s, e) => ResOptionChanged();
             _altPick.SelectionChanged += (s, e) =>
             {
                 string id = _altPick.SelectedItem as string;
@@ -561,6 +566,42 @@ namespace Mgs4Launcher
                 if (wh.Length == 2 && int.TryParse(wh[0], out w) && int.TryParse(wh[1], out h)) { o.Width = w; o.Height = h; }
             }
             return o;
+        }
+
+        bool _resSyncing;        // the box is being set from config.ini, not by hand: not a new value to write
+
+        void ResOptionChanged()
+        {
+            if (_restoring || _resSyncing) return;
+            string v = _optRes.IsChecked == true ? PickedRes() : "";
+            if (string.Equals(Paths.Setting("MGS4_RES", "") ?? "", v, StringComparison.Ordinal)) return;
+            try
+            {
+                Checks.SetIni(Paths.EnsureConfig(), new List<KeyValuePair<string, string>>
+                {
+                    new KeyValuePair<string, string>("MGS4_RES", v),
+                }, null);
+                Paths.ForgetConfig();
+                SyncSettingsRow("MGS4_RES", v);
+                Say(v.Length == 0 ? "resolution: the game chooses - kept in config.ini" : "resolution " + v + " - kept in config.ini");
+            }
+            catch (Exception e) { Say("could not write the resolution: " + e.Message); }
+        }
+
+        // config.ini's word on the resolution, put into the box: ticked and picked when MGS4_RES names a size,
+        // unticked when it is empty. Called on the way up, after the preferences, and after a Settings save.
+        void ApplyResFromConfig()
+        {
+            if (_optRes == null) return;
+            string v = (Paths.Setting("MGS4_RES", "") ?? "").Trim();
+            _resSyncing = true;
+            try
+            {
+                if (v.Length == 0) _optRes.IsChecked = false;
+                else { SelectRes(v); _optRes.IsChecked = true; }
+            }
+            finally { _resSyncing = false; }
+            UpdatePreview();
         }
 
         void UpdatePreview()

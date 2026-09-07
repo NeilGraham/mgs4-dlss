@@ -590,6 +590,10 @@
       <Setter Property="Foreground" Value="#ECECEE"/>
       <Setter Property="FontSize" Value="12"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <!-- The drop-down's list scrolls by the pixel, like every other list here. Left to itself it scrolls by
+           the item, and the wheel's easing (SmoothScroll), which thinks in pixels, then asked for a hundred
+           items a notch - the Menu music list went straight to its end. -->
+      <Setter Property="VirtualizingPanel.ScrollUnit" Value="Pixel"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBox">
@@ -616,7 +620,7 @@
               <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
                 <Border Background="#17171A" BorderBrush="#35353C" BorderThickness="1" CornerRadius="6"
                         MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" Margin="0,2,0,0">
-                  <ScrollViewer MaxHeight="280"><ItemsPresenter/></ScrollViewer>
+                  <ScrollViewer MaxHeight="280" CanContentScroll="False"><ItemsPresenter/></ScrollViewer>
                 </Border>
               </Popup>
             </Grid>

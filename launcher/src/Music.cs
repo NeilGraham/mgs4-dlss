@@ -80,6 +80,10 @@ namespace Mgs4Launcher
         // the whole iPod.
         public const string Playlist = "playlist", PlaylistShuffle = "playlist-shuffle";
 
+        // favorites-shuffle deals the hearted tracks the way Shuffle deals the whole iPod. Its list is the hearts,
+        // so a heart put on or taken off while it plays changes what comes next.
+        public const string FavoritesShuffle = "favorites-shuffle";
+
         public static bool IsShuffle(string setting)
         {
             return string.Equals(setting, Shuffle, StringComparison.OrdinalIgnoreCase)
@@ -96,8 +100,27 @@ namespace Mgs4Launcher
             return string.Equals(setting, PlaylistShuffle, StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool IsFavoritesShuffle(string setting)
+        {
+            return string.Equals(setting, FavoritesShuffle, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>A mode that deals its list rather than walking it in order.</summary>
+        public static bool IsDealt(string setting)
+        {
+            return IsShuffle(setting) || IsPlaylistShuffle(setting) || IsFavoritesShuffle(setting);
+        }
+
         /// <summary>A mode that walks a queue - anything but Off and a single named track.</summary>
-        public static bool IsQueued(string setting) { return IsShuffle(setting) || IsPlaylist(setting); }
+        public static bool IsQueued(string setting) { return IsShuffle(setting) || IsPlaylist(setting) || IsFavoritesShuffle(setting); }
+
+        /// <summary>The hearted tracks this install has, in the order every list shows them.</summary>
+        public static List<string> Hearted(string gameDir)
+        {
+            var outp = new List<string>();
+            foreach (string t in Ordered(Tracks(gameDir))) if (Favorites.Contains(t)) outp.Add(t);
+            return outp;
+        }
 
         // ------------------------------------------------------------------------------------ the playlist
 

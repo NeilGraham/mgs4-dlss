@@ -1,4 +1,4 @@
-// mgs4_dlss.addon64 - injects NGX DLSS into Metal Gear Solid 4 (Master Collection, bgfx on D3D12).
+﻿// mgs4_dlss.addon64 - injects NGX DLSS into Metal Gear Solid 4 (Master Collection, bgfx on D3D12).
 //
 // How it works (see docs/renderer-notes.md):
 //  * The port renders the 3D scene (UI included) into "internal resolution" RGBA8 targets with a shared R24G8 depth, then
@@ -60,8 +60,14 @@ static int g_cfgPreset = 11;          // NVSDK_NGX_DLSS_Hint_Render_Preset_K (tr
 static int g_cfgSharpness100 = 0;
 static int g_cfgLogEveryN = 600;
 static int g_cfgRecreateAfter = 0;
+// The add-on's version, as the log and ReShade's Add-ons page say it. Kept in step with docs/releases.md.
+#define MGS4_DLSS_VERSION "1.3.3"
 static int g_cfgDebugMode = 0;        // 0 normal, 1 = paint the displayed texture magenta, 2 = bypass DLSS, 3 = trace 3 frames again
 static int g_cfgLastDebugMode = 0;
+// DebugKey: a virtual key that flips DebugMode between 0 and DebugKeyMode in the game, with no overlay open - for
+// showing someone the motion vectors. 0 = no key. Read live like DebugMode itself.
+static unsigned g_cfgDebugKey = 0;
+static int g_cfgDebugKeyMode = 9;
 static NVSDK_NGX_PerfQuality_Value g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA;
 static char g_cfgModeName[32] = "DLAA";
 static uint32_t g_internalW = 0, g_internalH = 0;   // from ini InternalRes (size of the game's render targets)
@@ -3337,11 +3343,24 @@ static bool on_clear_dsv(command_list* cmd, resource_view dsv, const float* dept
 static bool on_copy_resource(command_list* cmd, resource src, resource dst) { handle_copy(cmd, src, dst, "copy_resource"); return false; }
 static bool on_copy_texture_region(command_list* cmd, resource src, uint32_t, const subresource_box*, resource dst, uint32_t, const subresource_box*, filter_mode) { handle_copy(cmd, src, dst, "copy_texture_region"); return false; }
 
+// The DebugKey setting as a virtual key: F1..F12 by name, a single letter or digit, a hex code (0x79), or nothing
+// ("", "none", "0").
+static unsigned parse_key(const char* k)
+{
+    if (!k || !*k || _stricmp(k, "none") == 0 || strcmp(k, "0") == 0) return 0;
+    if ((k[0] == 'F' || k[0] == 'f') && k[1] >= '0' && k[1] <= '9') { int n = atoi(k + 1); return (n >= 1 && n <= 24) ? VK_F1 + (n - 1) : 0; }
+    if (k[0] == '0' && (k[1] == 'x' || k[1] == 'X')) { unsigned v = (unsigned)strtoul(k, nullptr, 16); return v < 256 ? v : 0; }
+    if (!k[1]) { unsigned char c = (unsigned char)toupper((unsigned char)k[0]); return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ? c : 0; }
+    return 0;
+}
+
 static void reload_config()
 {
     g_cfgEnabled = GetPrivateProfileIntA("DLSS", "Enabled", 1, g_iniPath);
     g_cfgSharpness100 = GetPrivateProfileIntA("DLSS", "Sharpness", 0, g_iniPath);
     g_cfgDebugMode = GetPrivateProfileIntA("DLSS", "DebugMode", 0, g_iniPath);
+    { char k[32] = ""; GetPrivateProfileStringA("DLSS", "DebugKey", "", k, sizeof(k), g_iniPath); g_cfgDebugKey = parse_key(k); }
+    g_cfgDebugKeyMode = GetPrivateProfileIntA("DLSS", "DebugKeyMode", 9, g_iniPath);
     g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
     g_cfgUiMask = GetPrivateProfileIntA("DLSS", "UIMask", 1, g_iniPath);
@@ -3658,7 +3677,7 @@ static void load_config()
     logmsg("config: Enabled=%d Mode=%s RenderRes=%ux%u InternalRes=%ux%u Preset=%d Sharpness=%d%% DebugMode=%d", g_cfgEnabled, g_cfgModeName, g_cfgRenderResW, g_cfgRenderResH, g_internalW, g_internalH, g_cfgPreset, g_cfgSharpness100, g_cfgDebugMode);
 }
 
-// ---- overlay (ReShade Add-ons tab) ---------------------------------------------------------------------------------
+// ---- overlay: the add-on's own "MGS4 DLSS" tab in ReShade's window, and the same under its entry on the Add-ons page ----
 static const char* kModeNames[5] = { "DLAA (native)", "Quality", "Balanced", "Performance", "Ultra Performance" };
 static const char* kModeIni[5] = { "DLAA", "Quality", "Balanced", "Performance", "UltraPerformance" };
 static const NVSDK_NGX_PerfQuality_Value kModeVals[5] = { NVSDK_NGX_PerfQuality_Value_DLAA, NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf, NVSDK_NGX_PerfQuality_Value_UltraPerformance };
@@ -3685,6 +3704,10 @@ static void draw_overlay(effect_runtime*)
                           "Motion vectors blended over the image (a character's vector silhouette must sit on the character)", "DoF: blurred layer only", "DoF: blur coverage", "DoF: overlay mask" };
     int d = 0; for (int i = 0; i < 12; ++i) if (dbgModes[i] == g_cfgDebugMode) d = i;
     if (ImGui::Combo("Debug", &d, dbg, 12)) { write_ini_int("DebugMode", dbgModes[d]); reload_config(); }
+    if (g_cfgDebugKey) {
+        int kd = 0; for (int i = 0; i < 12; ++i) if (dbgModes[i] == g_cfgDebugKeyMode) kd = i;
+        ImGui::TextDisabled("DebugKey (0x%02X) switches Off <-> %s in the game, with this overlay closed", g_cfgDebugKey, dbg[kd]);
+    } else ImGui::TextDisabled("DebugKey=none in mgs4_dlss.ini: set a key (F1..F12) there, or in the launcher's Settings, to flip a debug view in the game");
     ImGui::Separator();
     ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
@@ -3766,6 +3789,32 @@ static void draw_overlay(effect_runtime*)
                 g_mvReady ? "ok" : (g_mvInitTried ? "FAILED" : "idle"), g_mvResets, g_camDeltaRot, g_camDeltaPos);
 }
 
+// The debug key, read the way ReShade reads its own keys - so it is the game's window that has to be in front, and
+// the overlay's key handling is respected. The switch goes through the ini, exactly as a change from the overlay
+// does, so the overlay, the launcher's Settings tab and the next reload_config all see the same DebugMode.
+static void on_reshade_present(effect_runtime* rt)
+{
+    if (!g_cfgDebugKey || !rt || !rt->is_key_pressed(g_cfgDebugKey)) return;
+    const int to = g_cfgDebugMode == 0 ? g_cfgDebugKeyMode : 0;
+    write_ini_int("DebugMode", to);
+    reload_config();
+    logmsg("DebugKey pressed: DebugMode %s", to == 0 ? "off" : "on");
+}
+
+// The block under the add-on's entry on ReShade's Add-ons page: the switch for the whole add-on, what it is
+// and what it is doing, and a pointer to the tab - the way the DLSS 5 NR add-on's reads. Everything else is on
+// the MGS4 DLSS tab, so a person opening the Add-ons page to turn things on and off is not handed the lot twice.
+static void draw_settings(effect_runtime*)
+{
+    bool en = g_cfgEnabled != 0;
+    if (ImGui::Checkbox("Enable MGS4 DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
+    ImGui::TextDisabled("mgs4_dlss v" MGS4_DLSS_VERSION "  -  DLSS / DLAA, per-object motion vectors, frame generation, DoF after DLSS");
+    if (g_dlss) ImGui::Text("%s  %ux%u -> %ux%u, preset %s%s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K",
+                            GetModuleHandleA("renodx-dlss5.addon64") ? ", DLSS 5 NR add-on loaded" : "");
+    else ImGui::Text("NGX: %s", g_ngxReady ? "ready, no feature yet" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
+    ImGui::TextDisabled("Every setting is on the MGS4 DLSS tab, and in the launcher's Settings.");
+}
+
 extern "C" __declspec(dllexport) const char* NAME = "MGS4 DLSS";
 extern "C" __declspec(dllexport) const char* DESCRIPTION = "Injects NGX DLSS (DLAA / Quality / Balanced / Performance / Ultra Performance) into Metal Gear Solid 4 (bgfx/D3D12).";
 
@@ -3779,7 +3828,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
-        logmsg("mgs4_dlss v1.3.2 registered (header API %u)", RESHADE_API_VERSION);
+        logmsg("mgs4_dlss v" MGS4_DLSS_VERSION " registered (header API %u)", RESHADE_API_VERSION);
         load_config();
         install_file_trace();   // before everything else: the stage load runs ahead of device creation
         reshade::register_event<reshade::addon_event::init_device>(on_init_device);
@@ -3808,10 +3857,16 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         reshade::register_event<reshade::addon_event::copy_resource>(on_copy_resource);
         reshade::register_event<reshade::addon_event::copy_texture_region>(on_copy_texture_region);
         reshade::register_event<reshade::addon_event::present>(on_present);
-        reshade::register_overlay(nullptr, draw_overlay);
+        reshade::register_event<reshade::addon_event::reshade_present>(on_reshade_present);
+        // A titled overlay is a tab of its own in ReShade's window, the way RenoDX's is, and carries every
+        // control; the untitled one is the short block under the add-on's entry on the Add-ons page.
+        reshade::register_overlay("MGS4 DLSS", draw_overlay);
+        reshade::register_overlay(nullptr, draw_settings);
         break; }
     case DLL_PROCESS_DETACH:
-        reshade::unregister_overlay(nullptr, draw_overlay);
+        reshade::unregister_event<reshade::addon_event::reshade_present>(on_reshade_present);
+        reshade::unregister_overlay("MGS4 DLSS", draw_overlay);
+        reshade::unregister_overlay(nullptr, draw_settings);
         reshade::unregister_addon(hModule);
         if (g_log) fclose(g_log);
         break;

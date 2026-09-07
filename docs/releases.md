@@ -6,6 +6,28 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
+## v1.3.3 (unreleased)
+
+- **Its own tab in ReShade.** The add-on's controls are on an **MGS4 DLSS** tab in ReShade's window, the way
+  RenoDX's are, as well as under its entry on the Add-ons page.
+- **A debug key.** `DebugKey` (Settings, Diagnostics, **Debug key**) names a key that switches a debug view on and
+  off in the game with no overlay open - the vectors over the image by default (`DebugKeyMode`) - for showing the
+  motion vectors to someone. Off unless set.
+- **The Streamline zip by its new name.** The Discord's pin is now named for the versions it carries
+  (`DLSS310.8.0-Streamline2.13.zip`); the Setup tab's drop area says so, and any zip name was always fine - what is
+  taken out of it goes by the file names inside.
+- **Hearted, shuffled.** A fifth Menu music mode (`MGS4_MUSIC=favorites-shuffle`) deals the hearted tracks. A heart
+  put on or taken off while it plays redeals from the track playing.
+- **Known issues** gains the motion vectors from hidden geometry (the gun models in first person) and NR not
+  reaching the pre-recorded videos.
+- **The game's settings under the game's names.** DirectX 11 / 12, Display 1 to N for the monitors Windows has,
+  Max frame rate 30 / 40 / 60, the quality levels as Low / Medium / High / Highest, the screen modes as Full Screen
+  / Borderless Window / Windowed.
+- **The Setup cards say whose they are.** Game, ReShade, NVIDIA, RenoDX and MGS4 DLSS badges, the same ones the
+  Settings groups wear.
+- **One resolution setting.** The Play tab's *Set the render resolution* box and Settings' *Resolution* row were two
+  views of different things; they are now one, `MGS4_RES`, and each follows the other.
+
 ## v1.3.2 (2026-09-07)
 
 The launcher starts Steam first, the music fades instead of cutting, and the project has a licence.
@@ -25,8 +47,9 @@ The launcher starts Steam first, the music fades instead of cutting, and the pro
   A speaker sits at the end of the deck's row: a click mutes for the sitting and writes nothing, the wheel over it
   steps the volume, and while the pointer is on it a flyout opens beside it with the slider, which writes
   `MGS4_MUSIC_VOLUME` a moment after it stops moving. Saving the Settings form leaves the track where it was unless the *mode* changed.
-- **The deck's buttons stay centred.** The speaker hangs off the right of the play buttons, and a blank of its
-  width heads the row, so pause sits under the title and over the scrubber whether the speaker is there or not.
+- **A heart on the deck.** A heart heads the deck's row, the speaker's twin at the other end: a click hearts the
+  track playing, or takes its heart off - the same heart the playlist editor and the Menu music list show. The two
+  are the same size, so the play buttons sit centred under the title and over the scrubber.
 - **The playlist editor.** Rows drag into order - the iPod's across into the list, the list's own up and down -
   and **Move up** / **Move down** (Ctrl+Up / Ctrl+Down, LB / RB on a pad) step the picked row; the playlist's rows
   are numbered in play order. A click anywhere off the card is Done, and the veil stops short of the bottom bar,

@@ -1,4 +1,4 @@
-{
+﻿{
   "_comment": [
     "The install, in the order you do it. Each group is one download and one instruction, and every row is a path",
     "relative to the folder holding mgs4.exe. launcher/src/Checks.cs reads this and renders it as the Setup tab",
@@ -62,14 +62,15 @@
       "blurb": "One zip holds all of these. nvngx_dlss.dll is what DLSS itself needs; the rest are for frame generation.",
       "url": "https://discord.gg/renodx",
       "urlLabel": "RenoDX Discord",
-      "guide": "In the Discord's Pinned Messages, take streamline.zip and extract everything in it straight into the folder with mgs4.exe. It carries the NVIDIA runtimes and the Streamline libraries together, already matched to each other - you do not need the NVIDIA or Streamline SDKs separately. If the NVIDIA app's DLSS override is on for this game it supplies nvngx_dlss.dll instead.",
+      "guide": "In the Discord's Pinned Messages, take the Streamline zip - named for the versions it carries, DLSS310.8.0-Streamline2.13.zip at the time of writing, streamline.zip in older pins - and extract everything in it straight into the folder with mgs4.exe. It carries the NVIDIA runtimes and the Streamline libraries together, already matched to each other - you do not need the NVIDIA or Streamline SDKs separately. If the NVIDIA app's DLSS override is on for this game it supplies nvngx_dlss.dll instead.",
       "accepts": [
         "streamline.zip",
+        "DLSS*Streamline*.zip",
         "sl.*.dll",
         "nvngx_*.dll"
       ],
       "drop": [
-        "streamline.zip"
+        "DLSS*-Streamline*.zip"
       ],
       "files": [
         {

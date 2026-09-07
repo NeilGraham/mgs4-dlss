@@ -1,4 +1,4 @@
-// The Settings tab: MGS4\mgs4_dlss.ini as a form, each row naming its key and what it does. Saving is blocked
+﻿// The Settings tab: MGS4\mgs4_dlss.ini as a form, each row naming its key and what it does. Saving is blocked
 // while the game is running, because the add-on owns that file then - its writes go through the Windows profile
 // API, whose cache will quietly undo an outside edit.
 using System;
@@ -258,6 +258,7 @@ namespace Mgs4Launcher
             string addonIni = IniForm.IniPath(_gameDir);
             string gameIni = IniForm.PathFor(IniSource.Game, _gameDir);
             IniForm.MusicChoices(_gameDir);     // the track list is this install's, so it is read before the rows
+            IniForm.DisplayChoices();           // and the monitors are this machine's
 
             // Grouped first, so a card can say every file its rows write - Display writes two of them.
             foreach (var group in IniForm.Spec.GroupBy(k => k.Group))
@@ -487,6 +488,7 @@ namespace Mgs4Launcher
             // own view among it, which has to change on the spot rather than at the next start.
             Paths.ForgetConfig();
             ApplyPlayView(true);
+            ApplyResFromConfig();     // the Play tab's resolution box is MGS4_RES, and it may just have been written
             ApplySetupTab();
             MusicSettingsSaved(musicWas);   // a new mode moves the deck; a new volume rides the ramp; anything else leaves it be
             UpdateSaveButton();

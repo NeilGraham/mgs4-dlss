@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
 namespace Mgs4Launcher
@@ -42,6 +43,11 @@ namespace Mgs4Launcher
 
     static class IniForm
     {
+        // Declared before Spec on purpose: static fields are initialised in the order they are written, and the
+        // quality rows below read these as Spec is built.
+        static readonly string[] QualityLevels = { "0", "1", "2", "3" };
+        static readonly string[] QualityNames = { "Low", "Medium", "High", "Highest" };
+
         public static readonly List<IniKey> Spec = new List<IniKey>
         {
             // The window's own, in config.ini beside the paths. Which half of the Play tab is on: the three ways
@@ -73,45 +79,53 @@ namespace Mgs4Launcher
             // The game's own options, out of mgs4_savedata_win\<steamid>\mgs4\mgs4.savedsettings - the same file
             // its in-game menu writes. Four of these are what the add-on needs set a particular way, and the Setup
             // tab has a button for exactly those four; the rest are here because this is where settings live.
-            new IniKey("Display", "api", "choice", "Renderer",
+            // Named the way the game's own Options screen names them, so a row here and a line in the game read
+            // as the same thing.
+            new IniKey("Display", "api", "choice", "DirectX version",
                 "this add-on is a D3D12 add-on and does nothing on the D3D11 backend",
-                new[] { "dx12", "dx11" }, new[] { "dx12 - DirectX 12", "dx11 - DirectX 11" },
+                new[] { "dx12", "dx11" }, new[] { "DirectX 12", "DirectX 11" },
                 IniSource.Game, "true", "false"),
-            new IniKey("Display", "displayIndex", "int", "Display",
-                "which monitor the game opens on, counting from 0", null, null, IniSource.Game, "true", "false") { Min = 0, Max = 7 },
+            // The choices are the monitors Windows has right now - DisplayChoices fills them in as the form is
+            // built - numbered the way the game numbers them, from 1, over a value that counts from 0.
+            new IniKey("Display", "displayIndex", "choice", "Display",
+                "which monitor the game opens on",
+                new[] { "0" }, new[] { "Display 1" }, IniSource.Game, "true", "false"),
             new IniKey("Display", "vsync", "bool", "Vsync",
-                "off pairs better with frame generation - the limiter below is what paces the game",
+                "off pairs better with frame generation - the frame rate below is what paces the game",
                 null, null, IniSource.Game, "true", "false"),
-            new IniKey("Display", "fpsLimiter", "int", "Frame limiter",
+            new IniKey("Display", "fpsLimiter", "choice", "Max frame rate",
                 "60. The port's physics are tied to it; frame generation is what puts more frames on screen",
-                null, null, IniSource.Game, "true", "false"),
+                new[] { "30", "40", "60" }, new[] { "30", "40", "60" }, IniSource.Game, "true", "false"),
 
             // This app's own, not the game's: it has no resolution or window-mode setting of its own, it takes
             // --res_width / --res_height / --windowing on the command line. They sit here because this is where a
             // person looks for them, and in config.ini because that is where the launcher's machine-local values
             // live.
             new IniKey("Display", "MGS4_RES", "choice", "Resolution",
-                "what a scene boot asks the game for (--res_width / --res_height); the port takes its 16:9 sizes and has been seen ignoring the request on a --stage boot. Empty lets the game choose; the Play tab's own list overrides it for that run",
+                "what a scene boot asks the game for (--res_width / --res_height); the port takes its 16:9 sizes and has been seen ignoring the request on a --stage boot. Empty lets the game choose. The Play tab's \"Set the render resolution\" box is this same setting",
                 new[] { "", "1280x720", "1920x1080", "2560x1440", "3840x2160" }, new[] { "let the game choose", "1280x720 (720p)", "1920x1080 (1080p)", "2560x1440 (1440p)", "3840x2160 (2160p)" },
                 IniSource.Launcher, "true", "false"),
-            new IniKey("Display", "MGS4_WINDOWING", "choice", "Mode",
-                "how the window comes up. The port has been seen ignoring this on a --stage boot; the Master Collection launcher's own display settings are the reliable place for it",
+            new IniKey("Display", "MGS4_WINDOWING", "choice", "Screen mode",
+                "how the window comes up (--windowing). The port has been seen ignoring this on a --stage boot; the Master Collection launcher's own display settings are the reliable place for it",
                 new[] { "full_exclusive", "full_borderless", "windowed" },
-                new[] { "Fullscreen", "Borderless Window", "Window" },
+                new[] { "Full Screen", "Borderless Window", "Windowed" },
                 IniSource.Launcher, "true", "false"),
 
-            new IniKey("Quality", "globalGraphicsQuality", "choice", "Overall quality",
+            // The game's four levels, under the game's own names. Its menu also shows "Custom" for a graphics
+            // quality whose three parts have been set apart from it; that is a reading of the file rather than a
+            // value in it, so there is no row for it - set the three below and the game will say Custom itself.
+            new IniKey("Quality", "globalGraphicsQuality", "choice", "Graphics quality",
                 "the preset the three below follow unless they are set apart from it",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("Quality", "textureQuality", "choice", "Textures",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("Quality", "shadowQuality", "choice", "Shadows",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
-            new IniKey("Quality", "vfxQuality", "choice", "Effects",
-                "3 is what the game writes at its highest",
-                new[] { "0", "1", "2", "3" }, new[] { "0", "1", "2", "3 - highest" }, IniSource.Game, "true", "false"),
+                QualityLevels, QualityNames, IniSource.Game, "true", "false"),
+            new IniKey("Quality", "textureQuality", "choice", "Texture quality",
+                "Highest is what the game writes at its top setting",
+                QualityLevels, QualityNames, IniSource.Game, "true", "false"),
+            new IniKey("Quality", "shadowQuality", "choice", "Shadow quality",
+                "Highest is what the game writes at its top setting",
+                QualityLevels, QualityNames, IniSource.Game, "true", "false"),
+            new IniKey("Quality", "vfxQuality", "choice", "Effect quality",
+                "Highest is what the game writes at its top setting",
+                QualityLevels, QualityNames, IniSource.Game, "true", "false"),
             new IniKey("Quality", "enableFXAA", "bool", "FXAA",
                 "off with DLAA - it only blurs the image DLSS is given",
                 null, null, IniSource.Game, "true", "false"),
@@ -182,6 +196,17 @@ namespace Mgs4Launcher
                 new[] { "0", "1", "2", "3", "4", "5", "9" },
                 new[] { "off", "magenta path test", "bypass DLSS (A/B)", "trace 3 frames", "draw constants",
                         "motion-vector field", "vectors over the image" }),
+            // The key that flips a debug view on and off in the game, without the ReShade overlay - for showing
+            // someone the motion vectors. The add-on reads both keys live and writes DebugMode back through the
+            // ini, so this form, the overlay and the key all see the same state.
+            new IniKey("Diagnostics", "DebugKey", "choice", "Debug key",
+                "press it in the game to switch the debug view below on and off; none to leave the keyboard alone",
+                new[] { "none", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" }, null) { Fallback = "none" },
+            new IniKey("Diagnostics", "DebugKeyMode", "choice", "Debug key view",
+                "what the debug key switches on; 9 puts the vector field over the image, so a character's vectors show on the character",
+                new[] { "1", "2", "5", "6", "7", "9", "10", "11", "12" },
+                new[] { "magenta path test", "bypass DLSS (A/B)", "motion-vector field", "UI layer", "HUD-less color",
+                        "vectors over the image", "DoF: blurred layer", "DoF: blur coverage", "DoF: overlay mask" }) { Fallback = "9" },
             new IniKey("Diagnostics", "SceneLog", "bool", "Scene-state log",
                 "the SCENE-STATE lines this launcher reads to tell a cutscene from gameplay - leave it on"),
             new IniKey("Diagnostics", "TraceFrames", "int", "Trace frames",
@@ -193,6 +218,25 @@ namespace Mgs4Launcher
                 "write every pipeline's bytecode to logs\\shaders"),
 
         };
+
+
+        // The Display row's choices: one per monitor Windows has right now, as the game numbers them. Like the
+        // music list this belongs to the machine rather than the spec, so it is filled in as the form is built.
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+        const int SM_CMONITORS = 80;
+
+        public static void DisplayChoices()
+        {
+            IniKey spec = Find("displayIndex");
+            if (spec == null) return;
+            int n = 1;
+            try { n = Math.Max(1, GetSystemMetrics(SM_CMONITORS)); } catch { }
+            var ids = new List<string>();
+            var labels = new List<string>();
+            for (int i = 0; i < n; i++) { ids.Add(i.ToString()); labels.Add("Display " + (i + 1)); }
+            spec.Choices = ids.ToArray();
+            spec.ChoiceLabels = labels.ToArray();
+        }
 
         // The menu-music list, from the banks the install actually has: None, Shuffle, then every named track. Done
         // here rather than in the spec because a spec is written once and this answer belongs to the machine - a
@@ -212,6 +256,8 @@ namespace Mgs4Launcher
                 labels.Add("Playlist  -  your list, in order");
                 ids.Add(Music.PlaylistShuffle);
                 labels.Add("Playlist, shuffled");
+                ids.Add(Music.FavoritesShuffle);
+                labels.Add("Hearted, shuffled  -  the tracks with a heart, dealt");
                 // The hearted tracks first, each with a heart in front of its name, then the rest, A to Z.
                 foreach (string t in Music.Ordered(tracks)) { ids.Add(t); labels.Add(new TrackItem(t).Label); }
             }
