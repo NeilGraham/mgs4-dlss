@@ -1,4 +1,4 @@
-// mgs4_dlss.ini as a form: what each key is, what it does, and what it may be set to. The add-on owns this file
+﻿// mgs4_dlss.ini as a form: what each key is, what it does, and what it may be set to. The add-on owns this file
 // while the game runs - its writes go through the Windows profile API, whose cache will quietly undo an outside
 // edit - so everything here checks that first.
 using System;
@@ -212,8 +212,7 @@ namespace Mgs4Launcher
                 labels.Add("Playlist  -  your list, in order");
                 ids.Add(Music.PlaylistShuffle);
                 labels.Add("Playlist, shuffled");
-                // The ones worth knowing first, starred and named, in Music.Memorable's order; then the rest of
-                // the install's playlist as the files name them.
+                // The hearted tracks first, each with a heart in front of its name, then the rest, A to Z.
                 foreach (string t in Music.Ordered(tracks)) { ids.Add(t); labels.Add(new TrackItem(t).Label); }
             }
             spec.Choices = ids.ToArray();

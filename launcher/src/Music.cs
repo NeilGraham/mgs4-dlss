@@ -1,4 +1,4 @@
-// Menu music, played out of the game's own soundtrack.
+﻿// Menu music, played out of the game's own soundtrack.
 //
 // Where it comes from. MGS4 keeps its music in <GameDir>\common\bank\default as FMOD Studio banks, one track to a
 // file and named for the track: At_Dawn.bank, Sea_Breeze.bank, Beyond_The_Bounds.bank. Inside each is a RIFF/FEV
@@ -28,23 +28,46 @@ using System.Web.Script.Serialization;
 namespace Mgs4Launcher
 {
     // A track as a list shows it. Top level and public, because WPF binds only to public members of public
-    // types, and Music is neither.
-    public class TrackItem
+    // types, and Music is neither. It tells the lists when it changes because the playlist editor numbers its
+    // rows, and a row's number moves when the rows above it do.
+    public class TrackItem : System.ComponentModel.INotifyPropertyChanged
     {
         public string File { get; private set; }
+        // The title, with where it is from for the ones that are known, and nothing else: what the editor's
+        // rows show, each with its heart drawn beside it rather than in it.
+        public string Name { get; private set; }
+        // The same with a ♥ in front of a favourite's: what the Menu music choice shows, which has no room for
+        // a heart of its own.
         public string Label { get; private set; }
         public bool Favorite { get; private set; }
         // The heart at the row's end: filled for a favourite, an outline for the rest, one character wide either
         // way so the column holds still. Tag="heart" in the template is what a click on it is told apart by.
         public string Heart { get { return Favorite ? "♥" : "♡"; } }
         public string HeartInk { get { return Favorite ? "#F27E9A" : "#4A4A52"; } }
+        public string HeartTip { get { return Favorite ? "Hearted - click to take the heart off" : "Heart this track - hearted tracks head every list"; } }
+
+        // Where the row sits in the playlist, from 1, as text; empty on the iPod side. Set by the editor as the
+        // list changes shape.
+        string _position = "";
+        public string Position
+        {
+            get { return _position; }
+            set
+            {
+                if (_position == value) return;
+                _position = value;
+                if (PropertyChanged != null) PropertyChanged(this, new System.ComponentModel.PropertyChangedEventArgs("Position"));
+            }
+        }
+        public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
+
         public TrackItem(string file)
         {
             File = file;
             Favorite = Music.Favorites.Contains(file);
             Music.Known k = Music.Lookup(file);
-            string name = k != null ? "★ " + k.Title + "  ·  " + k.From : Music.Pretty(file);
-            Label = (Favorite ? "♥ " : "") + name;
+            Name = k != null ? k.Title + "  ·  " + k.From : Music.Pretty(file);
+            Label = (Favorite ? "♥ " : "") + Name;
         }
     }
 
@@ -130,23 +153,23 @@ namespace Mgs4Launcher
         // The tracks someone has hearted, kept in launcher.json by MainWindow the way the scene favourites are.
         public static readonly HashSet<string> Favorites = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The iPod in the order every list shows it: the favourites first, then the memorable tracks,
-        /// then the rest - each group keeping the order it had.</summary>
+        // The hearts a first run starts with - the ones the author had on their own deck when the list stopped
+        // carrying a ranking of its own. They are a starting point and nothing more: a heart taken off stays off,
+        // because launcher.json holds the list from the first save on and these are only read when it has none.
+        public static readonly string[] DefaultFavorites =
+        {
+            "bgm_title_01", "Love_Theme_hum_ver", "Snake_Eater", "OishiTsuhan", "VR_TRAINING",
+        };
+
+        /// <summary>The iPod in the order every list shows it: the hearted tracks first, then the rest, each
+        /// group A to Z by the name a person sees. No track ranks above another for any reason but a heart.</summary>
         public static List<string> Ordered(List<string> tracks)
         {
-            var rest = new List<string>(tracks);
-            var ranked = new List<string>();
-            foreach (Known k in Memorable)
-            {
-                int i = rest.FindIndex(t => string.Equals(t, k.File, StringComparison.OrdinalIgnoreCase));
-                if (i < 0) continue;
-                ranked.Add(rest[i]);
-                rest.RemoveAt(i);
-            }
-            ranked.AddRange(rest);
+            var sorted = new List<string>(tracks);
+            sorted.Sort((a, b) => string.Compare(Title(a), Title(b), StringComparison.OrdinalIgnoreCase));
             var outp = new List<string>();
-            foreach (string t in ranked) if (Favorites.Contains(t)) outp.Add(t);
-            foreach (string t in ranked) if (!Favorites.Contains(t)) outp.Add(t);
+            foreach (string t in sorted) if (Favorites.Contains(t)) outp.Add(t);
+            foreach (string t in sorted) if (!Favorites.Contains(t)) outp.Add(t);
             return outp;
         }
 
@@ -213,10 +236,10 @@ namespace Mgs4Launcher
             return string.IsNullOrEmpty(track) ? "" : track.Replace('_', ' ');
         }
 
-        // The banks are the iPod's playlist, named the way the files are. These are the ones worth putting at
-        // the head of the list, in this order: the game's own themes first, then the series' - each with the
-        // title it is actually known by, and a word on where it is from. Anything not here is listed after
-        // them under its file name, made readable.
+        // The banks are the iPod's playlist, named the way the files are. These are the ones with a title they
+        // are actually known by, and a word on where they are from; the rest are listed under their file name,
+        // made readable. Being here ranks a track no higher than any other - the lists go by hearts and then
+        // A to Z, and this is only how a row reads.
         public class Known { public string File, Title, From; }
         public static readonly Known[] Memorable =
         {

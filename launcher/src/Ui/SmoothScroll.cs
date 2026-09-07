@@ -143,8 +143,23 @@ namespace Mgs4Launcher
             return null;
         }
 
+        // An element that takes the wheel for itself - the deck's speaker and its slider, stepping the volume -
+        // is tagged "wheel"; a wheel over anything under one is left to it.
+        static bool OwnsWheel(object source)
+        {
+            var d = source as DependencyObject;
+            while (d != null)
+            {
+                var fe = d as FrameworkElement;
+                if (fe != null && "wheel".Equals(fe.Tag as string)) return true;
+                d = d is Visual || d is System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d);
+            }
+            return false;
+        }
+
         void OnWheel(object sender, MouseWheelEventArgs e)
         {
+            if (OwnsWheel(e.OriginalSource)) return;
             ScrollViewer sv = HostFor(e.OriginalSource) ?? OnlyScroller(_win);
             if (sv == null) return;             // nothing here scrolls - leave the event alone
             e.Handled = true;

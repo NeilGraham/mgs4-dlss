@@ -1,4 +1,4 @@
-// Playing the menu music. Music.cs finds and decodes it; this is when it starts, when it stops, how loud, what
+﻿// Playing the menu music. Music.cs finds and decodes it; this is when it starts, when it stops, how loud, what
 // comes next, and the deck in the bottom bar that shows all of that.
 //
 // Two rules the rest of the window relies on: the game gets the speakers to itself - the music goes down the moment
@@ -57,10 +57,14 @@ namespace Mgs4Launcher
         DispatcherTimer _fadeTimer;
         DateTime _fadeTickAt;
         double _liveRate = 1 / CrossfadeSeconds;    // how fast the live player moves towards its target volume
-        const double CrossfadeSeconds = 1.6;        // one track under the next
-        const double FadeInSeconds = 0.7;           // a track starting over silence
+        const double CrossfadeSeconds = 1.0;        // one track under the next
+        const double FadeInSeconds = 0.5;           // a track starting over silence
         const double StopSeconds = 0.4;             // the game is about to have the speakers
         const double NudgeSeconds = 0.25;           // pause, mute, the volume slider
+        // How far before a track's end the next play is started, so it comes in under this one: the crossfade,
+        // plus room for the decode (a cached WAV, a few dozen milliseconds) to land before the end arrives.
+        const double EndLead = CrossfadeSeconds + 0.4;
+        bool _endHandled;                           // this play's end has been seen coming; once per play
 
         // Mute is the window's own, for the sitting: it is not written anywhere, and the slider keeps its place
         // under it so unmuting comes back to the same level.
@@ -150,11 +154,14 @@ namespace Mgs4Launcher
         const string GlyphBack = "", GlyphNext = "", GlyphPlay = "", GlyphPause = "";
         const string GlyphMute = "", GlyphVol0 = "", GlyphVol1 = "", GlyphVol2 = "", GlyphVol3 = "";
 
-        // The deck: the track's title, the three buttons under it the way iTunes draws them - bare glyphs, the
-        // play one larger - and under those the scrubber with the time either side. The volume is not part of
-        // this block: it hangs off its right-hand side, in the bar's own right-hand column, so the deck sits on
-        // the window's centre line with or without it.
-        StackPanel _volumeBox;
+        // The deck: the track's title, the buttons under it the way iTunes draws them - bare glyphs, the play one
+        // larger, the speaker at the end of the row - and under those the scrubber with the time either side.
+        // The volume slider is not in the bar at all: it is on a flyout that opens beside the speaker while the
+        // pointer is on it, so the deck's width is the same with or without it.
+        Popup _volumeFlyout;
+        Border _volumeFlyoutBox;
+        TextBlock _volumePct;
+        DispatcherTimer _flyoutClose;
 
         void WireMusic()
         {
@@ -172,36 +179,77 @@ namespace Mgs4Launcher
             _musicLabel.MaxWidth = 300;
 
             var row = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 1, 0, 1) };
+            // The speaker hangs off the row's right-hand end, and a blank of exactly its width heads the row, so
+            // the play button stays on the deck's centre line - under the title and over the scrubber - with the
+            // speaker there or not. Hidden rather than Collapsed: it has to keep its width.
+            var speakerBlank = new Border { Visibility = Visibility.Hidden };
+            row.Children.Add(speakerBlank);
             row.Children.Add(_musicBackBtn);
             row.Children.Add(_musicPauseBtn);
             row.Children.Add(_musicNextBtn);
 
-            // Mute is a click on the speaker; the slider beside it is the volume, and it writes MGS4_MUSIC_VOLUME
-            // for itself a moment after it stops moving. Mute writes nothing: it is for this sitting. The pair
-            // goes in the bottom bar's right-hand column, hard against the deck's edge, so it reads as the deck's
-            // and leaves the deck centred. The slider stands on end with the speaker under it, the two together
-            // the deck's height and a thumb wide: laid flat the slider was the one thing in that column with a
-            // width of its own, and at the window's minimum width it ran into the tab's buttons on the column's
-            // far side.
-            _muteBtn = DeckButton(GlyphVol2, 12, "Mute", (s, e) => ToggleMute(), deck);
-            _muteBtn.Padding = new Thickness(8, 2, 8, 0);
-            _muteBtn.HorizontalAlignment = HorizontalAlignment.Center;
+            // The speaker is the last button in the row. A click mutes, for this sitting, and writes nothing; the
+            // wheel over it steps the volume; and while the pointer is on it a flyout with the slider opens
+            // beside it, YouTube's way, and goes when the pointer has left both. The slider is the volume - it
+            // writes MGS4_MUSIC_VOLUME for itself a moment after it stops moving. An earlier layout put the
+            // slider in the bottom bar's right-hand column, where it ran into the tab's buttons at the window's
+            // minimum width; a flyout takes no width from anything.
+            // No tooltip on the speaker itself: it would come up over the flyout. The hint is on the flyout.
+            _muteBtn = DeckButton(GlyphVol2, 12, null, (s, e) => ToggleMute(), deck);
+            _muteBtn.Margin = new Thickness(6, 0, 0, 0);
+            _muteBtn.Tag = "wheel";                                   // SmoothScroll leaves the wheel to it
+            MouseWheelEventHandler stepVolume = (s, e) =>
+            {
+                double level = (_deckVolume ?? MusicVolume()) * 100;
+                VolumeMoved(Math.Round(level / 5) * 5 + (e.Delta > 0 ? 5 : -5));
+                ShowVolume();
+                e.Handled = true;
+            };
+            _muteBtn.PreviewMouseWheel += stepVolume;
+            _muteBtn.SizeChanged += (s, e) => speakerBlank.Width = _muteBtn.ActualWidth + _muteBtn.Margin.Left;
+            row.Children.Add(_muteBtn);
+
             _volume = new Slider
             {
-                Style = (Style)Win.FindResource("ScrubV"), Minimum = 0, Maximum = 100,
-                HorizontalAlignment = HorizontalAlignment.Center, ToolTip = "Music volume - written to config.ini as you set it",
+                Style = (Style)Win.FindResource("Scrub"), Width = 96, Minimum = 0, Maximum = 100,
+                VerticalAlignment = VerticalAlignment.Center, Tag = "wheel",
             };
             _volume.ValueChanged += (s, e) => { if (!_volumeSyncing) VolumeMoved(_volume.Value); };
-            _volumeBox = new StackPanel
+            _volume.PreviewMouseWheel += stepVolume;
+            _volumePct = Widgets.Text("", 10, "#8A8A96", false, true);
+            _volumePct.VerticalAlignment = VerticalAlignment.Center;
+            _volumePct.Margin = new Thickness(8, 0, 0, 0);
+            _volumePct.MinWidth = 22;
+            _volumePct.TextAlignment = TextAlignment.Right;
+            var flyoutRow = new StackPanel { Orientation = Orientation.Horizontal };
+            flyoutRow.Children.Add(_volume);
+            flyoutRow.Children.Add(_volumePct);
+            _volumeFlyoutBox = new Border
             {
-                Orientation = Orientation.Vertical, HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 0, 0),
-                Visibility = Visibility.Collapsed,
+                Background = (Brush)Win.FindResource("Card"), BorderBrush = (Brush)Win.FindResource("Line"),
+                BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+                Padding = new Thickness(10, 6, 10, 6), Child = flyoutRow,
+                ToolTip = "Music volume, written to config.ini as you set it. A click on the speaker mutes; the wheel over it steps the volume.",
             };
-            _volumeBox.Children.Add(_volume);
-            _volumeBox.Children.Add(_muteBtn);
-            var bar = _transport.Parent as Grid;
-            if (bar != null) { Grid.SetColumn(_volumeBox, 2); bar.Children.Add(_volumeBox); }
+            _volumeFlyout = new Popup
+            {
+                Child = _volumeFlyoutBox, PlacementTarget = _muteBtn, Placement = PlacementMode.Right,
+                HorizontalOffset = 2, VerticalOffset = -7, AllowsTransparency = true, StaysOpen = true, Focusable = false,
+            };
+            // Open on the way in; close a beat after the pointer has left both the speaker and the flyout, so
+            // crossing the gap between them does not shut it - and never while the slider has the mouse.
+            _flyoutClose = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+            _flyoutClose.Tick += (s, e) =>
+            {
+                _flyoutClose.Stop();
+                if (_muteBtn.IsMouseOver || _volumeFlyoutBox.IsMouseOver || _volume.IsMouseCaptureWithin) return;
+                _volumeFlyout.IsOpen = false;
+            };
+            _muteBtn.MouseEnter += (s, e) => ShowVolume();
+            _muteBtn.MouseLeave += (s, e) => HideVolumeSoon();
+            _volumeFlyoutBox.MouseEnter += (s, e) => _flyoutClose.Stop();
+            _volumeFlyoutBox.MouseLeave += (s, e) => HideVolumeSoon();
+            Win.Deactivated += (s, e) => { if (_volumeFlyout != null) _volumeFlyout.IsOpen = false; };
 
             // The scrubber. The timer moves it as the track plays; a hand on it seeks. The two are told apart by
             // the flag the timer raises round its own writes.
@@ -242,8 +290,12 @@ namespace Mgs4Launcher
             if (_transport == null) return;
             bool show = _musicPlaying != null;
             _transport.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-            if (_volumeBox != null) _volumeBox.Visibility = _transport.Visibility;
-            if (!show) { _deckTimer.Stop(); return; }
+            if (!show)
+            {
+                _deckTimer.Stop();
+                if (_volumeFlyout != null) _volumeFlyout.IsOpen = false;
+                return;
+            }
             bool queued = _queue != null && Music.IsQueued(MusicSetting());
             _musicBackBtn.Visibility = _musicNextBtn.Visibility = queued ? Visibility.Visible : Visibility.Collapsed;
             _musicPauseBtn.Content = _musicPaused ? GlyphPlay : GlyphPause;
@@ -272,9 +324,25 @@ namespace Mgs4Launcher
             }
             string glyph = _muted ? GlyphMute : level <= 0 ? GlyphVol0 : level < 34 ? GlyphVol1 : level < 67 ? GlyphVol2 : GlyphVol3;
             _muteBtn.Content = glyph;
-            _muteBtn.ToolTip = _muted ? "Unmute" : "Mute (the volume setting is left as it is)";
             _muteBtn.Foreground = Widgets.Brush(_muted ? "#F2C14E" : "#B8B8C2");
             _volume.Opacity = _muted ? 0.45 : 1;
+            _volumePct.Text = _muted ? "off" : ((int)Math.Round(level)).ToString();
+        }
+
+        void ShowVolume()
+        {
+            if (_volumeFlyout == null) return;
+            _flyoutClose.Stop();
+            if (_musicPlaying == null) return;
+            PaintVolume();
+            _volumeFlyout.IsOpen = true;
+        }
+
+        void HideVolumeSoon()
+        {
+            if (_flyoutClose == null) return;
+            _flyoutClose.Stop();
+            _flyoutClose.Start();
         }
 
         void ToggleMute()
@@ -362,6 +430,16 @@ namespace Mgs4Launcher
             finally { _scrubbing = false; }
             bool canBack = !_musicBusy && (at > BackRestarts || _queueAt > 0);
             if (_musicBackBtn.IsEnabled != canBack) _musicBackBtn.IsEnabled = canBack;
+
+            // The end, seen coming. Left to run out, the player stops and the next play - the next in the queue,
+            // or the same track again for a picked one - starts over silence, with a gap for the decode and a
+            // snap where a picked track went back to its start. Started this far before the end instead, it
+            // comes in under this one the way a press of Next does. MediaEnded stays as the fallback.
+            if (!_endHandled && !_musicBusy && len > 0 && at >= len - EndLead && at < len)
+            {
+                _endHandled = true;
+                if (Music.IsQueued(MusicSetting())) MusicNext(); else StartTrack(_musicPlaying);
+            }
         }
 
         void Seek(double seconds)
@@ -438,8 +516,9 @@ namespace Mgs4Launcher
             if (_musicBusy || _music == null) return;
             if (Position() > BackRestarts || _queue == null || _queueAt <= 0)
             {
-                try { _music.Position = TimeSpan.Zero; if (_musicPaused) MusicPause(); } catch { }
-                PaintTransport();
+                // Back to the start: the same track again, brought in under this one - a seek to zero was a
+                // snap, and the one thing on the deck that cut.
+                StartTrack(_musicPlaying);
                 return;
             }
             _queueAt--;
@@ -575,8 +654,7 @@ namespace Mgs4Launcher
             player.MediaEnded += (s, e) =>
             {
                 if (s != _music) return;
-                if (Music.IsQueued(MusicSetting())) { MusicNext(); return; }
-                try { _music.Position = TimeSpan.Zero; _music.Play(); } catch { }
+                if (Music.IsQueued(MusicSetting())) MusicNext(); else StartTrack(_musicPlaying);
             };
             player.MediaOpened += (s, e) => { if (s == _music) TickDeck(); };
             try
@@ -588,6 +666,7 @@ namespace Mgs4Launcher
                 _musicPlaying = track;
                 _musicPaused = false;
                 _pauseApplied = false;
+                _endHandled = false;
                 AimVolume(wasPlaying ? CrossfadeSeconds : FadeInSeconds);
                 Say("music: " + Music.Title(track));
             }
@@ -615,12 +694,19 @@ namespace Mgs4Launcher
 
         // ------------------------------------------------------------------------------------ the playlist editor
 
-        Border _playlistVeil, _allTracksBox, _playlistBox;
+        Border _playlistVeil, _playlistCard, _allTracksBox, _playlistBox;
         ListBox _allTracks, _playlistTracks;
         TextBlock _allTracksHead, _playlistHead, _playlistSummary;
-        Button _plAddBtn, _plSampleBtn, _plRemoveBtn, _plClearBtn, _plDoneBtn, _plFavBtn;
+        Button _plAddBtn, _plSampleBtn, _plRemoveBtn, _plClearBtn, _plDoneBtn, _plFavBtn, _plUpBtn, _plDownBtn;
         ObservableCollection<TrackItem> _playlist = new ObservableCollection<TrackItem>();
         bool _playlistOnRight;       // which list the keyboard and the pad are in
+
+        // A drag in the making: the row the button went down on, the list it is in, and where. It becomes a drag
+        // once the pointer has moved the system's own distance with the button still down, and is forgotten on
+        // a release or a heart.
+        TrackItem _dragItem;
+        ListBox _dragFrom;
+        Point _dragStart;
 
         public bool PlaylistOpen { get { return _playlistVeil != null && _playlistVeil.Visibility == Visibility.Visible; } }
 
@@ -628,6 +714,7 @@ namespace Mgs4Launcher
         {
             Func<string, object> f = n => Win.FindName(n);
             _playlistVeil = (Border)f("PlaylistVeil");
+            _playlistCard = (Border)f("PlaylistCard");
             _allTracksBox = (Border)f("AllTracksBox");
             _playlistBox = (Border)f("PlaylistBox");
             _allTracks = (ListBox)f("AllTracks");
@@ -640,30 +727,130 @@ namespace Mgs4Launcher
             _plClearBtn = (Button)f("PlClearBtn");
             _plDoneBtn = (Button)f("PlDoneBtn");
             _plFavBtn = (Button)f("PlFavBtn");
+            _plUpBtn = (Button)f("PlUpBtn");
+            _plDownBtn = (Button)f("PlDownBtn");
             _playlistTracks.ItemsSource = _playlist;
-            _plFavBtn.Click += (s, e) => PlaylistFavorite();
-            // The heart is its own click: hearting a track must not also pick it.
-            _allTracks.PreviewMouseLeftButtonDown += (s, e) =>
-            {
-                if (!HitTheHeart(e.OriginalSource)) return;
-                DependencyObject d = e.OriginalSource as DependencyObject;
-                while (d != null && !(d is ListBoxItem)) d = VisualTreeHelper.GetParent(d);
-                var item = d as ListBoxItem;
-                var t = item != null ? item.DataContext as TrackItem : null;
-                if (t != null) { ToggleMusicFavorite(t.File); e.Handled = true; }
-            };
+            // Every change of shape renumbers the rows and repaints what says how many there are and what can be
+            // done with them - so no add, remove, move or clear has to remember to.
+            _playlist.CollectionChanged += (s, e) => { RenumberPlaylist(); PaintPlaylistHeads(); PaintPlaylistButtons(); };
 
             _plAddBtn.Click += (s, e) => PlaylistAdd();
             _plRemoveBtn.Click += (s, e) => PlaylistRemove();
             _plSampleBtn.Click += (s, e) => PlaylistSample();
-            _plClearBtn.Click += (s, e) => { _playlist.Clear(); PaintPlaylistHeads(); };
+            _plFavBtn.Click += (s, e) => PlaylistFavorite();
+            _plUpBtn.Click += (s, e) => PlaylistMove(-1);
+            _plDownBtn.Click += (s, e) => PlaylistMove(1);
+            _plClearBtn.Click += (s, e) => _playlist.Clear();
             _plDoneBtn.Click += (s, e) => ClosePlaylist();
-            _allTracks.MouseDoubleClick += (s, e) => PlaylistAdd();
-            _playlistTracks.MouseDoubleClick += (s, e) => PlaylistRemove();
-            _allTracks.GotFocus += (s, e) => SetPlaylistSide(false);
-            _playlistTracks.GotFocus += (s, e) => SetPlaylistSide(true);
-            _allTracks.PreviewMouseLeftButtonDown += (s, e) => SetPlaylistSide(false);
-            _playlistTracks.PreviewMouseLeftButtonDown += (s, e) => SetPlaylistSide(true);
+            // A click on the veil - anywhere off the card - is Done. Clicks on the card bubble up here too, and
+            // are told apart by the card having the pointer.
+            _playlistVeil.MouseLeftButtonDown += (s, e) =>
+            {
+                if (_playlistCard.IsMouseOver) return;
+                ClosePlaylist();
+                e.Handled = true;
+            };
+
+            WirePlaylistList(_allTracks, false);
+            WirePlaylistList(_playlistTracks, true);
+
+            // Rows land on the playlist: the iPod's as a new row where they were dropped, the playlist's own moved
+            // there. Above a row's middle is before it, below is after; on nothing at all is the end.
+            _playlistTracks.DragOver += (s, e) =>
+            {
+                e.Effects = e.Data.GetDataPresent(typeof(TrackItem)) ? DragDropEffects.Move : DragDropEffects.None;
+                e.Handled = true;
+            };
+            _playlistTracks.Drop += (s, e) =>
+            {
+                if (!e.Data.GetDataPresent(typeof(TrackItem))) return;
+                var t = e.Data.GetData(typeof(TrackItem)) as TrackItem;
+                if (t == null) return;
+                int at = DropIndex(e);
+                if (_dragFrom == _playlistTracks)
+                {
+                    int from = _playlist.IndexOf(t);
+                    if (from < 0) return;
+                    if (at > from) at--;
+                    if (at != from) _playlist.Move(from, at);
+                    _playlistTracks.SelectedIndex = at;
+                }
+                else
+                {
+                    var row = new TrackItem(t.File);
+                    _playlist.Insert(at, row);
+                    _playlistTracks.SelectedItem = row;
+                }
+                if (_playlistTracks.SelectedItem != null) _playlistTracks.ScrollIntoView(_playlistTracks.SelectedItem);
+                SetPlaylistSide(true);
+                e.Handled = true;
+            };
+        }
+
+        // What the two lists share: focus and a press say which side the keys are on; a press on the heart
+        // hearts and does nothing else; a press anywhere else on a row may be the start of a drag; a double-click
+        // on a row adds it or takes it out.
+        void WirePlaylistList(ListBox list, bool right)
+        {
+            list.GotFocus += (s, e) => SetPlaylistSide(right);
+            list.SelectionChanged += (s, e) => PaintPlaylistButtons();
+            list.PreviewMouseLeftButtonDown += (s, e) =>
+            {
+                SetPlaylistSide(right);
+                TrackItem t = RowUnder(e.OriginalSource);
+                if (HitTheHeart(e.OriginalSource))
+                {
+                    // The heart is its own click: hearting a track must not also pick it, or start a drag.
+                    _dragItem = null;
+                    if (t != null) ToggleMusicFavorite(t.File);
+                    e.Handled = true;
+                    return;
+                }
+                _dragItem = t;
+                _dragFrom = list;
+                _dragStart = e.GetPosition(null);
+            };
+            list.PreviewMouseMove += (s, e) =>
+            {
+                if (_dragItem == null) return;
+                if (e.LeftButton != MouseButtonState.Pressed) { _dragItem = null; return; }
+                Vector moved = e.GetPosition(null) - _dragStart;
+                if (Math.Abs(moved.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                    Math.Abs(moved.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+                TrackItem item = _dragItem;
+                _dragItem = null;
+                DragDrop.DoDragDrop(list, new DataObject(typeof(TrackItem), item), DragDropEffects.Move);
+            };
+            list.PreviewMouseLeftButtonUp += (s, e) => _dragItem = null;
+            list.MouseDoubleClick += (s, e) =>
+            {
+                // A double-click on the heart is two hearts, already taken; one on the blank under the rows is
+                // nothing.
+                if (HitTheHeart(e.OriginalSource) || RowUnder(e.OriginalSource) == null) return;
+                if (right) PlaylistRemove(); else PlaylistAdd();
+            };
+        }
+
+        // The track whose row an event landed on, or null off the rows.
+        static TrackItem RowUnder(object source)
+        {
+            DependencyObject d = source as DependencyObject;
+            while (d != null && !(d is ListBoxItem)) d = VisualTreeHelper.GetParent(d);
+            var item = d as ListBoxItem;
+            return item != null ? item.DataContext as TrackItem : null;
+        }
+
+        // Where a drop goes in the playlist: before the row it is over when it is over the row's top half, after
+        // it when the bottom, and at the end when it is over no row.
+        int DropIndex(DragEventArgs e)
+        {
+            DependencyObject d = _playlistTracks.InputHitTest(e.GetPosition(_playlistTracks)) as DependencyObject;
+            while (d != null && !(d is ListBoxItem)) d = VisualTreeHelper.GetParent(d);
+            var item = d as ListBoxItem;
+            if (item == null) return _playlist.Count;
+            int i = _playlistTracks.ItemContainerGenerator.IndexFromContainer(item);
+            if (i < 0) return _playlist.Count;
+            return e.GetPosition(item).Y > item.ActualHeight / 2 ? i + 1 : i;
         }
 
         void OpenPlaylist()
@@ -676,14 +863,18 @@ namespace Mgs4Launcher
             SetPlaylistSide(false);
             if (_allTracks.Items.Count > 0 && _allTracks.SelectedIndex < 0) _allTracks.SelectedIndex = 0;
             _allTracks.Focus();
+            PaintPlaylistButtons();
             PaintPadHints();
         }
 
-        // Done: the list is written to config.ini on the spot - it is a thing of its own rather than a row on the
-        // form, so it does not wait on Save - and the deck is told.
+        // Done - the button, Escape, B on a pad, or a click off the card. The list is written to config.ini on
+        // the spot - it is a thing of its own rather than a row on the form, so it does not wait on Save - and
+        // the deck is told. Two of those arriving together write once.
         void ClosePlaylist()
         {
+            if (!PlaylistOpen) return;
             _playlistVeil.Visibility = Visibility.Collapsed;
+            _dragItem = null;
             var files = new List<string>();
             foreach (TrackItem t in _playlist) files.Add(t.File);
             try
@@ -699,7 +890,7 @@ namespace Mgs4Launcher
             PaintPadHints();
         }
 
-        // The iPod list, favourites first. Rebuilt whenever a heart changes, keeping the pick where it was.
+        // The iPod list, hearts first. Rebuilt whenever a heart changes, keeping the pick where it was.
         void FillIpod(string keep)
         {
             var all = new List<TrackItem>();
@@ -710,6 +901,7 @@ namespace Mgs4Launcher
                 TrackItem hit = all.Find(t => string.Equals(t.File, keep, StringComparison.OrdinalIgnoreCase));
                 if (hit != null) { _allTracks.SelectedItem = hit; _allTracks.ScrollIntoView(hit); }
             }
+            PaintPlaylistButtons();
         }
 
         static bool HitTheHeart(object source)
@@ -726,15 +918,17 @@ namespace Mgs4Launcher
         }
 
         // A heart on or off a track: remembered at once, and every list that shows the iPod re-sorted, the
-        // favourites at its head. The playlist keeps its own order - hearts only change how its rows read.
+        // hearted at its head. The playlist keeps its own order - hearts only change how its rows read.
         void ToggleMusicFavorite(string file)
         {
             if (string.IsNullOrEmpty(file)) return;
             if (!Music.Favorites.Remove(file)) Music.Favorites.Add(file);
             SavePrefs();
             FillIpod(file);
+            int pick = _playlistTracks.SelectedIndex;
             for (int i = 0; i < _playlist.Count; i++)
                 if (string.Equals(_playlist[i].File, file, StringComparison.OrdinalIgnoreCase)) _playlist[i] = new TrackItem(file);
+            if (pick >= 0 && pick < _playlist.Count) _playlistTracks.SelectedIndex = pick;
             Say(Music.Favorites.Contains(file)
                 ? Music.Title(file) + " hearted (" + Music.Favorites.Count + ")"
                 : Music.Title(file) + " un-hearted (" + Music.Favorites.Count + ")");
@@ -751,15 +945,38 @@ namespace Mgs4Launcher
             _playlistOnRight = right;
             _allTracksBox.BorderBrush = Widgets.Brush(right ? "#26262A" : "#7C9CFF");
             _playlistBox.BorderBrush = Widgets.Brush(right ? "#7C9CFF" : "#26262A");
+            PaintPlaylistButtons();
             PaintPadHints();        // A's badge moves to whichever of Add and Remove it now means
+        }
+
+        void RenumberPlaylist()
+        {
+            for (int i = 0; i < _playlist.Count; i++) _playlist[i].Position = (i + 1).ToString();
         }
 
         void PaintPlaylistHeads()
         {
             int n = _allTracks.Items.Count;
-            _allTracksHead.Text = "The iPod  ·  " + n + " track" + (n == 1 ? "" : "s");
-            _playlistHead.Text = _playlist.Count == 0 ? "Playlist  ·  empty"
-                               : "Playlist  ·  " + _playlist.Count + " track" + (_playlist.Count == 1 ? "" : "s") + ", in this order";
+            _allTracksHead.Text = "The iPod  \u00b7  " + n + " track" + (n == 1 ? "" : "s");
+            _playlistHead.Text = _playlist.Count == 0 ? "Playlist  \u00b7  empty - add tracks from the iPod"
+                               : "Playlist  \u00b7  " + _playlist.Count + " track" + (_playlist.Count == 1 ? "" : "s") + ", in this order";
+        }
+
+        // Each button lit only while it has something to act on: Add wants a pick on the iPod, Remove and the
+        // moves a pick on the playlist - and a move only where there is room that way - Sample and Heart a pick
+        // on whichever side the keys are.
+        void PaintPlaylistButtons()
+        {
+            if (_plUpBtn == null) return;
+            bool left = _allTracks.SelectedItem != null;
+            int at = _playlistTracks.SelectedIndex;
+            bool right = at >= 0;
+            _plAddBtn.IsEnabled = left;
+            _plRemoveBtn.IsEnabled = right;
+            _plUpBtn.IsEnabled = right && at > 0;
+            _plDownBtn.IsEnabled = right && at < _playlist.Count - 1;
+            _plSampleBtn.IsEnabled = _plFavBtn.IsEnabled = _playlistOnRight ? right : left;
+            _plClearBtn.IsEnabled = _playlist.Count > 0;
         }
 
         void PlaylistAdd()
@@ -768,7 +985,6 @@ namespace Mgs4Launcher
             if (t == null) return;
             _playlist.Add(new TrackItem(t.File));
             _playlistTracks.ScrollIntoView(_playlist[_playlist.Count - 1]);
-            PaintPlaylistHeads();
             // The pick walks on, so adding a run of tracks is a run of presses.
             if (_allTracks.SelectedIndex < _allTracks.Items.Count - 1) _allTracks.SelectedIndex++;
         }
@@ -779,7 +995,17 @@ namespace Mgs4Launcher
             if (i < 0) return;
             _playlist.RemoveAt(i);
             if (_playlist.Count > 0) _playlistTracks.SelectedIndex = Math.Min(i, _playlist.Count - 1);
-            PaintPlaylistHeads();
+        }
+
+        // The picked playlist row up or down one place. The pick goes with it.
+        void PlaylistMove(int dir)
+        {
+            int i = _playlistTracks.SelectedIndex, j = i + dir;
+            if (i < 0 || j < 0 || j >= _playlist.Count) return;
+            _playlist.Move(i, j);
+            _playlistTracks.SelectedIndex = j;
+            _playlistTracks.ScrollIntoView(_playlist[j]);
+            SetPlaylistSide(true);
         }
 
         // Play the picked track on the deck now. Whatever mode is set carries on from it when it ends.
@@ -792,11 +1018,13 @@ namespace Mgs4Launcher
         }
 
         // The keyboard in the editor: arrows walk, Tab and Left/Right cross, Enter adds, Delete removes, Space
-        // samples, Escape is Done. Returns true when the key was the editor's.
+        // samples, F hearts, Ctrl+Up and Ctrl+Down move a playlist row, Escape is Done. Returns true when the
+        // key was the editor's.
         bool PlaylistKey(Key key)
         {
             if (!PlaylistOpen) return false;
             ListBox on = _playlistOnRight ? _playlistTracks : _allTracks;
+            bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control;
             switch (key)
             {
                 case Key.Escape: ClosePlaylist(); return true;
@@ -806,8 +1034,8 @@ namespace Mgs4Launcher
                 case Key.F: PlaylistFavorite(); return true;
                 case Key.Left: SetPlaylistSide(false); _allTracks.Focus(); return true;
                 case Key.Right: SetPlaylistSide(true); _playlistTracks.Focus(); return true;
-                case Key.Up: StepList(on, -1); return true;
-                case Key.Down: StepList(on, 1); return true;
+                case Key.Up: if (ctrl && _playlistOnRight) PlaylistMove(-1); else StepList(on, -1); return true;
+                case Key.Down: if (ctrl && _playlistOnRight) PlaylistMove(1); else StepList(on, 1); return true;
             }
             return false;
         }
@@ -820,12 +1048,15 @@ namespace Mgs4Launcher
             list.ScrollIntoView(list.Items[i]);
         }
 
-        // A controller in the editor: the same moves on the d-pad, A adds or removes, X samples, B or Start is Done.
+        // A controller in the editor: the same moves on the d-pad, A adds or removes, X samples, Y hearts, the
+        // bumpers move a playlist row, B or Start is Done.
         void PadPlaylist(PadButton b, bool repeat)
         {
             ListBox on = _playlistOnRight ? _playlistTracks : _allTracks;
             if (b == PadButton.Up) StepList(on, -1);
             else if (b == PadButton.Down) StepList(on, 1);
+            else if (b == PadButton.LB) PlaylistMove(-1);
+            else if (b == PadButton.RB) PlaylistMove(1);
             else if (repeat) return;
             else if (b == PadButton.Left) SetPlaylistSide(false);
             else if (b == PadButton.Right) SetPlaylistSide(true);

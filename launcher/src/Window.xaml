@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="MGS4 DLSS Launcher" Height="880" Width="1180" MinHeight="560" MinWidth="920"
@@ -489,56 +489,6 @@
                       <ControlTemplate TargetType="RepeatButton">
                         <Grid Background="Transparent">
                           <Border Height="3" CornerRadius="1.5" Background="#8A8A96" VerticalAlignment="Center" Margin="5,0,0,0"/>
-                        </Grid>
-                      </ControlTemplate>
-                    </RepeatButton.Template>
-                  </RepeatButton>
-                </Track.DecreaseRepeatButton>
-                <Track.Thumb>
-                  <Thumb Width="10" Height="10" Focusable="False">
-                    <Thumb.Template>
-                      <ControlTemplate TargetType="Thumb">
-                        <Ellipse x:Name="e" Fill="#DCE2FF"/>
-                        <ControlTemplate.Triggers>
-                          <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="e" Property="Fill" Value="#FFFFFF"/>
-                          </Trigger>
-                          <Trigger Property="IsDragging" Value="True">
-                            <Setter TargetName="e" Property="Fill" Value="#7C9CFF"/>
-                          </Trigger>
-                        </ControlTemplate.Triggers>
-                      </ControlTemplate>
-                    </Thumb.Template>
-                  </Thumb>
-                </Track.Thumb>
-                <Track.IncreaseRepeatButton>
-                  <RepeatButton Command="Slider.IncreaseLarge" Focusable="False" Opacity="0"/>
-                </Track.IncreaseRepeatButton>
-              </Track>
-            </Grid>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <!-- The same line stood on end, for the deck's volume: with the speaker under it the pair takes the deck's
-         height and a thumb's width, so the bottom bar's right-hand column keeps clear of the tab's buttons at any
-         window width. The filled part is the lower one, the level rising from the bottom. -->
-    <Style x:Key="ScrubV" TargetType="Slider" BasedOn="{StaticResource {x:Type Slider}}">
-      <Setter Property="Orientation" Value="Vertical"/>
-      <Setter Property="Width" Value="16"/>
-      <Setter Property="Height" Value="34"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Slider">
-            <Grid Background="Transparent">
-              <Border Width="3" CornerRadius="1.5" Background="#2A2A30" HorizontalAlignment="Center" Margin="0,5"/>
-              <Track x:Name="PART_Track" Orientation="Vertical">
-                <Track.DecreaseRepeatButton>
-                  <RepeatButton Command="Slider.DecreaseLarge" Focusable="False">
-                    <RepeatButton.Template>
-                      <ControlTemplate TargetType="RepeatButton">
-                        <Grid Background="Transparent">
-                          <Border Width="3" CornerRadius="1.5" Background="#8A8A96" HorizontalAlignment="Center" Margin="0,0,0,5"/>
                         </Grid>
                       </ControlTemplate>
                     </RepeatButton.Template>
@@ -1084,10 +1034,12 @@
          be read rather than dismissed. Declared last so it paints over everything, and it covers the header too:
          the caption stays draggable because the chrome, not this Border, owns that strip. -->
     <!-- The playlist editor: the game's iPod on the left, the playlist on the right, and what is picked on either
-         side can be sampled on the deck. Order of adding is the order they play in. Driven from
-         MainWindow.Music.cs, by the mouse, the keyboard and a controller alike. -->
-    <Border x:Name="PlaylistVeil" Grid.Row="0" Grid.RowSpan="3" Background="#D00B0B0C" Visibility="Collapsed">
-      <Border Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
+         side can be sampled on the deck. The veil covers the header and the content but not the bottom bar, so
+         the deck stays in view and in reach while the editor is up; a click on the veil itself is Done. Order
+         is the playlist's own: drag a row, or Move up and Move down. Driven from MainWindow.Music.cs, by the
+         mouse, the keyboard and a controller alike. -->
+    <Border x:Name="PlaylistVeil" Grid.Row="0" Grid.RowSpan="2" Background="#D00B0B0C" Visibility="Collapsed">
+      <Border x:Name="PlaylistCard" Background="{StaticResource Card}" BorderBrush="{StaticResource Line}" BorderThickness="1"
               CornerRadius="12" Padding="24,20" Width="880" MaxHeight="680" Margin="22"
               VerticalAlignment="Center" HorizontalAlignment="Center">
         <Grid>
@@ -1098,7 +1050,7 @@
           </Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Margin="0,0,0,14">
             <TextBlock Text="Playlist" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
-            <TextBlock Text="Pick from the game's iPod. Tracks play in the order they were added; double-click one to add it or take it out, and Sample plays it now."
+            <TextBlock Text="Pick from the game's iPod: double-click a track, or drag it across, and drag the playlist's rows to put them in order. Sample plays the picked track on the deck below. The list is kept the moment the editor closes - Done, Escape, or a click outside it."
                        FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap"/>
           </StackPanel>
           <Grid Grid.Row="1">
@@ -1124,13 +1076,13 @@
                           <ColumnDefinition Width="*"/>
                           <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding Label}" FontSize="12" Foreground="#ECECEE" Margin="12,7"
+                        <TextBlock Text="{Binding Name}" FontSize="12" Foreground="#ECECEE" Margin="12,7"
                                    TextTrimming="CharacterEllipsis"/>
                         <!-- Tag="heart" is what the click handler looks for, so a click here hearts the track
                              instead of picking it. -->
                         <TextBlock Grid.Column="1" Tag="heart" Text="{Binding Heart}" FontSize="14"
                                    Foreground="{Binding HeartInk}" Margin="8,0,12,0" VerticalAlignment="Center"
-                                   Cursor="Hand" ToolTip="Favourite - favourites head every list"/>
+                                   Cursor="Hand" ToolTip="{Binding HeartTip}"/>
                       </Grid>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
@@ -1139,12 +1091,16 @@
             </Border>
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="14,0">
               <Button x:Name="PlAddBtn" Content="Add  ►" Style="{StaticResource Flat}" ToolTip="Add the picked track to the playlist (Enter, or A on a pad)"/>
-              <Button x:Name="PlSampleBtn" Content="Sample" Style="{StaticResource Flat}" Margin="0,8,0,0"
-                      ToolTip="Play the picked track on the deck now (Space, or X on a pad)"/>
-              <Button x:Name="PlFavBtn" Content="&#x2665;  Favourite" Style="{StaticResource Flat}" Margin="0,8,0,0"
-                      ToolTip="Heart the picked track; favourites head every list (F, or Y on a pad)"/>
               <Button x:Name="PlRemoveBtn" Content="◄  Remove" Style="{StaticResource Flat}" Margin="0,8,0,0"
                       ToolTip="Take the picked track out of the playlist (Delete, or A on a pad)"/>
+              <Button x:Name="PlSampleBtn" Content="Sample" Style="{StaticResource Flat}" Margin="0,18,0,0"
+                      ToolTip="Play the picked track on the deck now (Space, or X on a pad)"/>
+              <Button x:Name="PlFavBtn" Content="&#x2665;  Heart" Style="{StaticResource Flat}" Margin="0,8,0,0"
+                      ToolTip="Heart the picked track; hearted tracks head every list (F, or Y on a pad)"/>
+              <Button x:Name="PlUpBtn" Content="▲  Move up" Style="{StaticResource Flat}" Margin="0,18,0,0"
+                      ToolTip="Move the picked playlist row up one (Ctrl+Up, or LB on a pad)"/>
+              <Button x:Name="PlDownBtn" Content="▼  Move down" Style="{StaticResource Flat}" Margin="0,8,0,0"
+                      ToolTip="Move the picked playlist row down one (Ctrl+Down, or RB on a pad)"/>
             </StackPanel>
             <Border x:Name="PlaylistBox" Grid.Column="2" Background="#111114" BorderBrush="#26262A" BorderThickness="1"
                     CornerRadius="8" MinHeight="300">
@@ -1155,11 +1111,25 @@
                 </Grid.RowDefinitions>
                 <TextBlock x:Name="PlaylistHead" Text="Playlist" FontSize="11" FontWeight="SemiBold"
                            Foreground="{StaticResource Muted}" Margin="12,9,12,7"/>
-                <ListBox x:Name="PlaylistTracks" Grid.Row="1">
+                <!-- AllowDrop: rows dragged from the iPod land here, and the list's own rows are dragged into
+                     order. The number at the row's head is its place in the play order. -->
+                <ListBox x:Name="PlaylistTracks" Grid.Row="1" AllowDrop="True">
                   <ListBox.ItemTemplate>
                     <DataTemplate>
-                      <TextBlock Text="{Binding Label}" FontSize="12" Foreground="#ECECEE" Margin="12,7"
-                                 TextTrimming="CharacterEllipsis"/>
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="Auto"/>
+                          <ColumnDefinition Width="*"/>
+                          <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Position}" FontSize="11" Foreground="#6E6E77" Margin="12,7,0,7"
+                                   MinWidth="22" TextAlignment="Right" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="12" Foreground="#ECECEE" Margin="10,7,0,7"
+                                   TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2" Tag="heart" Text="{Binding Heart}" FontSize="14"
+                                   Foreground="{Binding HeartInk}" Margin="8,0,12,0" VerticalAlignment="Center"
+                                   Cursor="Hand" ToolTip="{Binding HeartTip}"/>
+                      </Grid>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
@@ -1169,7 +1139,7 @@
           <Grid Grid.Row="2" Margin="0,16,0,0">
             <Button x:Name="PlClearBtn" Content="Clear the playlist" Style="{StaticResource Flat}" HorizontalAlignment="Left"/>
             <Button x:Name="PlDoneBtn" Content="Done" Style="{StaticResource Primary}" HorizontalAlignment="Right"
-                    ToolTip="Keep this playlist (Escape closes too)"/>
+                    ToolTip="Keep this playlist (Escape, or a click outside the editor, does the same)"/>
           </Grid>
         </Grid>
       </Border>

@@ -1,4 +1,4 @@
-# Releases
+﻿# Releases
 
 Every release carries three assets: `mgs4-dlss-launcher.exe`, `mgs4_dlss.addon64` and `mgs4_dlss.ini`. The exe is
 the launcher with the same add-on and ini built into it, so it is the only download most people need; the loose pair
@@ -20,9 +20,22 @@ The launcher starts Steam first, the music fades instead of cutting, and the pro
   **MGS1 running**: the collection's front-end and the bundled MGS1 are watched for as well as `mgs4.exe`. The music
   reads the same thing, and stays down through a launch and while any of the three is up.
 - **Nothing on the deck cuts.** A change of track is a crossfade, a track starting over silence fades in, a stop is
-  a short fade, and pause, mute and the volume ride a quarter-second ramp. A speaker and a volume slider sit off the
-  deck's right-hand edge: the slider writes `MGS4_MUSIC_VOLUME` a moment after it stops moving, the speaker mutes for
-  the sitting and writes nothing. Saving the Settings form leaves the track where it was unless the *mode* changed.
+  a short fade, and pause, mute and the volume ride a quarter-second ramp. A track running out - or a picked one
+  going round again, or Back taking it to its start - is brought in under itself the same way rather than snapping.
+  A speaker sits at the end of the deck's row: a click mutes for the sitting and writes nothing, the wheel over it
+  steps the volume, and while the pointer is on it a flyout opens beside it with the slider, which writes
+  `MGS4_MUSIC_VOLUME` a moment after it stops moving. Saving the Settings form leaves the track where it was unless the *mode* changed.
+- **The deck's buttons stay centred.** The speaker hangs off the right of the play buttons, and a blank of its
+  width heads the row, so pause sits under the title and over the scrubber whether the speaker is there or not.
+- **The playlist editor.** Rows drag into order - the iPod's across into the list, the list's own up and down -
+  and **Move up** / **Move down** (Ctrl+Up / Ctrl+Down, LB / RB on a pad) step the picked row; the playlist's rows
+  are numbered in play order. A click anywhere off the card is Done, and the veil stops short of the bottom bar,
+  so the deck stays in view and in reach with the editor up. Buttons light only with something to act on.
+- **Hearts, and nothing else.** The built-in set of starred picks is gone: nothing ranks a track but a heart, and
+  the rest follow A to Z. Both of the editor's lists carry a heart on every row and no ♥ in the name; the Menu
+  music drop-down keeps the ♥ in front, having no room for a heart of its own. A first run starts with five hearted
+  - the title theme, the hummed Love Theme, Snake Eater, Oishii Tsuhan and VR Training - and from the first save
+  on the list is the person's own.
 - **The pad walks more of the window.** The d-pad steps through the act headers as well as the scenes, and A on a
   header opens or shuts the act; the run-option walk reaches the Launch button at its foot; Start Options' row of
   buttons is reachable; holding a direction repeats at thirteen a second, judged against where a glide is going

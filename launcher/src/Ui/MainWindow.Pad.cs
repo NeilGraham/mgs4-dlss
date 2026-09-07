@@ -1,4 +1,4 @@
-// The window on a controller. Gamepad.cs says which buttons are down; this says what they do, tab by tab, and
+﻿// The window on a controller. Gamepad.cs says which buttons are down; this says what they do, tab by tab, and
 // puts each button's name beside the thing it does while a pad is connected.
 //
 // The shape is the same everywhere: a *zone* is the part of the tab the pad is in, the d-pad walks within it, A
@@ -593,6 +593,8 @@ namespace Mgs4Launcher
             Hint(_plRemoveBtn, PadButton.A);
             Hint(_plSampleBtn, PadButton.X);
             Hint(_plFavBtn, PadButton.Y);
+            Hint(_plUpBtn, PadButton.LB);
+            Hint(_plDownBtn, PadButton.RB);
             Hint(_plDoneBtn, PadButton.B);
 
             // The filter chips are reached with Y, so Y sits at the head of their row.

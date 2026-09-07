@@ -1,4 +1,4 @@
-// The window: one shell, three tabs, and the same things as a command line. The chrome is the XAML lifted from the
+﻿// The window: one shell, three tabs, and the same things as a command line. The chrome is the XAML lifted from the
 // PowerShell app (Window.xaml, embedded); everything with data in it is built in code, tab by tab, in the partial
 // classes beside this one.
 using System;
@@ -551,6 +551,15 @@ namespace Mgs4Launcher
         {
             _optAdvance.IsChecked = true;
             Dictionary<string, object> p = Prefs.Read();
+            // The hearts. A file with none of the key at all - or no file - is a first run, and starts with the
+            // default set; a file that has the key, even an empty one, is the person's own list, taken as written.
+            object hearts;
+            if (p != null && p.TryGetValue("MusicFavorites", out hearts))
+            {
+                if (hearts is object[])
+                    foreach (object o in (object[])hearts) if (o != null) Music.Favorites.Add(o.ToString());
+            }
+            else foreach (string t in Music.DefaultFavorites) Music.Favorites.Add(t);
             if (p == null) return;
             Func<string, bool> flag = k =>
             {
@@ -563,9 +572,6 @@ namespace Mgs4Launcher
                 return p.TryGetValue(k, out v) && v != null ? v.ToString() : null;
             };
             if (p.ContainsKey("Advance")) _optAdvance.IsChecked = flag("Advance");
-            object hearts;
-            if (p.TryGetValue("MusicFavorites", out hearts) && hearts is object[])
-                foreach (object o in (object[])hearts) if (o != null) Music.Favorites.Add(o.ToString());
             // The simple view's own copy of the same option, and its own default: off. Starting the game and
             // getting out of the way is what that view is for, and a scene run's habits are not its business.
             _startAdvance.IsChecked = flag("StartAdvance");

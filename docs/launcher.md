@@ -1,4 +1,4 @@
-# The launcher (`mgs4-dlss-launcher`)
+﻿# The launcher (`mgs4-dlss-launcher`)
 
 One window for the whole add-on, and the same things as a command line. It is a C# WPF program built from
 `launcher\src` by the compiler that ships with Windows, so it needs nothing installed, and a release is the one exe
@@ -123,7 +123,7 @@ in, over USB or Bluetooth, is read as raw HID (`Gamepad.cs`). The moment one is 
 beside the things they do, in the pad's own names, and go when the pad does: ☰ on **Launch**, **Save settings** and
 **Re-check**; LB and RB (L1 and R1) either side of the tabs, each only while there is a tab in that direction; the
 Play tab's view button wears VIEW / CREATE; △ (Y) sits at the head of the filter chips; and the playlist editor's own
-buttons carry ✕ / □ / △ / ○. There is no legend for the d-pad, A or B - those do what they do everywhere. Only the
+buttons carry ✕ / □ / △ / L1 / R1 / ○. There is no legend for the d-pad, A or B - those do what they do everywhere. Only the
 **active** window listens: with the game in front the presses are the game's.
 
 The bumpers and triggers step between the tabs. On **Play, all scenes** the left stick scrolls the list and the
@@ -413,12 +413,13 @@ as `bgm_*` cues, and its cutscene music under `ww\bank\default`. Two of those ar
 iTunes draws its own, and under those a scrubber with the time either side - drag it or click along it to seek.
 A single picked track loops and gets pause alone; the queued modes get back and next as well. Back within three
 seconds of a track starting goes to the one before it, later than that to the top of the one playing, and at the
-head of a queue with nowhere to go it is greyed out. Off the deck's right-hand edge - in the bar's own right-hand
-column, so the deck stays on the window's centre line - are a speaker and a volume slider standing on end, the
-deck's height, so it takes no width from the tab's buttons at the window's narrowest: the slider is
+head of a queue with nowhere to go it is greyed out. A speaker ends the row: a click mutes for this sitting and
+writes nothing, the wheel over it steps the volume by five, and while the pointer is on it a flyout opens beside
+it with the volume slider and the number, and goes a beat after the pointer has left both. The slider is
 `MGS4_MUSIC_VOLUME` and writes itself to `config.ini` a moment after it stops moving (the Settings form's own row
-follows), while the speaker mutes for this sitting and writes nothing - the slider keeps its place under it, and
-moving the slider unmutes.
+follows); the slider keeps its place under a mute, and moving it unmutes. A track running out, a picked one going
+round again and Back taking a track to its start are all brought in under the one playing, like a press of Next:
+the next play is started a second and a bit before the end, and nothing on the deck snaps.
 
 **Nothing cuts.** A change of track is a crossfade, the one leaving going out under the one arriving over a second
 and a half; a track starting over silence fades in; a stop - the game taking the speakers - is a short fade; pause,
@@ -431,13 +432,20 @@ the whole list dealt into a random order once, walked to its end before a fresh 
 the new deal never the track that just finished. **Playlist** (`playlist`) plays a list of your own in order and
 goes round; **Playlist, shuffled** (`playlist-shuffle`) deals that list the same way. The list itself is
 `MGS4_PLAYLIST` in `config.ini`, file names comma-separated in play order, and is edited from the Launcher card's
-**Edit playlist...** row: the iPod on the left, the list on the right, double-click or Enter to add, Delete to take
-out, Space to sample the picked track on the deck, Escape or Done to keep it. On a controller Left and Right pick
-the list, A adds or removes, X samples, B is Done. Order of adding is the order of playing.
+**Edit playlist...** row: the iPod on the left, the list on the right with its rows numbered in play order.
+Double-click a track or press Enter to add it, or drag it across and drop it where it should go; Delete takes one
+out; the playlist's own rows drag into order, or **Move up** and **Move down** (Ctrl+Up and Ctrl+Down) step the
+picked one; Space samples the picked track on the deck. The editor's veil stops short of the bottom bar, so the
+deck stays in view and in reach while it is up. The list is kept the moment the editor closes, and it closes on
+Done, Escape, or a click anywhere off the card. On a controller Left and Right pick the list, A adds or removes,
+X samples, L1 and R1 (LB and RB) move a row, B is Done.
 
-**Favourites.** Each row on the iPod side ends in a heart; click it, press F, or Y on a pad, and the track is
-hearted (`MusicFavorites` in `launcher.json`). Favourites head every list the iPod is shown in - the Menu music
-choice and the editor's own - ahead of the starred tracks, with a ♥ in front of the name.
+**Hearts.** Every row in the editor ends in a heart; click it, press F, or Y on a pad, and the track is hearted
+(`MusicFavorites` in `launcher.json`). Hearted tracks head every list the iPod is shown in - the editor's two, and
+the Menu music choice, where a ♥ stands in front of the name because a drop-down has no room for a heart of its
+own - and the rest follow A to Z. Nothing ranks a track but a heart: there is no built-in set of picks. A first
+run starts with five hearted - the title theme, the hummed Love Theme, Snake Eater, Oishii Tsuhan and VR Training
+- and from the first save on the list is the person's own, so a heart taken off stays off.
 
 **A plain launcher.** `MGS4_SETUP_TAB=hidden` in `config.ini` (Settings, Launcher, **Setup tab**) takes the Setup
 tab away: no install check, no add-on, nothing about DLSS on screen, for a machine with nothing to set up - an AMD
