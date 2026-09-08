@@ -171,6 +171,8 @@ namespace Mgs4Launcher
                 "DLSS inside the Codec caller's own render target"),
             new IniKey("Image", "PreWarm", "bool", "Pre-warm",
                 "build the DLSS / NR features on loading screens, so the stall is not in the first cutscene frames"),
+            new IniKey("Image", "BorderGuard", "bool", "Wide-display bars",
+                "on a display wider than 16:9, clear the bars beside the game's image at every present - otherwise frame generation fills them with a flickering ghost of the scene and the ReShade overlay is left behind in them") { Fallback = "1" },
 
 
             // RenoDX's DLSS 5 add-on, out of [RenoDX.DLSS5] in MGS4\ReShade.ini. Not this project's settings and

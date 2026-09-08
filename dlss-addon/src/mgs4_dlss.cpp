@@ -512,6 +512,20 @@ static bool g_nrPreloadDone = false;
 // game's device on the next evaluation. The WARP device is kept alive for the whole run (RenoDX resets its runtime
 // state on destroy_device) and this add-on ignores it.
 static int g_cfgNrKick = 1;
+// BorderGuard (default 1, live): on a display wider than the game's 16:9 the swapchain is the whole panel (7680x2160
+// on a 32:9) and the game composites its 3840x2160 image into the middle of it; the bars either side are whatever
+// was left in the backbuffer. Two things get left there. With frame generation on, RenoDX's DLSS add-on steps into
+// DLSS-G's evaluate (its "DLSS-G final-color input" source) and runs Neural Rendering over the entire backbuffer,
+// bars included, with the 16:9 depth and motion vectors stretched across it: the bars fill with a rippling ghost of
+// the scene that flickers between real and generated frames. Without it, nothing ever clears the bars, so ReShade's
+// overlay, drawn over the whole backbuffer, stays behind in them after it is closed. So at every present - ReShade's
+// present event, which is downstream of Streamline and so sees the real and the generated frames once DLSS-G and
+// RenoDX are done with them, and runs before ReShade draws its overlay - the backbuffer outside the game's rectangle
+// (the composite draw's viewport, g_gameVp) is cleared to black. When the game fills the backbuffer there is nothing
+// to clear and nothing is recorded.
+static int g_cfgBorderGuard = 1;
+static std::unordered_map<uint64_t, resource_view> g_bbRtvs;   // backbuffer -> RTV for the border clear
+static uint32_t g_borderClears = 0;
 static bool g_nrKickDone = false;
 static bool g_nrKickInProgress = false;
 static ID3D12Device* g_nrKickDevice = nullptr;
@@ -3492,6 +3506,7 @@ static void reload_config()
             else { HMODULE h = LoadLibraryW(path); logmsg("NrPreload: nvngx_dlssnr.dll %s for %s (NrPreload=0 in the ini turns this off)", h ? "loaded" : "failed to load", g_nrAddonName); }
         }
         g_cfgNrKick = GetPrivateProfileIntA("DLSS", "NrKick", 1, g_iniPath);
+        g_cfgBorderGuard = GetPrivateProfileIntA("DLSS", "BorderGuard", 1, g_iniPath);
         const int eff = g_cfgPrePostMode < 0 ? (g_nrAddonLoaded ? 0 : 1) : g_cfgPrePostMode;
         if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS post-processing add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? g_nrAddonName : "not loaded");
         g_cfgPrePost = eff;
@@ -3697,9 +3712,43 @@ static void frame_rollover()
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }
     if (g_frame % 120 == 0) reload_config();
 }
+// The BorderGuard (see g_cfgBorderGuard): clear the backbuffer about to be presented outside the game's rectangle.
+static void border_guard(command_queue* queue, swapchain* sc)
+{
+    if (!g_cfgBorderGuard || !queue || !sc || !g_bbW || !g_bbH) return;
+    const int32_t gx = (int32_t)g_gameVp[0], gy = (int32_t)g_gameVp[1], gw = (int32_t)g_gameVp[2], gh = (int32_t)g_gameVp[3];
+    if (gw <= 0 || gh <= 0) return;
+    const int32_t bw = (int32_t)g_bbW, bh = (int32_t)g_bbH;
+    rect rects[4]; uint32_t n = 0;
+    if (gx > 0) rects[n++] = { 0, 0, gx, bh };                          // left bar
+    if (gx + gw < bw) rects[n++] = { gx + gw, 0, bw, bh };              // right bar
+    if (gy > 0) rects[n++] = { gx, 0, gx + gw, gy };                    // top bar (between the side bars)
+    if (gy + gh < bh) rects[n++] = { gx, gy + gh, gx + gw, bh };        // bottom bar
+    if (!n) return;   // the game fills the backbuffer
+    resource bb = sc->get_current_back_buffer(); if (!bb.handle) return;
+    device* dev = sc->get_device();
+    resource_view rtv = { 0 };
+    auto it = g_bbRtvs.find(bb.handle);
+    if (it != g_bbRtvs.end()) rtv = it->second;
+    else {
+        const resource_desc d = dev->get_resource_desc(bb);
+        if (!dev->create_resource_view(bb, resource_usage::render_target, resource_view_desc(format_to_default_typed(d.texture.format, 0)), &rtv)) { rtv = { 0 }; logmsg("BorderGuard: backbuffer RTV failed (fmt %u) - the bars outside the game's image are left alone", (unsigned)d.texture.format); }
+        g_bbRtvs[bb.handle] = rtv;
+        static bool once = false;
+        if (rtv.handle && !once) { once = true; logmsg("BorderGuard: the backbuffer outside the game's image (%d,%d %dx%d in %ux%u: %u bars) is cleared at every present (BorderGuard=0 in the ini turns this off)", gx, gy, gw, gh, g_bbW, g_bbH, n); }
+    }
+    if (!rtv.handle) return;
+    command_list* cmd = queue->get_immediate_command_list(); if (!cmd) return;
+    const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    cmd->barrier(bb, resource_usage::present, resource_usage::render_target);
+    cmd->clear_render_target_view(rtv, black, n, rects);
+    cmd->barrier(bb, resource_usage::render_target, resource_usage::present);
+    g_borderClears++;
+}
 static void on_present(command_queue* queue, swapchain* sc, const rect*, const rect*, uint32_t, const rect*)
 {
     nr_kick();
+    border_guard(queue, sc);
     if (g_cfgProbe && g_probeReady && queue && sc) {   // every presented frame, generated ones included
         command_list* icl = queue->get_immediate_command_list();
         if (icl) { resource bb = sc->get_current_back_buffer(); if (bb.handle) probe_dispatch(icl, bb, resource_usage::present, 3); }
@@ -3718,7 +3767,12 @@ static void on_init_swapchain(swapchain* sc, bool resize)
     g_hwnd = reinterpret_cast<HWND>(sc->get_hwnd());
     logmsg("swapchain %s: %ux%u fmt=%u (%u buffers), window %p", resize ? "resized" : "created", g_bbW, g_bbH, (unsigned)d.texture.format, sc->get_back_buffer_count(), (void*)g_hwnd);
 }
-static void on_destroy_swapchain(swapchain*, bool) { g_backbuffers.clear(); }
+static void on_destroy_swapchain(swapchain* sc, bool)
+{
+    g_backbuffers.clear();
+    if (device* dev = sc ? sc->get_device() : nullptr) for (auto& kv : g_bbRtvs) if (kv.second.handle) dev->destroy_resource_view(kv.second);
+    g_bbRtvs.clear();
+}
 static void on_init_device(device* dev)
 {
     if (g_nrKickInProgress) { logmsg("device created: the NrKick WARP device - ignored"); return; }
@@ -3763,9 +3817,32 @@ static void on_destroy_device(device* dev)
     objmv::shutdown();
 }
 
+// The Windows profile API knows nothing of a UTF-8 byte-order mark: with one in front of "[DLSS]" the section is not
+// recognized, every key reads as its default (frame generation off, InternalRes unknown ...) and the first write appends
+// a second [DLSS] section at the end of the file. An editor that saves "UTF-8 with BOM" - or a copy of the ini that
+// carried one - is enough, so the mark is taken off the file once, before it is first read.
+static void strip_ini_bom()
+{
+    HANDLE h = CreateFileA(g_iniPath, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    unsigned char bom[3] = {}; DWORD got = 0;
+    if (ReadFile(h, bom, 3, &got, nullptr) && got == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF) {
+        const DWORD size = GetFileSize(h, nullptr);
+        std::vector<char> rest(size > 3 ? size - 3 : 0);
+        DWORD n = 0;
+        if (rest.empty() || (ReadFile(h, rest.data(), (DWORD)rest.size(), &n, nullptr) && n == rest.size())) {
+            SetFilePointer(h, 0, nullptr, FILE_BEGIN);
+            DWORD w = 0; if (!rest.empty()) WriteFile(h, rest.data(), (DWORD)rest.size(), &w, nullptr);
+            SetEndOfFile(h);
+            logmsg("mgs4_dlss.ini started with a UTF-8 byte-order mark, which hides every key from the Windows profile API - removed");
+        }
+    }
+    CloseHandle(h);
+}
 static void load_config()
 {
     snprintf(g_iniPath, MAX_PATH, "%s\\mgs4_dlss.ini", g_gameDir);
+    strip_ini_bom();
     g_cfgPreset = GetPrivateProfileIntA("DLSS", "Preset", 11, g_iniPath);
     g_cfgLogEveryN = GetPrivateProfileIntA("DLSS", "LogEveryN", 600, g_iniPath);
     g_cfgRecreateAfter = GetPrivateProfileIntA("DLSS", "RecreateAfter", 0, g_iniPath);
@@ -3865,6 +3942,9 @@ static void draw_overlay(effect_runtime*)
     bool fb = g_cfgFrozenBg != 0;
     if (ImGui::Checkbox("Frozen screens (pause menu / Codec): DLSS before the game captures its background", &fb)) { g_cfgFrozenBg = fb ? 1 : 0; write_ini_int("FrozenBackground", g_cfgFrozenBg); }
     ImGui::Text("Frozen-screen insertions: %u | pass-through frames (no second NR on a frozen image): %u", g_frozenInjections, g_frozenPassFrames);
+    bool bg = g_cfgBorderGuard != 0;
+    if (ImGui::Checkbox("Clear the bars outside the game's image at every present (wide displays: keeps NR and the overlay out of the pillarbox)", &bg)) { g_cfgBorderGuard = bg ? 1 : 0; write_ini_int("BorderGuard", g_cfgBorderGuard); }
+    if (g_bbW && g_gameVp[2] > 0) ImGui::Text("Game image (%.0f,%.0f %.0fx%.0f) in a %ux%u backbuffer | bar clears: %u", g_gameVp[0], g_gameVp[1], g_gameVp[2], g_gameVp[3], g_bbW, g_bbH, g_borderClears);
     bool om = g_cfgObjectMV != 0;
     if (ImGui::Checkbox("Per-object motion vectors (stream-out of the game's vertex shaders)", &om)) { g_cfgObjectMV = om ? 1 : 0; write_ini_int("ObjectMV", g_cfgObjectMV); }
     {

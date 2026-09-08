@@ -57,6 +57,19 @@ launcher that built itself on first run.
   add-on.
 - **The Setup cards say whose they are.** Game, ReShade, NVIDIA, RenoDX and MGS4 DLSS badges, the same ones the
   Settings groups wear.
+- **The bars on a wide display are kept black.** On a 32:9 panel the swapchain is the whole 7680x2160 and the
+  game composites its 16:9 image into the middle of it; nothing ever cleared the bars either side, so with frame
+  generation on they filled with a rippling, flickering ghost of the scene, and with it off the ReShade overlay was
+  left behind in them after it was closed. `BorderGuard=1` (live; *Clear the bars outside the game's image* on the
+  MGS4 DLSS tab) clears the backbuffer outside the game's rectangle at every present - ReShade's present event,
+  downstream of Streamline, so the real and the generated frames both pass through it once DLSS-G and RenoDX are
+  done with them, and before ReShade draws its overlay. On a 16:9 display the game fills the backbuffer and nothing
+  is recorded.
+- **A byte-order mark no longer blanks the ini.** The shipped `mgs4_dlss.ini` had picked up a UTF-8 byte-order
+  mark (from 2026-09-07, unreleased), which the Windows profile API does not understand: `[DLSS]` went unrecognised,
+  every key read as its default - frame generation off, InternalRes unknown - and the first write appended a second
+  `[DLSS]` section at the end of the file. The mark is gone from the shipped file, and the add-on removes one from
+  the ini next to the game before its first read, so an editor that saves "UTF-8 with BOM" cannot do this again.
 - **One resolution setting.** The Play tab's *Set the render resolution* box and Settings' *Resolution* row were two
   views of different things; they are now one, `MGS4_RES`, and each follows the other.
 
