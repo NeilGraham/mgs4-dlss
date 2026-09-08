@@ -219,6 +219,12 @@ namespace Mgs4Launcher
             // The key that flips a debug view on and off in the game, without the ReShade overlay - for showing
             // someone the motion vectors. The add-on reads both keys live and writes DebugMode back through the
             // ini, so this form, the overlay and the key all see the same state.
+            // The pause: the game stops its world as it does on the Windows key, but the window keeps focus, so the
+            // ReShade overlay and its NR settings stay usable over a still frame. Toggled by the key, or on the
+            // MGS4 DLSS tab in the overlay.
+            new IniKey("Diagnostics", "PauseKey", "choice", "Pause key",
+                "press it in the game to stop the world while the picture is still drawn every frame - the game's own focus-loss pause with the window kept in front - to compare NR, DLAA and the native image on one frame; press again to resume",
+                new[] { "none", "Pause", "Scroll", "Insert", "Home", "End", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" }, null) { Fallback = "Pause" },
             new IniKey("Diagnostics", "DebugKey", "choice", "Debug key",
                 "press it in the game to switch the debug view below on and off; none to leave the keyboard alone",
                 new[] { "none", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" }, null) { Fallback = "none" },

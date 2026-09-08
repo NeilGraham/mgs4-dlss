@@ -174,6 +174,12 @@ namespace Mgs4Launcher
                 case "RIGHT": return 0x27;
                 case "BACK": return 0x08;
                 case "DELETE": return 0x2E;
+                case "PAUSE": return 0x13;
+                case "SCROLL": return 0x91;
+                case "INSERT": return 0x2D;
+                case "HOME": return 0x24;
+                case "END": return 0x23;
+                case "PRINTSCREEN": case "PRTSC": return 0x2C;
             }
             Match m = Regex.Match(name, "^F(\\d+)$", RegexOptions.IgnoreCase);
             if (m.Success) return (ushort)(0x6F + int.Parse(m.Groups[1].Value));

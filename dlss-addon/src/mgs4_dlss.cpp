@@ -69,6 +69,19 @@ static int g_cfgLastDebugMode = 0;
 // showing someone the motion vectors. 0 = no key. Read live like DebugMode itself.
 static unsigned g_cfgDebugKey = 0;
 static int g_cfgDebugKeyMode = 9;
+// PauseKey: a key that stops the world while the game keeps rendering it. The port pauses its simulation when its
+// window loses focus (the Windows key) and goes on drawing the frozen scene every frame - the one moment NR, DLAA
+// and the native image can be compared on the same picture - but with the window unfocused the ReShade overlay
+// takes no input. So the pause is the game's own: on the key the add-on sends the game's window the messages a
+// focus loss brings (WM_ACTIVATEAPP, WM_ACTIVATE, WM_KILLFOCUS - PauseMessages picks which), from a thread of its
+// own, while the window really stays in front; the matching "active" set resumes. Nothing in the game's state is
+// touched directly. A real alt-tab while paused hands the game a real activation, which resumes it: press the key
+// twice then. The state lives in memory only - a game never starts paused.
+static unsigned g_cfgPauseKey = 0;
+static int g_cfgPauseMessages = 7;           // 1 WM_ACTIVATEAPP, 2 WM_ACTIVATE, 4 WM_KILLFOCUS/WM_SETFOCUS
+static HWND g_hwnd = nullptr;                // the game's window, from ReShade's swapchain
+static bool g_worldPaused = false;
+static uint32_t g_pauseToggles = 0;
 static NVSDK_NGX_PerfQuality_Value g_cfgMode = NVSDK_NGX_PerfQuality_Value_DLAA;
 static char g_cfgModeName[32] = "DLAA";
 static uint32_t g_internalW = 0, g_internalH = 0;   // from ini InternalRes (size of the game's render targets)
@@ -3377,7 +3390,36 @@ static unsigned parse_key(const char* k)
     if ((k[0] == 'F' || k[0] == 'f') && k[1] >= '0' && k[1] <= '9') { int n = atoi(k + 1); return (n >= 1 && n <= 24) ? VK_F1 + (n - 1) : 0; }
     if (k[0] == '0' && (k[1] == 'x' || k[1] == 'X')) { unsigned v = (unsigned)strtoul(k, nullptr, 16); return v < 256 ? v : 0; }
     if (!k[1]) { unsigned char c = (unsigned char)toupper((unsigned char)k[0]); return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ? c : 0; }
+    static const struct { const char* name; unsigned vk; } named[] = {
+        { "pause", VK_PAUSE }, { "scroll", VK_SCROLL }, { "insert", VK_INSERT }, { "home", VK_HOME }, { "end", VK_END },
+        { "pgup", VK_PRIOR }, { "pgdn", VK_NEXT }, { "delete", VK_DELETE }, { "backspace", VK_BACK },
+    };
+    for (const auto& n : named) if (_stricmp(k, n.name) == 0) return n.vk;
     return 0;
+}
+
+// The pause: the focus-loss messages to the game's window, or the activation ones back, off this thread. A blocked
+// SendMessage would hold whichever thread pressed the key (the present thread, or DLSS-G's) against the window's
+// thread, which may be waiting on it; a thread of its own with a timeout never does.
+struct PauseJob { HWND hwnd; bool on; int mask; };
+static DWORD WINAPI world_pause_thread(LPVOID p)
+{
+    PauseJob job = *reinterpret_cast<PauseJob*>(p); delete reinterpret_cast<PauseJob*>(p);
+    DWORD_PTR res = 0;
+    if (job.mask & 1) SendMessageTimeoutW(job.hwnd, WM_ACTIVATEAPP, job.on ? FALSE : TRUE, 0, SMTO_ABORTIFHUNG | SMTO_NORMAL, 3000, &res);
+    if (job.mask & 2) SendMessageTimeoutW(job.hwnd, WM_ACTIVATE, job.on ? WA_INACTIVE : WA_ACTIVE, 0, SMTO_ABORTIFHUNG | SMTO_NORMAL, 3000, &res);
+    if (job.mask & 4) SendMessageTimeoutW(job.hwnd, job.on ? WM_KILLFOCUS : WM_SETFOCUS, 0, 0, SMTO_ABORTIFHUNG | SMTO_NORMAL, 3000, &res);
+    return 0;
+}
+static void world_pause(bool on)
+{
+    if (!g_hwnd) { logmsg("pause: no game window known yet"); return; }
+    g_worldPaused = on; ++g_pauseToggles;
+    logmsg("world %s at frame %u: %s to window %p (PauseMessages=%d)", on ? "PAUSED" : "resumed", g_frame,
+           on ? "focus-loss messages" : "activation messages", (void*)g_hwnd, g_cfgPauseMessages);
+    PauseJob* job = new PauseJob{ g_hwnd, on, g_cfgPauseMessages };
+    HANDLE t = CreateThread(nullptr, 0, world_pause_thread, job, 0, nullptr);
+    if (t) CloseHandle(t); else { delete job; g_worldPaused = !on; logmsg("pause: could not start the thread"); }
 }
 
 // Which of the CompositeIfLoaded modules (RenoDX's DLSS add-on by default) is in the process, if any.
@@ -3417,6 +3459,8 @@ static void reload_config()
     g_cfgSharpness100 = GetPrivateProfileIntA("DLSS", "Sharpness", 0, g_iniPath);
     g_cfgDebugMode = GetPrivateProfileIntA("DLSS", "DebugMode", 0, g_iniPath);
     { char k[32] = ""; GetPrivateProfileStringA("DLSS", "DebugKey", "", k, sizeof(k), g_iniPath); g_cfgDebugKey = parse_key(k); }
+    { char k[32] = ""; GetPrivateProfileStringA("DLSS", "PauseKey", "Pause", k, sizeof(k), g_iniPath); g_cfgPauseKey = parse_key(k); }
+    g_cfgPauseMessages = GetPrivateProfileIntA("DLSS", "PauseMessages", 7, g_iniPath);
     g_cfgDebugKeyMode = GetPrivateProfileIntA("DLSS", "DebugKeyMode", 9, g_iniPath);
     g_cfgJitter = GetPrivateProfileIntA("DLSS", "Jitter", 1, g_iniPath);
     g_cfgDynMask = GetPrivateProfileIntA("DLSS", "DynamicMask", 0, g_iniPath);
@@ -3671,7 +3715,8 @@ static void on_init_swapchain(swapchain* sc, bool resize)
     for (uint32_t i = 0; i < sc->get_back_buffer_count(); ++i) g_backbuffers.insert(sc->get_back_buffer(i).handle);
     resource_desc d = dev->get_resource_desc(sc->get_back_buffer(0));
     g_bbW = d.texture.width; g_bbH = d.texture.height;
-    logmsg("swapchain %s: %ux%u fmt=%u (%u buffers)", resize ? "resized" : "created", g_bbW, g_bbH, (unsigned)d.texture.format, sc->get_back_buffer_count());
+    g_hwnd = reinterpret_cast<HWND>(sc->get_hwnd());
+    logmsg("swapchain %s: %ux%u fmt=%u (%u buffers), window %p", resize ? "resized" : "created", g_bbW, g_bbH, (unsigned)d.texture.format, sc->get_back_buffer_count(), (void*)g_hwnd);
 }
 static void on_destroy_swapchain(swapchain*, bool) { g_backbuffers.clear(); }
 static void on_init_device(device* dev)
@@ -3774,6 +3819,13 @@ static void draw_overlay(effect_runtime*)
         ImGui::TextDisabled("DebugKey (0x%02X) switches Off <-> %s in the game, with this overlay closed", g_cfgDebugKey, dbg[kd]);
     } else ImGui::TextDisabled("DebugKey=none in mgs4_dlss.ini: set a key (F1..F12) there, or in the launcher's Settings, to flip a debug view in the game");
     ImGui::Separator();
+    // The world stopped, the picture still drawn every frame: the one way to set NR, DLAA and the native image
+    // side by side on the same frame. The game's own pause, brought on without the window losing focus.
+    bool paused = g_worldPaused;
+    if (ImGui::Checkbox("Pause the world (the game's focus-loss pause, with this window kept in front)", &paused)) world_pause(paused);
+    if (g_cfgPauseKey) ImGui::TextDisabled("PauseKey (0x%02X) does the same in the game, overlay open or not. The world stays still while you change NR here. If you alt-tab it resumes: press the key twice.", g_cfgPauseKey);
+    else ImGui::TextDisabled("PauseKey=none in mgs4_dlss.ini: name a key (Pause, F1..F12) there or in the launcher's Settings");
+    ImGui::Separator();
     ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
     else ImGui::Text("Feature: none yet");
@@ -3859,7 +3911,9 @@ static void draw_overlay(effect_runtime*)
 // does, so the overlay, the launcher's Settings tab and the next reload_config all see the same DebugMode.
 static void on_reshade_present(effect_runtime* rt)
 {
-    if (!g_cfgDebugKey || !rt || !rt->is_key_pressed(g_cfgDebugKey)) return;
+    if (!rt) return;
+    if (g_cfgPauseKey && rt->is_key_pressed(g_cfgPauseKey)) { world_pause(!g_worldPaused); logmsg("PauseKey pressed"); }
+    if (!g_cfgDebugKey || !rt->is_key_pressed(g_cfgDebugKey)) return;
     const int to = g_cfgDebugMode == 0 ? g_cfgDebugKeyMode : 0;
     write_ini_int("DebugMode", to);
     reload_config();

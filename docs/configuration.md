@@ -19,6 +19,8 @@ RecreateAfter=0          ; 0 = never re-create the feature (NGX-hooking add-ons 
 DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyze draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
 NrPreload=1              ; with RenoDX present, load nvngx_dlssnr.dll ourselves once - RenoDX has been seen never binding its NR runtime on its own with Streamline in the process
 NrKick=1                 ; with RenoDX present, create one WARP D3D12 device once the game runs: ReShade raises init_device again and RenoDX attaches its NR runtime. Without it the current RenoDX build only attaches after a change in its own settings tab, and every NR pass before that is refused ("BindDevice rejected unavailable runtime state"). The WARP device is kept for the run and ignored by this add-on.
+PauseKey=Pause           ; live: a key (Pause, Scroll, Insert, Home, End, F1..F12, a letter, or none) that stops the world while the game keeps drawing it - see The pause key below
+PauseMessages=7          ; which focus-loss messages the pause sends the game's window: 1 WM_ACTIVATEAPP, 2 WM_ACTIVATE, 4 WM_KILLFOCUS (added up; 7 is all three)
 DebugKey=none            ; live: a key (F1..F12, or a letter) that switches DebugMode between 0 and DebugKeyMode in the game, with no overlay
 DebugKeyMode=9           ; live: the view the debug key switches on
 Jitter=1                 ; live: Halton camera jitter patched into scene draw constants
@@ -133,6 +135,16 @@ checkbox: with it off the "Game dynamic resolution" line should climb back to fu
 
 All of them are in the overlay's Debug combo, which is on the add-on's own **MGS4 DLSS** tab in ReShade's window
 (and, in shorter form, under the add-on's entry on the Add-ons page).
+
+**The pause key.** The port stops its simulation when its window loses focus (the Windows key) and keeps drawing
+the frozen world every frame - the one moment DLSS 5 Neural Rendering, DLAA and the native image can be compared
+on the same picture - but with the window unfocused the ReShade overlay takes no input. `PauseKey` (`Pause` by
+default; also *Pause the world* on the MGS4 DLSS tab) brings on that same pause with the window kept in front: the
+add-on sends the game's window the messages a focus loss brings (`PauseMessages` says which - all three unless
+told otherwise) from a thread of its own, and the "active" set on the next press. The world stands still, the
+picture is redrawn every frame, and every NR setting, DLAA on or off, and *Enable MGS4 DLSS* apply to it at once.
+An alt-tab while paused hands the game a real activation and resumes it: press the key twice then. Nothing is
+written to the ini - a game never starts paused.
 
 **The debug key.** `DebugKey` names a key - `F1` to `F12`, or a single letter - that switches `DebugMode` between
 `0` and `DebugKeyMode` (`9`, the vectors over the image, unless set otherwise) while the game has the keyboard, with

@@ -39,6 +39,11 @@ launcher that built itself on first run.
   touched. The add-on now raises `init_device` once more for it by creating one WARP D3D12 device through ReShade
   on the first presented frame (`NrKick=1`); RenoDX attaches at once, and the first DLSS evaluation of the run
   already carries NR. The WARP device is kept for the run and ignored by everything else.
+- **A pause key.** `PauseKey` (`Pause` by default; also *Pause the world* on the MGS4 DLSS tab) stops the world
+  while the game keeps drawing it: the port's own focus-loss pause, brought on by the messages a focus loss sends
+  the game's window, with the window kept in front so the ReShade overlay still takes input. The picture is
+  redrawn every frame, so every NR setting, DLAA on or off and *Enable MGS4 DLSS* apply to one still frame - the
+  comparison the Windows key never allowed. Press again to resume; an alt-tab resumes it too.
 - **Updates.** The launcher looks at GitHub once a day when the window opens (or on *Check for updates*, Setup
   tab) for a newer release of itself - the add-on and ini ride inside it - and for a newer file list on master
   (`tools\install_manifest.json`, by its `revision` date), kept under `%LOCALAPPDATA%` when it is. A newer
