@@ -8,6 +8,13 @@ launcher that built itself on first run.
 
 ## v1.3.3 (unreleased)
 
+- **The ReShade overlay no longer kills the game with frame generation on.** Opening it (HOME) with generated
+  frames in flight died three times running with heap corruption: ReShade draws the overlay on Streamline's
+  present thread while another Streamline thread is inside RenoDX's frame-generation hook, and the two race in
+  RenoDX's overlay. `OverlayPausesFG=1` (Settings, Frame generation, *Off while the ReShade overlay is open*)
+  holds the opening back, stops frame generation, and opens the overlay a few frames later on the game's own
+  thread; closing it brings generation back. The log names each step. Details under "The ReShade overlay and
+  frame generation" in [configuration.md](configuration.md).
 - **Its own tab in ReShade.** The add-on's controls are on an **MGS4 DLSS** tab in ReShade's window, the way
   RenoDX's are, as well as under its entry on the Add-ons page.
 - **A debug key.** `DebugKey` (Settings, Diagnostics, **Debug key**) names a key that switches a debug view on and

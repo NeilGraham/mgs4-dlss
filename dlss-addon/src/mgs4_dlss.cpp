@@ -89,6 +89,7 @@ static uint32_t g_cfgRenderResW = 0, g_cfgRenderResH = 0;   // RenderRes: an exp
 static int g_cfgFgMode = 0;           // FrameGen: 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic (target fps)
 static float g_cfgFgTargetFps = 0.0f; // FGTargetFps (dynamic mode; 0 = monitor refresh rate)
 static int g_cfgReflex = 1;           // Reflex: 0 off, 1 on, 2 on + boost
+static int g_cfgOverlayFg = 1;        // OverlayPausesFG: frame generation off while the ReShade overlay is open
 static float g_gameVp[4] = { 0, 0, 0, 0 };   // composite draw viewport (x, y, w, h): where the game image sits in the backbuffer
 
 static void logmsg(const char* fmt, ...)
@@ -525,6 +526,23 @@ static int g_cfgNrKick = 1;
 // to clear and nothing is recorded.
 static int g_cfgBorderGuard = 1;
 static std::unordered_map<uint64_t, resource_view> g_bbRtvs;   // backbuffer -> RTV for the border clear
+static std::mutex g_bbRtvsMutex;                                // present arrives on Streamline's thread, the swapchain goes on the game's
+static bool g_overlayOpen = false;                              // ReShade's overlay is open (reshade_open_overlay)
+static uint32_t g_overlayOpens = 0;
+static bool g_overlayPending = false;                           // an opening held back until DLSS-G has stopped generating
+static uint32_t g_overlayPendingFrames = 0;                     // ReShade frames seen with DLSS-G off since then
+static uint32_t g_overlayKeyUpFrames = 0;                       // ... and with the overlay key released (a press while it is held is a repeat to ReShade)
+static DWORD g_overlayPendingSince = 0, g_overlaySuspendedIdle = 0;
+static DWORD g_overlayReKeyDown = 0;                            // tick of the key-down pressed from here (the key-up follows a few frames later)
+// Which threads a callback has run on so far: the first is logged, and so is every later one - the overlay and the
+// present both arrive on Streamline's present thread under DLSS-G, and a second thread there would be news.
+static void note_thread(const char* what, DWORD* seen, int& n)
+{
+    const DWORD tid = GetCurrentThreadId();
+    for (int i = 0; i < n; ++i) if (seen[i] == tid) return;
+    if (n < 8) seen[n++] = tid;
+    logmsg("%s on thread %lu%s (%s)", what, (unsigned long)tid, n > 1 ? " - a further thread" : "", tid == fg::render_thread() ? "the game's render thread" : "not the game's render thread");
+}
 static uint32_t g_borderClears = 0;
 static bool g_nrKickDone = false;
 static bool g_nrKickInProgress = false;
@@ -3530,6 +3548,7 @@ static void reload_config()
             logmsg("frame generation: %s, target fps %.0f, Reflex %d", g_cfgFgMode == 0 ? "off" : (g_cfgFgMode == 4 ? "dynamic" : (g_cfgFgMode == 1 ? "2x" : (g_cfgFgMode == 2 ? "3x" : "4x"))), g_cfgFgTargetFps, g_cfgReflex);
         }
     }
+    g_cfgOverlayFg = GetPrivateProfileIntA("DLSS", "OverlayPausesFG", 1, g_iniPath);
     g_cfgObjectMV = GetPrivateProfileIntA("DLSS", "ObjectMV", 1, g_iniPath);
     g_cfgObjMvProps = GetPrivateProfileIntA("DLSS", "ObjectMVProps", 0, g_iniPath);
     { const int lim = GetPrivateProfileIntA("DLSS", "CutPosLimit", 6000, g_iniPath); g_cfgCutPosLimit = lim > 0 ? float(lim) : 6000.0f; }
@@ -3728,6 +3747,7 @@ static void border_guard(command_queue* queue, swapchain* sc)
     resource bb = sc->get_current_back_buffer(); if (!bb.handle) return;
     device* dev = sc->get_device();
     resource_view rtv = { 0 };
+    std::unique_lock<std::mutex> lock(g_bbRtvsMutex);
     auto it = g_bbRtvs.find(bb.handle);
     if (it != g_bbRtvs.end()) rtv = it->second;
     else {
@@ -3737,6 +3757,7 @@ static void border_guard(command_queue* queue, swapchain* sc)
         static bool once = false;
         if (rtv.handle && !once) { once = true; logmsg("BorderGuard: the backbuffer outside the game's image (%d,%d %dx%d in %ux%u: %u bars) is cleared at every present (BorderGuard=0 in the ini turns this off)", gx, gy, gw, gh, g_bbW, g_bbH, n); }
     }
+    lock.unlock();
     if (!rtv.handle) return;
     command_list* cmd = queue->get_immediate_command_list(); if (!cmd) return;
     const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -3747,6 +3768,7 @@ static void border_guard(command_queue* queue, swapchain* sc)
 }
 static void on_present(command_queue* queue, swapchain* sc, const rect*, const rect*, uint32_t, const rect*)
 {
+    { static DWORD seen[8]; static int n = 0; note_thread("present", seen, n); }
     nr_kick();
     border_guard(queue, sc);
     if (g_cfgProbe && g_probeReady && queue && sc) {   // every presented frame, generated ones included
@@ -3770,8 +3792,9 @@ static void on_init_swapchain(swapchain* sc, bool resize)
 static void on_destroy_swapchain(swapchain* sc, bool)
 {
     g_backbuffers.clear();
-    if (device* dev = sc ? sc->get_device() : nullptr) for (auto& kv : g_bbRtvs) if (kv.second.handle) dev->destroy_resource_view(kv.second);
-    g_bbRtvs.clear();
+    { std::lock_guard<std::mutex> lock(g_bbRtvsMutex);
+      if (device* dev = sc ? sc->get_device() : nullptr) for (auto& kv : g_bbRtvs) if (kv.second.handle) dev->destroy_resource_view(kv.second);
+      g_bbRtvs.clear(); }
 }
 static void on_init_device(device* dev)
 {
@@ -3875,6 +3898,7 @@ static void write_ini_int(const char* key, int val) { char b[16]; snprintf(b, si
 
 static void draw_overlay(effect_runtime*)
 {
+    { static DWORD seen[8]; static int n = 0; note_thread("overlay drawn", seen, n); }
     if (g_uiMode < 0) g_uiMode = mode_index(g_cfgMode);
     bool en = g_cfgEnabled != 0;
     if (ImGui::Checkbox("Enable DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
@@ -3968,6 +3992,9 @@ static void draw_overlay(effect_runtime*)
             if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }
             if (!st.dynamicSupported && st.initialized) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
         }
+        bool of = g_cfgOverlayFg != 0;
+        if (ImGui::Checkbox("Frame generation off while this overlay is open (opening it with generation running killed the game; applies from the next opening)", &of)) { g_cfgOverlayFg = of ? 1 : 0; write_ini_int("OverlayPausesFG", g_cfgOverlayFg); }
+        if (fg::suspended()) ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Frame generation is off while this overlay is open (%s) - close it to get the generated frames back", st.active ? "winding down" : "off now");
         const char* rfNames[] = { "Off", "On", "On + Boost" };
         int rf = g_cfgReflex;
         if (ImGui::Combo("NVIDIA Reflex", &rf, rfNames, 3)) { write_ini_int("Reflex", rf); reload_config(); }
@@ -3989,9 +4016,79 @@ static void draw_overlay(effect_runtime*)
 // The debug key, read the way ReShade reads its own keys - so it is the game's window that has to be in front, and
 // the overlay's key handling is respected. The switch goes through the ini, exactly as a change from the overlay
 // does, so the overlay, the launcher's Settings tab and the next reload_config all see the same DebugMode.
+// ReShade opens its overlay on whichever thread presents. Under DLSS-G that is Streamline's present thread, while
+// Streamline's workers keep running the other add-ons' hooks on generated frames; opening the overlay that way ended
+// the process with heap corruption inside RenoDX's overlay (2026-09-07/08, docs/configuration.md, "The ReShade overlay and frame generation"). So frame
+// generation is held off while the overlay is open (OverlayPausesFG) and lifted when it closes; fg::poll applies the
+// change on the game's own present. Returning false lets ReShade open or close the overlay as asked.
+// The overlay's key, the way ReShade has it in ReShade.ini (KeyOverlay=key,ctrl,shift,alt).
+static int overlay_key(effect_runtime* rt, int* ctrl = nullptr, int* shift = nullptr, int* alt = nullptr)
+{
+    char v[64] = ""; size_t n = sizeof(v);
+    int k = VK_HOME, c = 0, s = 0, a = 0;
+    if (reshade::get_config_value(rt, "INPUT", "KeyOverlay", v, &n)) sscanf(v, "%d,%d,%d,%d", &k, &c, &s, &a);
+    if (ctrl) *ctrl = c; if (shift) *shift = s; if (alt) *alt = a;
+    return k > 0 && k < 256 ? k : VK_HOME;
+}
+// That key pressed again from here, modifiers included: keybd_event with the real scan code, the way the launcher
+// drives the game, and the key-down and key-up a few frames apart - ReShade reads its key state once per frame, and a
+// down and an up in the same batch of messages leave it seeing only the release.
+static void press_overlay_key(effect_runtime* rt, bool down)
+{
+    int ctrl = 0, shift = 0, alt = 0; const int key = overlay_key(rt, &ctrl, &shift, &alt);
+    auto tap = [&](int vk) { keybd_event((BYTE)vk, (BYTE)MapVirtualKeyA((UINT)vk, MAPVK_VK_TO_VSC), down ? 0 : KEYEVENTF_KEYUP, 0); };
+    if (down) { if (ctrl) tap(VK_CONTROL); if (shift) tap(VK_SHIFT); if (alt) tap(VK_MENU); tap(key); }
+    else { tap(key); if (alt) tap(VK_MENU); if (shift) tap(VK_SHIFT); if (ctrl) tap(VK_CONTROL); }
+}
+static bool on_open_overlay(effect_runtime*, bool open, input_source src)
+{
+    static const char* const srcNames[5] = { "no input", "the mouse", "the keyboard", "a gamepad", "the clipboard" };
+    const char* who = (int)src >= 0 && (int)src < 5 ? srcNames[(int)src] : "?";
+    const fg::Status& st = fg::status();
+    if (open && g_cfgOverlayFg != 0 && st.active) {
+        // DLSS-G is generating right now: not yet. Frame generation goes off, and the overlay is opened from
+        // on_reshade_present once a few frames have presented without it.
+        if (!g_overlayPending) {
+            g_overlayPending = true; g_overlayPendingFrames = 0; g_overlayKeyUpFrames = 0; g_overlayPendingSince = GetTickCount(); g_overlayReKeyDown = 0;
+            fg::suspend(true);
+            logmsg("ReShade overlay asked for by %s on thread %lu while DLSS-G is generating: held back, frame generation off first", who, (unsigned long)GetCurrentThreadId());
+        }
+        return true;
+    }
+    g_overlayOpen = open; if (open) ++g_overlayOpens;
+    if (!open) g_overlayPending = false;
+    const bool hold = open && g_cfgOverlayFg != 0;
+    fg::suspend(hold);
+    logmsg("ReShade overlay %s by %s on thread %lu (%s)%s", open ? "opened" : "closed", who, (unsigned long)GetCurrentThreadId(), GetCurrentThreadId() == fg::render_thread() ? "the game's render thread" : "not the game's render thread",
+           !st.loaded ? "" : (open ? (hold ? ": frame generation off until it closes" : ": frame generation left running (OverlayPausesFG=0)") : ": frame generation back to the ini setting"));
+    return false;
+}
 static void on_reshade_present(effect_runtime* rt)
 {
     if (!rt) return;
+    if (g_overlayPending) {
+        const fg::Status& st = fg::status();
+        if (!st.active) ++g_overlayPendingFrames;
+        // ReShade takes a key-down while the key is already down for a repeat and ignores it, so the physical press
+        // that asked for the overlay has to be over before the key is pressed again from here.
+        if (GetAsyncKeyState(overlay_key(rt)) & 0x8000) g_overlayKeyUpFrames = 0; else ++g_overlayKeyUpFrames;
+        const DWORD waited = GetTickCount() - g_overlayPendingSince;
+        const bool ready = g_overlayPendingFrames >= 3 && g_overlayKeyUpFrames >= 2;
+        if (ready || waited > 3000) {
+            g_overlayPending = false;
+            if (ready) logmsg("frame generation stopped (%u frames without it, %lu ms) - opening the overlay", g_overlayPendingFrames, (unsigned long)waited);
+            else logmsg("%s after %lu ms - opening the overlay anyway", g_overlayPendingFrames < 3 ? "DLSS-G still reported generating" : "the overlay key is still held", (unsigned long)waited);
+            g_overlayReKeyDown = GetTickCount(); if (!g_overlayReKeyDown) g_overlayReKeyDown = 1;
+            press_overlay_key(rt, true);
+        }
+    }
+    else if (g_overlayReKeyDown) {
+        if (GetTickCount() - g_overlayReKeyDown >= 60) { press_overlay_key(rt, false); g_overlayReKeyDown = 0; g_overlaySuspendedIdle = GetTickCount(); }
+    }
+    else if (fg::suspended() && !g_overlayOpen) {
+        // suspended only while the overlay is open or about to be: if the re-press did not open it, let generation go on
+        if (GetTickCount() - g_overlaySuspendedIdle > 1500) { fg::suspend(false); logmsg("the overlay did not open after the key was pressed again - frame generation back on"); }
+    }
     if (g_cfgPauseKey && rt->is_key_pressed(g_cfgPauseKey)) { world_pause(!g_worldPaused); logmsg("PauseKey pressed"); }
     if (!g_cfgDebugKey || !rt->is_key_pressed(g_cfgDebugKey)) return;
     const int to = g_cfgDebugMode == 0 ? g_cfgDebugKeyMode : 0;
@@ -4057,6 +4154,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         reshade::register_event<reshade::addon_event::copy_texture_region>(on_copy_texture_region);
         reshade::register_event<reshade::addon_event::present>(on_present);
         reshade::register_event<reshade::addon_event::reshade_present>(on_reshade_present);
+        reshade::register_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
         // A titled overlay is a tab of its own in ReShade's window, the way RenoDX's is, and carries every
         // control; the untitled one is the short block under the add-on's entry on the Add-ons page.
         reshade::register_overlay("MGS4 DLSS", draw_overlay);
@@ -4064,6 +4162,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         break; }
     case DLL_PROCESS_DETACH:
         reshade::unregister_event<reshade::addon_event::reshade_present>(on_reshade_present);
+        reshade::unregister_event<reshade::addon_event::reshade_open_overlay>(on_open_overlay);
         reshade::unregister_overlay("MGS4 DLSS", draw_overlay);
         reshade::unregister_overlay(nullptr, draw_settings);
         reshade::unregister_addon(hModule);

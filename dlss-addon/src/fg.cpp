@@ -114,6 +114,7 @@ static uint32_t g_idleFrames = 0;           // consecutive presented frames with
 static uint32_t g_liveFrames = 0;           // consecutive presented frames with inputs
 static uint32_t g_idleTotal = 0;            // frames spent with generation switched off (logging)
 static bool g_fgIdle = false;               // DLSS-G forced off because the game is not rendering a scene
+static bool g_fgSuspended = false;          // DLSS-G held off by the add-on (the ReShade overlay is open)
 static bool g_tokenPresented = false;       // this frame's token has already carried the present markers
 // 2, not 1: an isolated frame whose insertion point was missed inside a live scene must not cost a DLSS-G teardown
 // and rebuild, and one untagged present is harmless (the old build survived tens of seconds of them). 2, not more:
@@ -399,6 +400,7 @@ void init(ID3D12Device* device, const wchar_t* gameDirW, LogFn log)
 
 void set_frame_callback(void (*fn)()) { g_frameCb = fn; }
 ID3D12Device* sl_device() { return g_slDevice; }
+unsigned long render_thread() { return g_renderThread; }
 bool inside_streamline()
 {
     if (t_slDepth > 0) return true;
@@ -418,6 +420,8 @@ void shutdown()
 }
 
 void set_settings(const Settings& s) { g_set = s; g_optionsDirty = true; g_reflexDirty = true; }
+void suspend(bool on) { if (g_fgSuspended == on) return; g_fgSuspended = on; g_optionsDirty = true; }
+bool suspended() { return g_fgSuspended; }
 const Settings& settings() { return g_set; }
 const Status& status() { return g_st; }
 
@@ -440,7 +444,7 @@ static void apply_options(uint32_t renderW, uint32_t renderH, uint32_t bbW, uint
     g_lastSizes[0] = renderW; g_lastSizes[1] = renderH; g_lastSizes[2] = bbW; g_lastSizes[3] = bbH;
     sl::DLSSGOptions o;
     uint32_t frames = 1;
-    if (g_set.mode == 0 || g_fgIdle) o.mode = sl::DLSSGMode::eOff;
+    if (g_set.mode == 0 || g_fgIdle || g_fgSuspended) o.mode = sl::DLSSGMode::eOff;
     else if (g_set.mode == 4) {
         if (g_st.dynamicSupported) { o.mode = sl::DLSSGMode::eDynamic; o.dynamicTargetFrameRate = g_set.targetFps; }
         else { o.mode = sl::DLSSGMode::eOn; frames = g_st.adaptiveFrames ? g_st.adaptiveFrames : 1; }   // fallback: adaptive controller
@@ -454,7 +458,7 @@ static void apply_options(uint32_t renderW, uint32_t renderH, uint32_t bbW, uint
     if ((int)o.mode == g_lastOptMode && frames == g_lastOptFrames && o.dynamicTargetFrameRate == g_lastOptTarget && !g_optionsDirty) return;
     sl::Result r; { SlCall guard; r = p_slDLSSGSetOptions(kViewport, o); }
     if (r != sl::Result::eOk) { LOG("FG: slDLSSGSetOptions failed %d", (int)r); snprintf(g_st.lastError, sizeof(g_st.lastError), "slDLSSGSetOptions failed (%d)", (int)r); }
-    else LOG("FG: options applied: mode %s%s, frames %u, target fps %.0f (render %ux%u, color %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), g_fgIdle ? " (no scene being rendered)" : "", frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
+    else LOG("FG: options applied: mode %s%s, frames %u, target fps %.0f (render %ux%u, color %ux%u)", o.mode == sl::DLSSGMode::eOff ? "off" : (o.mode == sl::DLSSGMode::eDynamic ? "dynamic" : "on"), g_fgIdle ? " (no scene being rendered)" : (g_fgSuspended ? " (the ReShade overlay is open)" : ""), frames, o.dynamicTargetFrameRate, renderW, renderH, bbW, bbH);
     g_lastOptMode = (int)o.mode; g_lastOptFrames = frames; g_lastOptTarget = o.dynamicTargetFrameRate; g_optionsDirty = false;
     g_st.active = o.mode != sl::DLSSGMode::eOff;
 }

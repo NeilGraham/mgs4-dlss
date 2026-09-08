@@ -153,6 +153,8 @@ namespace Mgs4Launcher
             new IniKey("Frame generation", "FGTargetFps", "int", "Target fps",
                 "dynamic mode aims here; match your refresh rate (0 = ask the monitor)") { Min = 0, Max = 480 },
             new IniKey("Frame generation", "Reflex", "bool", "Reflex", "latency pacing; DLSS-G wants it on"),
+            new IniKey("Frame generation", "OverlayPausesFG", "bool", "Off while the ReShade overlay is open",
+                "opening the overlay with generated frames in flight killed the game (heap corruption in RenoDX's overlay on Streamline's thread); generation stops for as long as the overlay is open"),
 
             new IniKey("Image", "PostDof", "bool", "Depth of field after DLSS",
                 "skip the game's DoF draws and re-apply the same DoF on the DLSS / NR output"),

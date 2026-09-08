@@ -45,6 +45,7 @@ PreWarm=1                ; create the DLSS feature (+ the NR add-on's) and run w
 FrameGen=4               ; 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to FGTargetFps (needs the Streamline runtime; restart to load it)
 FGTargetFps=240          ; match your display's refresh rate; the game itself runs at 60
 Reflex=1
+OverlayPausesFG=1        ; live: frame generation off while the ReShade overlay is open (see "The ReShade overlay and frame generation" below)
 ObjectMV=1               ; per-object motion vectors (stream-out of the game's vertex shaders)
 ObjectMVProps=0          ; live: 1 = object vectors also for rigid props with their own model matrix (vehicles, the Mk. II, doors), not only skinned meshes; one extra stream-out draw per such prop
 CutPosLimit=6000         ; live: camera-cut heuristic - a position jump above this many game units (millimeters) in one frame resets the DLSS history; 1500 fired on every 2 m aim / cover snap
@@ -105,6 +106,28 @@ Settings tab offers it as a list: the mode decides, 2160p, 1440p, 1080p, 720p. L
 ## Frame generation (`FrameGen`, `FGTargetFps`, `Reflex`)
 
 `FrameGen`: 0 off, 1 = 2x, 2 = 3x, 3 = 4x, 4 = dynamic to `FGTargetFps` (0 = the monitor's refresh rate). Frame generation only helps when the display (or the virtual display you stream from) refreshes faster than the game's 60 fps - set `FGTargetFps` to your refresh rate; on a 60 Hz output set `FrameGen=0`. Streamline is only loaded when `FrameGen` is non-zero at startup, so the first switch from Off needs a restart; after that every value changes live. The technical side is in [the pipeline notes](dlss-pipeline.md#frame-generation-dlss-g--multi-frame-generation-via-streamline).
+
+## The ReShade overlay and frame generation (`OverlayPausesFG`)
+
+With frame generation on, ReShade sits below Streamline: every present, real or generated, reaches it on
+Streamline's present thread, and that is the thread ReShade's overlay is drawn on - every add-on's tab included.
+Meanwhile DLSS-G keeps another Streamline thread running the other add-ons' hooks on each generated frame (RenoDX's
+"NR FG control" runs there). Opening the overlay (HOME) in that state ended the game three times in a row with
+heap corruption (`0xc0000374`, a fail-fast, so the add-on's crash handler and the logs see nothing): the crashing
+thread was Streamline's present thread inside RenoDX's overlay, freeing a per-setting button label, while a second
+Streamline thread was inside RenoDX's frame-generation hook. With frame generation off, or with RenoDX's add-on
+removed, the overlay opened and closed as often as asked; with both present the two threads race inside RenoDX.
+
+`OverlayPausesFG=1` (live, the default; *Frame generation off while this overlay is open* on the MGS4 DLSS tab)
+keeps the two apart: when the overlay is asked for while DLSS-G is generating, the opening is held back, frame
+generation is switched off, and once a few frames have presented without it the overlay key is pressed again from
+inside the add-on, so the overlay opens on the game's own thread with no generated frames in flight. Closing it puts
+frame generation back to the ini setting. Expect a short hitch on the way in and out (DLSS-G winding down and back
+up), and the tab says while it is open that generation is off. The log tells the whole sequence: `ReShade overlay
+asked for ... held back, frame generation off first`, `frame generation stopped (N frames without it) - opening
+the overlay`, `ReShade overlay opened`, and `closed ... frame generation back to the ini setting`. Should the re-press
+not open it within a second and a half, generation comes back on by itself and the log says so. With
+`OverlayPausesFG=0` the overlay opens straight away, generation running - the crash is yours to keep.
 
 ## Dynamic resolution and what the overlay says about it
 

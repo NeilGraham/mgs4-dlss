@@ -52,6 +52,9 @@ namespace fg {
     void shutdown();
 
     void set_settings(const Settings& s);      // live
+    // Live: DLSS-G held off while true (the ReShade overlay is open), the settings kept for when it is lifted.
+    void suspend(bool on);
+    bool suspended();
     const Settings& settings();
     const Status& status();                    // refreshed by poll()
     void poll();                               // once per game frame: state refresh + adaptive controller
@@ -71,6 +74,8 @@ namespace fg {
     // one of our Streamline calls, or on a thread other than the game's render thread). The add-on must not treat
     // those as game work (texture shrinking, copy-to-backbuffer insertion).
     bool inside_streamline();
+    // The thread the game presents from (0 until its first present through the proxy).
+    unsigned long render_thread();
     // The device object Streamline was given (the one the game's queue reports; ReShade's proxy), or nullptr.
     ID3D12Device* sl_device();
 }
