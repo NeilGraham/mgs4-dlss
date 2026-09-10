@@ -16,7 +16,7 @@
     "  revision        the date this list last changed; the launcher fetches the copy on master when it is newer",
     "  downloads       the downloads the install was verified with, by SHA-256: a dropped file is matched here"
   ],
-  "revision": "2026-09-07",
+  "revision": "2026-09-10",
   "downloads": [
     {
       "name": "ReShade_Setup_6.8.0_Addon.exe",
@@ -162,7 +162,7 @@
       "blurb": "Optional. With this present the add-on runs DLAA on the final image, so NR works at full strength.",
       "url": "https://discord.gg/renodx",
       "urlLabel": "RenoDX Discord",
-      "guide": "From the same Pinned Messages, take the newest renodx-dlss.addon64 and drop it next to mgs4.exe (older pins named it renodx-dlss5.addon64; either works, but keep only one, or ReShade loads both). This add-on notices it and moves the DLAA pass to the composite on its own. The current RenoDX build picks where it applies NR for itself: set its Hook Method to Upscaled - Settings, Neural Rendering - so it takes this add-on's DLAA output rather than the whole backbuffer.",
+      "guide": "From the same Pinned Messages, take the newest renodx-dlss.addon64 and drop it next to mgs4.exe (older pins named it renodx-dlss5.addon64; either works, but keep only one, or ReShade loads both). This add-on notices it and moves the DLAA pass to the composite on its own. Then set RenoDX's Hook Method to Upscaled: Settings tab, Neural Rendering, Hook method (or RenoDX's own tab in the ReShade overlay). The current build, 2026-09-05, defaults to Auto, which puts NR on the whole backbuffer inside frame generation rather than on this add-on's DLAA output; Re-check flags it until it is Upscaled.",
       "accepts": [
         "renodx-dlss.addon64",
         "renodx-dlss5.addon64"

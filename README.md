@@ -57,6 +57,9 @@ The full walk-through, the manual route and the versions this was verified on ar
 - The DLSS / Streamline runtimes (the Streamline zip, `DLSS310.8.0-Streamline2.13.zip` at the time of writing) and,
   optionally, `renodx-dlss.addon64`, both from the
   [RenoDX Discord](https://discord.gg/renodx). They are NVIDIA's and RenoDX's files and are not redistributed here.
+  The current RenoDX build (2026-09-05) needs its **Hook Method set to Upscaled** (the launcher's Settings tab,
+  Neural Rendering, or RenoDX's own tab in the ReShade overlay); its default, Auto, puts NR on the whole backbuffer
+  inside frame generation rather than on this add-on's DLAA output.
 
 Verified on an RTX 5090 at 3840x2160, DLAA preset K, DLSS 5 NR, dynamic frame generation to 240 fps.
 

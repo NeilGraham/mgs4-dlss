@@ -26,7 +26,10 @@ add-on. None of those can be redistributed here.
      set, matched to each other. Any zip name is fine: what is taken out of it is decided by the file names inside.
    - **`renodx-dlss.addon64`** from the same Pinned Messages (older pins named it `renodx-dlss5.addon64`; either works,
      but keep only one): drop it on the tab. Optional, and the reason to bother -
-     with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength.
+     with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength. **Then set
+     RenoDX's Hook Method to Upscaled**: Settings tab, Neural Rendering, **Hook method**. The current RenoDX build
+     (2026-09-05) defaults to Auto, which puts NR on the whole backbuffer inside frame generation rather than on
+     this add-on's DLAA output; Re-check shows *RenoDX: Hook Method* as a warning until it is Upscaled.
    - **This add-on**: press **Install the add-on**. It writes the `mgs4_dlss.addon64` and `mgs4_dlss.ini` built into
      the launcher next to `mgs4.exe` (an ini already there is kept).
 4. Press **Re-check** (F5): every row should be green. Then start the game from the **Play** tab.
@@ -53,11 +56,16 @@ In order, with the game closed:
    straight into `MGS4\` (the folder with `mgs4.exe`). If the NVIDIA app's DLSS override is on for this game it supplies
    `nvngx_dlss.dll` instead, which is fine.
 4. **`renodx-dlss.addon64`** from the same Pinned Messages, next to `mgs4.exe` (`renodx-dlss5.addon64` in older pins;
-   keep one of the two). Optional; auto-detected. In RenoDX's own tab set **Hook Method** to *Upscaled*, so NR takes
-   this add-on's DLAA output rather than the whole backbuffer - the launcher's Settings tab has the same row.
-5. **`mgs4_dlss.addon64`** and **`mgs4_dlss.ini`** from the release, next to `mgs4.exe`, last, so the add-on loads with
+   keep one of the two). Optional; auto-detected.
+5. **Set RenoDX's Hook Method to Upscaled.** The current RenoDX build (2026-09-05) defaults to Auto, which applies
+   NR to the whole backbuffer inside frame generation; Upscaled applies it to this add-on's DLAA output, which is
+   what the two were built for. In the game: ReShade overlay (Home key), **RenoDX DLSS** tab, Options Mode
+   **DLSS-NR**, **Hook Method** = *Upscaled*; its status line then reads *Upscaled: Active*. Or with the game
+   closed, `DirectNeuralRenderingHookPoint=2` under `[RENODX-DLSS]` in `MGS4\ReShade.ini` - the launcher's
+   Settings tab, Neural Rendering, writes the same key.
+6. **`mgs4_dlss.addon64`** and **`mgs4_dlss.ini`** from the release, next to `mgs4.exe`, last, so the add-on loads with
    the rest in place. Keep an ini you already have: it holds your settings and the `InternalRes` the first run wrote.
-6. Start the game. The first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the
+7. Start the game. The first run writes the detected `InternalRes` to the ini. `MGS4\logs\mgs4_dlss.log` records the
    DLSS create / evaluate calls, NR hooking, frame generation and dynamic-resolution state; the ReShade overlay (Home
    key), Add-ons tab, has the live controls and GPU / CPU timing.
 
