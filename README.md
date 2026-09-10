@@ -5,7 +5,7 @@ per-object motion vectors, frame generation, and full compatibility with **DLSS 
 add-on, with a launcher that installs it, checks it, edits every setting as a form, and starts the game at any of
 its 400+ scenes.
 
-**Current release: v1.3.2** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
+**Current release: v1.3.3** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
 [release notes](docs/releases.md) · [install](docs/install.md)
 
 Supported DLSS features:
@@ -99,10 +99,6 @@ Things that are wrong today and are being worked on. If you hit something not li
   draws, including ones behind other surfaces of the same model. Where a hidden part moves differently from the
   surface in front of it - the gun models in first-person view are the clearest case - DLSS can be handed the
   hidden vertex's vector, and the surface can ghost or shimmer. `DebugMode=9` (or the debug key, below) shows it.
-- **RenoDX's NR may not start on its own.** With the current `renodx-dlss.addon64` and frame generation on, RenoDX
-  has been seen never binding its NR runtime at startup - the image is DLAA only until any setting in its own tab
-  is changed (open the ReShade overlay, RenoDX DLSS, flip one setting and back). The Setup tab says when a run went
-  like that. Without frame generation it binds at once. Reported upstream.
 - **DLSS 5 Neural Rendering is not applied to pre-recorded video yet.** Some of the game's most intense sequences
   are played back as video rather than rendered by the engine (the launcher's scene list marks them *Video*). NR
   runs on what the engine renders, so those play as the port ships them.

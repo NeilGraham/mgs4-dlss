@@ -6,7 +6,9 @@
                                       most people need (launcher\\build.ps1 -Release)
     release\\mgs4_dlss.addon64         the built add-on (build\\mgs4_dlss.addon64 - run dlss-addon\\build.bat first)
     release\\mgs4_dlss.ini             the shipped configuration (dlss-addon\\mgs4_dlss.ini)
-    release\\notes-<version>.md        that version's section of docs\\releases.md, for `gh release create --notes-file`
+    release\\notes-<version>.md        the release body for `gh release create --notes-file`: docs\\release-install.md
+                                      (the install steps every release page carries) and then that version's
+                                      section of docs\\releases.md
 
 The exe is built here with -Release, so it wears the launcher's own icon (tools\\launcher_icon.ps1) rather than the
 one a local build reads out of mgs4.exe - that artwork is Konami's and does not ship. The loose add-on and ini are
@@ -28,7 +30,9 @@ def release_notes(version):
     body = text[start:start + nxt.start()] if nxt else text[start:]
     # release bodies are rendered on GitHub: promote the section's sub-headings one level
     body = re.sub(r"^### ", "## ", body.strip() + "\n", flags=re.M)
-    return body
+    # every release page opens with how to install - with the launcher, and by hand - then what changed
+    install = open(os.path.join(REPO, "docs", "release-install.md"), encoding="utf-8-sig").read().strip() + "\n"
+    return install + "\n## What changed in v%s\n\n" % version + body
 
 
 def build_launcher(out):

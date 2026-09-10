@@ -6,7 +6,11 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
-## v1.3.3 (unreleased)
+## v1.3.3 (2026-09-10)
+
+The first public release. The ReShade overlay no longer kills the game with frame generation on, Neural Rendering
+starts from the first frame with the current RenoDX build, the launcher updates itself, and a pause key holds the world
+still for comparing settings.
 
 - **The ReShade overlay no longer kills the game with frame generation on.** Opening it (HOME) with generated
   frames in flight died three times running with heap corruption: ReShade draws the overlay on Streamline's

@@ -59,11 +59,11 @@ The PowerShell scripts also still take `-GameDir` for a one-off run.
 
 ```bat
 dlss-addon\build.bat
-python tools\package_release.py --version 1.3.0
-gh release create v1.3.0 --title v1.3.0 --notes-file release\notes-1.3.0.md release\mgs4-dlss-launcher.exe release\mgs4_dlss.addon64 release\mgs4_dlss.ini
+python tools\package_release.py --version 1.3.3
+gh release create v1.3.3 --title v1.3.3 --notes-file release\notes-1.3.3.md release\mgs4-dlss-launcher.exe release\mgs4_dlss.addon64 release\mgs4_dlss.ini
 ```
 
-`tools\package_release.py` assembles `release\` (git-ignored) with the three assets a release carries: `mgs4-dlss-launcher.exe` - the launcher built with `-Release`, one file with the add-on and ini inside it - and the loose `mgs4_dlss.addon64` and `mgs4_dlss.ini` for a manual install or an add-on-only update. It also writes `release\notes-<version>.md`, the matching section of [releases.md](releases.md), for `gh release create --notes-file`.
+`tools\package_release.py` assembles `release\` (git-ignored) with the three assets a release carries: `mgs4-dlss-launcher.exe` - the launcher built with `-Release`, one file with the add-on and ini inside it - and the loose `mgs4_dlss.addon64` and `mgs4_dlss.ini` for a manual install or an add-on-only update. It also writes `release\notes-<version>.md` for `gh release create --notes-file`: the install steps every release page carries, [release-install.md](release-install.md) (with the launcher, and by hand - keep it in step with [install.md](install.md)), followed by that version's section of [releases.md](releases.md).
 
 Pushing a tag `v<version>` does the same on GitHub: `.github\workflows\release.yml` builds the add-on and the exe on a Windows runner and publishes the release with that version's notes. The `## v<version>` section in [releases.md](releases.md) has to exist before the tag is pushed.
 
