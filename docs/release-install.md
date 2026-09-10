@@ -1,77 +1,41 @@
 ## Install
 
-You need the Steam version of *Metal Gear Solid 4* (Master Collection Vol. 2) on **DirectX 12**, an NVIDIA RTX GPU
-(RTX 40 series or newer for frame generation), **ReShade with add-on support** from [reshade.me](https://reshade.me/),
-and two files from the [RenoDX Discord](https://discord.gg/renodx)'s Pinned Messages: the Streamline zip
-(`DLSS310.8.0-Streamline2.13.zip` at the time of writing) with NVIDIA's DLSS / DLSS-G / DLSS-NR runtimes, and
-`renodx-dlss.addon64` for DLSS 5 Neural Rendering. NVIDIA's and RenoDX's files are theirs and are not part of this
-release. There are two ways to the same result; each ends with the game on DirectX 12 and these files next to `mgs4.exe`:
+**You need:** the Steam *Metal Gear Solid 4* (Master Collection Vol. 2) on **DirectX 12**, an NVIDIA RTX GPU (40 series or
+newer for frame generation), [ReShade](https://reshade.me/) **with full add-on support**, and from the
+[RenoDX Discord](https://discord.gg/renodx)'s Pinned Messages the Streamline zip (`DLSS310.8.0-Streamline2.13.zip`)
+and `renodx-dlss.addon64`. NVIDIA's and RenoDX's files are theirs and are not in this release.
 
-```
-MGS4\
-  dxgi.dll                ReShade with add-on support
-  nvngx_dlss.dll, nvngx_dlssg.dll, nvngx_dlssnr.dll, sl.*.dll   from the Streamline zip
-  renodx-dlss.addon64     DLSS 5 Neural Rendering (optional)
-  mgs4_dlss.addon64       this add-on
-  mgs4_dlss.ini           its settings
-```
+### With the launcher
 
-### With the launcher (`mgs4-dlss-launcher.exe`)
+`mgs4-dlss-launcher.exe` is the whole mod in one file: the launcher with this release's add-on and ini built in.
 
-The exe below is the whole mod in one file: the launcher, with this release's `mgs4_dlss.addon64` and
-`mgs4_dlss.ini` built in. Nothing to unzip or install; it runs on the .NET Framework that is part of Windows.
+1. Download it, put it anywhere outside the game folder, run it. (SmartScreen: *More info*, *Run anyway*.) It opens on
+   **Setup** and finds the game.
+2. With the game closed, go down the cards: **Set them for me** on the game card, drop the ReShade setup, the Streamline
+   zip and `renodx-dlss.addon64` on the tab, press **Install the add-on**.
+3. **Settings tab, Neural Rendering: Hook method = Upscaled.** The current RenoDX build defaults to Auto, which applies NR
+   to the whole backbuffer instead of this add-on's DLAA output.
+4. **Re-check** (F5): all green. Play from the **Play** tab.
 
-1. Download **`mgs4-dlss-launcher.exe`** and put it anywhere outside the game folder. Windows SmartScreen may warn
-   about an unsigned download the first time: *More info*, then *Run anyway*.
-2. Run it. It opens on the **Setup** tab, finds the game in your Steam libraries (**Change...** if it cannot) and
-   lists the install as cards, in order. Each card has a button to its download and a drop area.
-3. Follow the cards top to bottom, with the game closed:
-   - **The game**: press **Set them for me**. The game goes on DirectX 12 with FXAA off, vsync off and the frame
-     limiter at 60.
-   - **ReShade**: download the setup marked *with full add-on support* from reshade.me and drop it on the tab. It is
-     run for you against `mgs4.exe`.
-   - **The Streamline zip**: drop it on the tab. What is needed is taken out of it.
-   - **`renodx-dlss.addon64`**: drop it on the tab. Optional, but it is what DLSS 5 Neural Rendering needs. **Then
-     set RenoDX's Hook Method to Upscaled**: Settings tab, Neural Rendering, **Hook method**. The current RenoDX
-     build (2026-09-05) defaults to Auto, which puts NR on the whole backbuffer inside frame generation instead of
-     on this add-on's DLAA output; Re-check shows *RenoDX: Hook Method* as a warning until it is Upscaled.
-   - **MGS4 DLSS**: press **Install the add-on**. The add-on and ini built into the exe are written next to
-     `mgs4.exe`; an ini already there is kept.
-4. Press **Re-check** (F5). Every row should be green. Start the game from the **Play** tab.
-
-Already have an earlier version? Run the new exe and press **Install the add-on** again; it replaces the add-on and
-keeps your ini. From v1.3.3 the launcher also checks for a newer release itself, once a day or from
-**Check for updates** on the Setup tab, and updates itself with one button.
+Updating: run the new exe and press **Install the add-on**; your ini is kept. The launcher also checks for new
+releases once a day and updates itself with one button.
 
 ### By hand
 
-The same steps without the launcher, using the two loose files below. With the game closed, in order:
+With the game closed, in order:
 
-1. **DirectX 12 in the game.** Options > Graphics > API = DirectX 12, FXAA off, vsync off, frame limiter 60. The
-   add-on does nothing on the DirectX 11 backend.
-2. **ReShade with add-on support.** Run the setup marked *with full add-on support* from reshade.me, point it at
-   `MGS4\mgs4.exe`, choose the Direct3D 10/11/12 renderer and tick no shader packs. It installs as `MGS4\dxgi.dll`.
-   A ReShade build without add-on support looks right on disk and silently loads nothing.
-3. **The Streamline zip.** Extract everything in it straight into `MGS4\`, the folder with `mgs4.exe`.
-4. **`renodx-dlss.addon64`** next to `mgs4.exe`. Optional; the add-on detects it. Keep only one RenoDX DLSS add-on
-   (older pins named it `renodx-dlss5.addon64`).
-5. **Set RenoDX's Hook Method to Upscaled.** The current RenoDX build (2026-09-05) defaults to Auto, which applies
-   NR to the whole backbuffer inside frame generation; Upscaled applies it to this add-on's DLAA output, which is
-   what the two were built for. In the game: ReShade overlay (Home key), **RenoDX DLSS** tab, Options Mode
-   **DLSS-NR**, **Hook Method** = *Upscaled*; its status line then reads *Upscaled: Active*. Or with the game
-   closed, in `MGS4\ReShade.ini`:
-   ```ini
-   [RENODX-DLSS]
-   DirectNeuralRenderingHookPoint=2
-   ```
-6. **`mgs4_dlss.addon64`** and **`mgs4_dlss.ini`** from the assets below, next to `mgs4.exe`, last. Updating from
-   an earlier version: replace the add-on and keep your ini.
-7. Start the game. `MGS4\logs\mgs4_dlss.log` records what happened; the ReShade overlay (Home key) has an
-   **MGS4 DLSS** tab with the live controls.
+1. In the game: Options, Graphics, API = **DirectX 12**, FXAA off, vsync off, frame limiter 60.
+2. Run the ReShade setup marked *with full add-on support* against `MGS4\mgs4.exe` (Direct3D 10/11/12, no shader
+   packs). It installs as `MGS4\dxgi.dll`.
+3. Extract everything in the Streamline zip into `MGS4\` (the folder with `mgs4.exe`).
+4. Put `renodx-dlss.addon64` next to `mgs4.exe` (keep only one RenoDX DLSS add-on), then set its **Hook Method** to
+   *Upscaled*: in the ReShade overlay (Home), **RenoDX DLSS** tab, Options Mode **DLSS-NR**. Or with the game closed,
+   `DirectNeuralRenderingHookPoint=2` under `[RENODX-DLSS]` in `MGS4\ReShade.ini`.
+5. Put `mgs4_dlss.addon64` and `mgs4_dlss.ini` from the assets below next to `mgs4.exe`. Updating: replace the add-on,
+   keep your ini.
+6. Start the game. The ReShade overlay (Home) has an **MGS4 DLSS** tab with the live controls; `MGS4\logs\mgs4_dlss.log`
+   records what happened.
 
-Settings are in `MGS4\mgs4_dlss.ini`, documented key by key in
-[configuration.md](https://github.com/NeilGraham/mgs4-dlss/blob/master/docs/configuration.md). The shipped ini is
-the verified configuration: DLAA, dynamic frame generation to 240 fps (`FGTargetFps`; set it to your refresh rate,
-or `FrameGen=0` on a 60 Hz display). The full walk-through, the verified versions and troubleshooting are in
-[install.md](https://github.com/NeilGraham/mgs4-dlss/blob/master/docs/install.md); how the add-on works is in
-[dlss-pipeline.md](https://github.com/NeilGraham/mgs4-dlss/blob/master/docs/dlss-pipeline.md).
+Every key is documented in [configuration.md](https://github.com/NeilGraham/mgs4-dlss/blob/master/docs/configuration.md);
+the full walk-through, verified versions and troubleshooting are in
+[install.md](https://github.com/NeilGraham/mgs4-dlss/blob/master/docs/install.md).

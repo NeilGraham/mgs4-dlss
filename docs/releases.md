@@ -6,6 +6,26 @@ is for a manual install or for updating an add-on that is already in place. Inst
 [install.md](install.md). Releases before v1.3.0 carried `mgs4_dlss_launcher.zip` instead, a source copy of the
 launcher that built itself on first run.
 
+## v1.3.4 (2026-09-10)
+
+The game's dynamic resolution can be held at full size, and the MGS4 DLSS tab puts what you set first.
+
+- **The MGS4 DLSS tab is in order.** What a person sets comes first, under three headings: **Image** (DLSS on,
+  mode, preset, sharpness, the 3D scene held at full size), **Frame generation** (mode, target frame rate,
+  Reflex, off while the overlay is open) and **Tools** (the debug view, pause the world); everything below
+  **Diagnostics** is the counters and switches for working on the add-on, as before. Streamline's status lines
+  stay in the diagnostics.
+- **The game's dynamic resolution can be held at full size.** The port scales its 3D scene by its measured GPU time
+  against a 16 ms budget, stepping the viewport scale by 0.02 every 8 frames between a floor of 0.5 and 1.0; DLAA,
+  NR and frame generation all count, so under load the scene sat at 1920x1080 and the game's own bilinear upscale
+  was what DLSS got. `DRSMin=1.0` (live, off by default; *Keep the 3D scene at full size* on the MGS4 DLSS tab, no restart either way)
+  finds the game's dynamic-resolution state in the running exe - by the byte pattern of the getter its renderer
+  asks, checked against the constructor's values first - and holds its minimum scale factor there, so the game's
+  own logic keeps the scene at full size with nothing patched. `0.5` is the game's own floor at 4K, `0` leaves the
+  game alone; the log names where the state was found and what is held, and says so if a new build of the game
+  moves it. The cost is frame rate rather than resolution: on a 5090 the Act 1 opening ran at 34 fps at full 4K where the
+  game's own 50 % held 60, which is why it ships off; `Mode=Quality` remains the cheaper way. Details under "Dynamic resolution" in [configuration.md](configuration.md).
+
 ## v1.3.3 (2026-09-10)
 
 The first public release. The ReShade overlay no longer kills the game with frame generation on, Neural Rendering

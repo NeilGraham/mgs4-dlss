@@ -607,7 +607,7 @@ The file list, the verified versions and the download links are one data file, `
 checks in `launcher\src\Checks.cs` only render it. A copy goes into the exe at build time and is used when that
 folder is not there; with neither, Setup says so in a card and the rest of the window carries on.
 
-The shipped ini is the configuration v1.3.3 ships with and was verified on: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
+The shipped ini is the configuration v1.3.4 ships with and was verified on: DLAA preset K at 3840x2160, jitter + camera and object motion vectors, DLSS 5 NR through `renodx-dlss5`, dynamic-resolution handling, depth of field re-applied after NR (`PostDof=1`) and dynamic frame generation to 240 fps. The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`) are off; turning them on costs frames.
 
 ## Updates
 

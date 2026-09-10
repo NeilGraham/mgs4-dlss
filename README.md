@@ -5,7 +5,7 @@ per-object motion vectors, frame generation, and full compatibility with **DLSS 
 add-on, with a launcher that installs it, checks it, edits every setting as a form, and starts the game at any of
 its 400+ scenes.
 
-**Current release: v1.3.3** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
+**Current release: v1.3.4** - [download](https://github.com/NeilGraham/mgs4-dlss/releases) ·
 [release notes](docs/releases.md) · [install](docs/install.md)
 
 Supported DLSS features:
@@ -73,9 +73,11 @@ is documented in **[docs/configuration.md](docs/configuration.md)**.
 
 ## Known limitations
 
-- The game decides its own render scale from GPU load and can drop its 3D scene to 50 % under DLAA + NR + frame
-  generation; the add-on renders correctly at any scale, but detail follows the game's choice. `Mode=Quality` removes
-  the game's room to scale down and gives DLSS real samples to upscale.
+- The game decides its own render scale from GPU load and, left alone, drops its 3D scene to 50 % under DLAA + NR +
+  frame generation. `DRSMin=1` (off by default; *Keep the 3D scene at full size* on the MGS4 DLSS tab, live) holds the game's
+  own floor at full size, so the scene never goes below your resolution; the cost is frame rate rather than
+  resolution - 34 fps where 60 held, on a 5090 at 4K - when the GPU cannot keep up. `Mode=Quality` is the
+  cheaper alternative: it removes the game's room to scale down and gives DLSS real samples to upscale.
 - `Mode` changes need a restart (the game creates its render targets at startup).
 - Frame generation on a 60 Hz output only alternates real and generated frames; use a faster display or virtual display.
 - Aiming in third and first person is jittery with mouse look in the native game too; DLSS reconstructs what it is

@@ -62,7 +62,7 @@ static int g_cfgSharpness100 = 0;
 static int g_cfgLogEveryN = 600;
 static int g_cfgRecreateAfter = 0;
 // The add-on's version, as the log and ReShade's Add-ons page say it. Kept in step with docs/releases.md.
-#define MGS4_DLSS_VERSION "1.3.3"
+#define MGS4_DLSS_VERSION "1.3.4"
 static int g_cfgDebugMode = 0;        // 0 normal, 1 = paint the displayed texture magenta, 2 = bypass DLSS, 3 = trace 3 frames again
 static int g_cfgLastDebugMode = 0;
 // DebugKey: a virtual key that flips DebugMode between 0 and DebugKeyMode in the game, with no overlay open - for
@@ -525,6 +525,15 @@ static int g_cfgNrKick = 1;
 // (the composite draw's viewport, g_gameVp) is cleared to black. When the game fills the backbuffer there is nothing
 // to clear and nothing is recorded.
 static int g_cfgBorderGuard = 1;
+// DRSMin (default 0 = the game's own, live): the floor of the game's own dynamic resolution. The port scales its 3D scene by the GPU
+// time it measures against a budget (16 ms at its 60 fps): every 8 frames it steps the viewport scale by 0.02 toward
+// the budget and clamps it between a min and a max scale factor - 0.5 and 1.0 - then rounds the width to 32 pixels.
+// DLAA, NR and frame generation all count toward that budget, so under load the scene ends at 1920x1080 of 3840x2160
+// and the game's own bilinear upscale is what DLSS is given. The min is set once at startup and nothing else writes
+// it; holding it at DRSMin makes the game's own decision keep the scene there (see namespace gdrs). 1 = always full
+// size; 0.5 = the game's own floor at 4K; 0 = leave the game's value alone. Off by default: at full 4K with DLAA, NR
+// and frame generation a 5090 measured 24 ms a frame (34 fps) where the game's own 50 % held 60.
+static float g_cfgDRSMin = 0.0f;
 static std::unordered_map<uint64_t, resource_view> g_bbRtvs;   // backbuffer -> RTV for the border clear
 static std::mutex g_bbRtvsMutex;                                // present arrives on Streamline's thread, the swapchain goes on the game's
 static bool g_overlayOpen = false;                              // ReShade's overlay is open (reshade_open_overlay)
@@ -3525,6 +3534,7 @@ static void reload_config()
         }
         g_cfgNrKick = GetPrivateProfileIntA("DLSS", "NrKick", 1, g_iniPath);
         g_cfgBorderGuard = GetPrivateProfileIntA("DLSS", "BorderGuard", 1, g_iniPath);
+        { char v[32]; GetPrivateProfileStringA("DLSS", "DRSMin", "0", v, sizeof(v), g_iniPath); const float m = (float)atof(v); g_cfgDRSMin = m <= 0.0f ? 0.0f : (m < 0.25f ? 0.25f : (m > 1.0f ? 1.0f : m)); }
         const int eff = g_cfgPrePostMode < 0 ? (g_nrAddonLoaded ? 0 : 1) : g_cfgPrePostMode;
         if (eff != g_cfgPrePost) logmsg("insertion: %s (PrePost=%s, DLSS post-processing add-on %s)", eff ? "pre-post (before post-process/HUD)" : "composite (final image)", g_cfgPrePostMode < 0 ? "auto" : (g_cfgPrePostMode ? "1" : "0"), g_nrAddonLoaded ? g_nrAddonName : "not loaded");
         g_cfgPrePost = eff;
@@ -3731,6 +3741,113 @@ static void frame_rollover()
     { std::lock_guard<std::mutex> lock(g_clMutex); for (auto& kv : g_cl) kv.second.bb_draws = 0; }
     if (g_frame % 120 == 0) reload_config();
 }
+// The game's own dynamic resolution (see g_cfgDRSMin). Read out of the running mgs4.exe (Master Collection Vol. 2,
+// code a84606af of 2026-08-25; the exe is Steam-encrypted on disk): a state struct in .data - the viewport scale at
+// +0, a "scale changed" byte at +4, a ring of GPU times from +8, its size at +0x198, the target fps at +0x1a8, the
+// buffer size at +0x1c0, the adjusted size at +0x1c8, the budget (ms) at +0x1d0, the min and max scale factors at
+// +0x1d8 / +0x1dc, the step at +0x1e0 - and an enable byte just past it, set at startup from render.dynamicResolution
+// in the (encrypted) config. The renderer asks "changed && enabled" through a two-line getter (movzx eax,[rip+changed];
+// xor ecx,ecx; cmp [rip+enabled],cl; cmove eax,ecx; ret) that names both addresses, so that is the byte pattern
+// looked for; what it points at is checked against the constructor's values before anything is written. Only the min
+// scale factor is written - the game's own logic then keeps the scene at the floor, nothing is patched and the
+// renderer stays on its normal path. The struct's constructor also caps the min at 1.0 (the max), so 1.0 is exact.
+namespace gdrs {
+    enum { kScale = 0, kRing = 0x198, kFps = 0x1a8, kWidth = 0x1c0, kHeight = 0x1c4, kAdjW = 0x1c8, kAdjH = 0x1cc, kBudget = 0x1d0, kMin = 0x1d8, kMax = 0x1dc, kStep = 0x1e0, kChanged = 4 };
+    static uint8_t* s_state = nullptr;     // the struct, once found
+    static uint8_t* s_enabled = nullptr;   // the enable byte
+    static bool s_scanned = false;
+    static int s_matches = 0;
+    static uint8_t* s_candidate = nullptr;   // the pattern's struct while it is still zero (the engine builds it after its first presents)
+    static uint8_t* s_candEnabled = nullptr;
+    static unsigned s_rechecks = 0;
+    static float s_gameMin = 0.0f;         // the game's own floor, restored for DRSMin=0
+    static float s_held = -1.0f;           // what is being held (-1: nothing written yet)
+    static float f(const uint8_t* st, int off) { return *(const float*)(st + off); }
+    static int   i(const uint8_t* st, int off) { return *(const int*)(st + off); }
+    static bool plausible(const uint8_t* st)
+    {
+        __try {
+            const float scale = f(st, kScale), mn = f(st, kMin), mx = f(st, kMax), step = f(st, kStep);
+            const int ring = i(st, kRing), w = i(st, kWidth), h = i(st, kHeight), fps = i(st, kFps);
+            return scale > 0.05f && scale <= 1.0001f && mn > 0.05f && mn <= 1.0001f && mx > 0.5f && mx <= 1.0001f && step > 0.0f && step < 0.5f
+                && ring > 0 && ring <= 256 && w >= 320 && w <= 16384 && h >= 200 && h <= 16384 && fps >= 10 && fps <= 1000;
+        } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    static bool adopt()
+    {
+        if (!s_candidate || !plausible(s_candidate)) return false;
+        s_state = s_candidate; s_enabled = s_candEnabled;
+        logmsg("DRSMin: the game's dynamic-resolution state is at mgs4.exe+0x%llX (scale %.2f, floor %.2f, max %.2f, step %.2f, budget %.1f ms at %d fps, buffer %dx%d, enabled %d)",
+               (unsigned long long)(s_state - (const uint8_t*)GetModuleHandleW(nullptr)), f(s_state, kScale), f(s_state, kMin), f(s_state, kMax), f(s_state, kStep), f(s_state, kBudget), i(s_state, kFps), i(s_state, kWidth), i(s_state, kHeight), (int)*s_enabled);
+        return true;
+    }
+    static void find()
+    {
+        s_scanned = true;
+        const uint8_t* exe = (const uint8_t*)GetModuleHandleW(nullptr);
+        const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)exe;
+        if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE) return;
+        const IMAGE_NT_HEADERS64* nt = (const IMAGE_NT_HEADERS64*)(exe + dos->e_lfanew);
+        if (nt->Signature != IMAGE_NT_SIGNATURE) return;
+        static const uint8_t pat[] = { 0x0F, 0xB6, 0x05, 0, 0, 0, 0, 0x33, 0xC9, 0x38, 0x0D, 0, 0, 0, 0, 0x0F, 0x44, 0xC1, 0xC3 };
+        static const char mask[] = "xxx????xxxx????xxxx";
+        const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+        for (unsigned s = 0; s < nt->FileHeader.NumberOfSections; ++s, ++sec) {
+            if (memcmp(sec->Name, ".text", 6) != 0) continue;
+            const uint8_t* p = exe + sec->VirtualAddress; const size_t n = sec->Misc.VirtualSize;
+            for (size_t k = 0; k + sizeof(pat) <= n; ++k) {
+                if (p[k] != 0x0F || p[k + 1] != 0xB6 || p[k + 2] != 0x05) continue;
+                bool ok = true; for (size_t m = 3; m < sizeof(pat); ++m) if (mask[m] == 'x' && p[k + m] != pat[m]) { ok = false; break; }
+                if (!ok) continue;
+                ++s_matches;
+                uint8_t* changed = (uint8_t*)(p + k + 7) + *(const int32_t*)(p + k + 3);    // rip-relative: next instruction + disp32
+                uint8_t* enabled = (uint8_t*)(p + k + 15) + *(const int32_t*)(p + k + 11);
+                if (enabled != changed + 0x1f4) continue;    // the enable byte sits 0x1f8 past the struct
+                s_candidate = changed - kChanged; s_candEnabled = enabled;
+                if (adopt()) return;
+                // The engine constructs the struct after its first presents (the boot screens come first), so the
+                // pattern's target is all zeros at frame 1: keep it and look again (apply() rechecks every 60 frames).
+                logmsg("DRSMin: the game's dynamic-resolution state should be at mgs4.exe+0x%llX but is not initialised yet (scale %.2f, floor %.2f, max %.2f, buffer %dx%d) - looking again as the game starts up",
+                       (unsigned long long)(s_candidate - exe), f(s_candidate, kScale), f(s_candidate, kMin), f(s_candidate, kMax), i(s_candidate, kWidth), i(s_candidate, kHeight));
+                return;
+            }
+        }
+        logmsg("DRSMin: the game's dynamic-resolution state was not found (%d pattern matches) - this mgs4.exe is not the build it was read from; the game keeps its own floor", s_matches);
+    }
+    // Every presented frame: hold the floor at DRSMin, or give the game's own back.
+    static void apply()
+    {
+        if (g_cfgDRSMin <= 0.0f) {
+            if (s_state && s_held > 0.0f) { *(float*)(s_state + kMin) = s_gameMin; s_held = -1.0f; logmsg("DRSMin=0: the game's dynamic-resolution floor is its own %.2f again", s_gameMin); }
+            return;
+        }
+        if (!s_scanned) find();
+        if (!s_state && s_candidate) {
+            // not initialised at the scan: look again every 60 frames for the first ten minutes or so
+            if (++s_rechecks % 60 != 0 || s_rechecks > 36000 || !adopt()) return;
+        }
+        if (!s_state) return;
+        float* mn = (float*)(s_state + kMin);
+        if (s_held < 0.0f) s_gameMin = *mn;
+        if (*mn != g_cfgDRSMin) *mn = g_cfgDRSMin;
+        if (s_held != g_cfgDRSMin) {
+            s_held = g_cfgDRSMin;
+            logmsg("DRSMin=%.2f: the game's dynamic-resolution floor (its own %.2f) is held at %.2f - the 3D scene stays at or above %dx%d", g_cfgDRSMin, s_gameMin, g_cfgDRSMin,
+                   (int)(i(s_state, kWidth) * g_cfgDRSMin), (int)(i(s_state, kHeight) * g_cfgDRSMin));
+        }
+    }
+    static const char* status()
+    {
+        static char b[320];
+        if (!s_scanned) snprintf(b, sizeof(b), "Game dynamic-resolution state: not looked for yet (DRSMin=0 leaves the game alone)");
+        else if (!s_state && s_candidate) snprintf(b, sizeof(b), "Game dynamic-resolution state: located but not initialised by the game yet (%u rechecks)", s_rechecks);
+        else if (!s_state) snprintf(b, sizeof(b), "Game dynamic-resolution state: not found in this mgs4.exe (%d pattern matches) - the game keeps its own floor", s_matches);
+        else snprintf(b, sizeof(b), "Game dynamic-resolution state: scale %.2f (%dx%d of %dx%d), floor %.2f%s, max %.2f, budget %.1f ms, enabled %d",
+                      f(s_state, kScale), i(s_state, kAdjW), i(s_state, kAdjH), i(s_state, kWidth), i(s_state, kHeight), f(s_state, kMin),
+                      s_held > 0.0f ? " (held; the game's own is lower)" : "", f(s_state, kMax), f(s_state, kBudget), (int)*s_enabled);
+        return b;
+    }
+}
 // The BorderGuard (see g_cfgBorderGuard): clear the backbuffer about to be presented outside the game's rectangle.
 static void border_guard(command_queue* queue, swapchain* sc)
 {
@@ -3770,6 +3887,7 @@ static void on_present(command_queue* queue, swapchain* sc, const rect*, const r
 {
     { static DWORD seen[8]; static int n = 0; note_thread("present", seen, n); }
     nr_kick();
+    gdrs::apply();
     border_guard(queue, sc);
     if (g_cfgProbe && g_probeReady && queue && sc) {   // every presented frame, generated ones included
         command_list* icl = queue->get_immediate_command_list();
@@ -3896,10 +4014,12 @@ static int mode_index(NVSDK_NGX_PerfQuality_Value v) { for (int i = 0; i < 5; ++
 static void write_ini(const char* key, const char* val) { WritePrivateProfileStringA("DLSS", key, val, g_iniPath); }
 static void write_ini_int(const char* key, int val) { char b[16]; snprintf(b, sizeof(b), "%d", val); write_ini(key, b); }
 
+static const char* fg_mode_name(int m) { return m == 1 ? "2x" : (m == 2 ? "3x" : (m == 3 ? "4x" : "?")); }
 static void draw_overlay(effect_runtime*)
 {
     { static DWORD seen[8]; static int n = 0; note_thread("overlay drawn", seen, n); }
     if (g_uiMode < 0) g_uiMode = mode_index(g_cfgMode);
+    ImGui::SeparatorText("Image");
     bool en = g_cfgEnabled != 0;
     if (ImGui::Checkbox("Enable DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
     if (ImGui::Combo("DLSS mode", &g_uiMode, kModeNames, 5)) write_ini("Mode", kModeIni[g_uiMode]);
@@ -3910,6 +4030,36 @@ static void draw_overlay(effect_runtime*)
     int preset = g_cfgPreset == 10 ? 0 : 1; const char* presets[] = { "J", "K (transformer, default)" };
     if (ImGui::Combo("DLSS preset", &preset, presets, 2)) { g_cfgPreset = preset == 0 ? 10 : 11; write_ini_int("Preset", g_cfgPreset); g_recreateRequested = true; }
     if (ImGui::SliderInt("Sharpness", &g_cfgSharpness100, 0, 100, "%d%%")) write_ini_int("Sharpness", g_cfgSharpness100);
+    {
+        // The game's own dynamic resolution, held at full size (DRSMin; namespace gdrs). Live both ways: the game
+        // walks its scale by 0.02 every 8 frames, so 1080p to 4K takes a few seconds.
+        bool hold = g_cfgDRSMin >= 1.0f;
+        if (ImGui::Checkbox("Keep the 3D scene at full size (the game's own dynamic resolution drops it to 50% under load; holding it costs frame rate instead)", &hold)) { g_cfgDRSMin = hold ? 1.0f : 0.0f; write_ini("DRSMin", hold ? "1.0" : "0"); }
+        if (g_cfgDRSMin > 0.0f && g_cfgDRSMin < 1.0f) ImGui::TextDisabled("DRSMin=%.2f in the ini: the floor is held at %.0f%%", g_cfgDRSMin, g_cfgDRSMin * 100.0f);
+        ImGui::TextDisabled("%s", gdrs::status());
+    }
+    ImGui::SeparatorText("Frame generation");
+    {
+        const fg::Status& st = fg::status();
+        const char* fgNames[] = { "Off", "2x", "3x", "4x", "Dynamic (target frame rate)" };
+        int fm = g_cfgFgMode;
+        if (ImGui::Combo("Frame generation", &fm, fgNames, 5)) { write_ini_int("FrameGen", fm); reload_config(); }
+        if (g_cfgFgMode != 0 && !st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Restart the game to load Streamline (frame generation was off at startup)");
+        if (g_cfgFgMode == 4) {
+            float t = g_cfgFgTargetFps;
+            if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }
+            if (!st.dynamicSupported && st.initialized) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
+        }
+        const char* rfNames[] = { "Off", "On", "On + Boost" };
+        int rf = g_cfgReflex;
+        if (ImGui::Combo("NVIDIA Reflex", &rf, rfNames, 3)) { write_ini_int("Reflex", rf); reload_config(); }
+        bool of = g_cfgOverlayFg != 0;
+        if (ImGui::Checkbox("Off while this overlay is open (opening it with generation running killed the game; applies from the next opening)", &of)) { g_cfgOverlayFg = of ? 1 : 0; write_ini_int("OverlayPausesFG", g_cfgOverlayFg); }
+        if (fg::suspended()) ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Frame generation is off while this overlay is open (%s) - close it to get the generated frames back", st.active ? "winding down" : "off now");
+        if (st.loaded && !st.initialized) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline failed to initialize: %s", st.lastError);
+        else if (st.loaded && !st.supported) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS Frame Generation not supported: %s", st.lastError[0] ? st.lastError : "adapter/driver");
+    }
+    ImGui::SeparatorText("Tools");
     static const int dbgModes[] = { 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12 };
     const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyze draw constants", "Motion vectors (field only)", "UI layer (frame generation)", "HUD-less color (frame generation)",
                           "Motion vectors blended over the image (a character's vector silhouette must sit on the character)", "DoF: blurred layer only", "DoF: blur coverage", "DoF: overlay mask" };
@@ -3919,14 +4069,13 @@ static void draw_overlay(effect_runtime*)
         int kd = 0; for (int i = 0; i < 12; ++i) if (dbgModes[i] == g_cfgDebugKeyMode) kd = i;
         ImGui::TextDisabled("DebugKey (0x%02X) switches Off <-> %s in the game, with this overlay closed", g_cfgDebugKey, dbg[kd]);
     } else ImGui::TextDisabled("DebugKey=none in mgs4_dlss.ini: set a key (F1..F12) there, or in the launcher's Settings, to flip a debug view in the game");
-    ImGui::Separator();
     // The world stopped, the picture still drawn every frame: the one way to set NR, DLAA and the native image
     // side by side on the same frame. The game's own pause, brought on without the window losing focus.
     bool paused = g_worldPaused;
     if (ImGui::Checkbox("Pause the world (the game's focus-loss pause, with this window kept in front)", &paused)) world_pause(paused);
     if (g_cfgPauseKey) ImGui::TextDisabled("PauseKey (0x%02X) does the same in the game, overlay open or not. The world stays still while you change NR here. If you alt-tab it resumes: press the key twice.", g_cfgPauseKey);
     else ImGui::TextDisabled("PauseKey=none in mgs4_dlss.ini: name a key (Pause, F1..F12) there or in the launcher's Settings");
-    ImGui::Separator();
+    ImGui::SeparatorText("Diagnostics");
     ImGui::Text("NGX: %s", g_ngxReady ? "ready" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
     if (g_dlss) ImGui::Text("Feature: %s  %ux%u -> %ux%u, preset %s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K");
     else ImGui::Text("Feature: none yet");
@@ -3940,7 +4089,7 @@ static void draw_overlay(effect_runtime*)
             // the game's own load-driven dynamic resolution: it renders the 3D scene into this sub-rect and upscales it
             // itself before DLSS sees the image, so the detail DLAA works from is capped by the game's scale
             if (g_cfgDRS == 2) ImGui::TextColored(ImVec4(0.6f, 0.9f, 0.6f, 1.0f), "Game dynamic resolution: the 3D scene is rendered at %.0fx%.0f (%.0f%%) -> DLSS evaluates that sub-rect, output resampled back into it (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_drsFrames);
-            else if (g_cfgDRS) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Game dynamic resolution: the GAME renders its 3D scene at %.0fx%.0f (%.0f%%) and upscales it to %ux%u itself; DLAA runs on that full image, so detail is capped at the game's scale. The game picks it from its GPU load (DLSS + NR count) - Mode=Quality or less load keeps it at 100%% (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_internalW, g_internalH, g_drsFrames);
+            else if (g_cfgDRS) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Game dynamic resolution: the GAME renders its 3D scene at %.0fx%.0f (%.0f%%) and upscales it to %ux%u itself; DLAA runs on that full image, so detail is capped at the game's scale. The game picks it from its GPU load (DLSS + NR count) - the floor below, Mode=Quality or less load keeps it at 100%% (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_internalW, g_internalH, g_drsFrames);
             else ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Game dynamic resolution: scene viewport %.0fx%.0f (%.0f%%) -> NOT handled (DRS=0): expect smearing while the game changes resolution (%u frames so far)", g_sceneVp.width, g_sceneVp.height, fx * 100.0f, g_drsFrames);
         }
         else ImGui::Text("Game dynamic resolution: scene viewport at full size (%.0fx%.0f)", g_sceneVp.width, g_sceneVp.height);
@@ -3983,21 +4132,7 @@ static void draw_overlay(effect_runtime*)
     ImGui::Separator();
     {
         const fg::Status& st = fg::status();
-        const char* fgNames[] = { "Off", "2x", "3x", "4x", "Dynamic (target frame rate)" };
-        int fm = g_cfgFgMode;
-        if (ImGui::Combo("Frame generation", &fm, fgNames, 5)) { write_ini_int("FrameGen", fm); reload_config(); }
-        if (g_cfgFgMode != 0 && !st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Restart the game to load Streamline (frame generation was off at startup)");
-        if (g_cfgFgMode == 4) {
-            float t = g_cfgFgTargetFps;
-            if (ImGui::InputFloat("Target fps (0 = monitor refresh)", &t, 10.0f, 30.0f, "%.0f")) { char b[32]; snprintf(b, sizeof(b), "%.0f", t < 0 ? 0.0f : t); write_ini("FGTargetFps", b); reload_config(); }
-            if (!st.dynamicSupported && st.initialized) ImGui::TextWrapped("Driver-side dynamic multi-frame generation is not reported as available; the add-on picks 2x/3x/4x itself from the measured game frame rate (now %ux).", st.adaptiveFrames + 1);
-        }
-        bool of = g_cfgOverlayFg != 0;
-        if (ImGui::Checkbox("Frame generation off while this overlay is open (opening it with generation running killed the game; applies from the next opening)", &of)) { g_cfgOverlayFg = of ? 1 : 0; write_ini_int("OverlayPausesFG", g_cfgOverlayFg); }
-        if (fg::suspended()) ImGui::TextColored(ImVec4(0.6f, 0.9f, 1.0f, 1.0f), "Frame generation is off while this overlay is open (%s) - close it to get the generated frames back", st.active ? "winding down" : "off now");
-        const char* rfNames[] = { "Off", "On", "On + Boost" };
-        int rf = g_cfgReflex;
-        if (ImGui::Combo("NVIDIA Reflex", &rf, rfNames, 3)) { write_ini_int("Reflex", rf); reload_config(); }
+        ImGui::Text("Frame generation: %s", g_cfgFgMode == 0 ? "off" : (g_cfgFgMode == 4 ? "dynamic" : fg_mode_name(g_cfgFgMode)));
         if (!st.loaded) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline runtime (sl.interposer.dll, sl.dlss_g.dll, ...) not found next to mgs4.exe");
         else if (!st.initialized) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Streamline failed to initialize: %s", st.lastError);
         else if (!st.supported) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS Frame Generation not supported: %s", st.lastError[0] ? st.lastError : "adapter/driver");

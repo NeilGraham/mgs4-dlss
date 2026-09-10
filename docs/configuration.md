@@ -4,7 +4,7 @@ Every setting of the add-on lives in `MGS4\mgs4_dlss.ini`, next to `mgs4.exe`. K
 
 ## The shipped ini
 
-This is the configuration v1.3.3 ships with and was verified on:
+This is the configuration v1.3.4 ships with and was verified on:
 
 ```ini
 [DLSS]
@@ -54,6 +54,7 @@ ObjectMVMaxGradient=4    ; live: an object vector field changing by more than th
 FGHintRescale=0          ; live: 1 = in a window that is not the render size, rescale the HUD-less / UI hints to the backbuffer for DLSS-G (two 4K passes + DLSS-G's UI work; benefit not shown in testing)
 SceneLog=1
 DRS=1                    ; dynamic-resolution handling (full grid); 2 = legacy sub-rect evaluation (reference only)
+DRSMin=0                 ; live: the floor of the game's own dynamic resolution - 0 = the game's own (down to 1920x1080 of 4K under load), 1 = the 3D scene is always rendered at full size, 0.75 / 0.5 in between (see "Dynamic resolution" below)
 WindowScene=1            ; DLSS on a 3D window's own render target (the Codec caller): the caller's scene gets DLAA/NR, the CRT overlay and the panels around it do not
 MonitorProject=0         ; experimental: project the video call's caller (Naomi, Campbell) vectors through the Nomad's monitor; the screen quad's texture coordinates are not resolved yet, so the motion lands beside the caller - leave off
 MonitorFlipV=0           ; with MonitorProject=1: flip the feed's vertical texture coordinate
@@ -118,7 +119,7 @@ thread was Streamline's present thread inside RenoDX's overlay, freeing a per-se
 Streamline thread was inside RenoDX's frame-generation hook. With frame generation off, or with RenoDX's add-on
 removed, the overlay opened and closed as often as asked; with both present the two threads race inside RenoDX.
 
-`OverlayPausesFG=1` (live, the default; *Frame generation off while this overlay is open* on the MGS4 DLSS tab)
+`OverlayPausesFG=1` (live, the default; *Off while this overlay is open* under Frame generation on the MGS4 DLSS tab)
 keeps the two apart: when the overlay is asked for while DLSS-G is generating, the opening is held back, frame
 generation is switched off, and once a few frames have presented without it the overlay key is pressed again from
 inside the add-on, so the overlay opens on the game's own thread with no generated frames in flight. Closing it puts
@@ -129,16 +130,33 @@ the overlay`, `ReShade overlay opened`, and `closed ... frame generation back to
 not open it within a second and a half, generation comes back on by itself and the log says so. With
 `OverlayPausesFG=0` the overlay opens straight away, generation running - the crash is yours to keep.
 
-## Dynamic resolution and what the overlay says about it
+## Dynamic resolution: the game's own, and holding it at full size (`DRSMin`)
 
-**Why the overlay may say the scene is 1920x1080 with DLAA on.** The game decides its own render scale from its GPU load,
-and everything the add-on runs inside its frame (DLAA, DLSS 5 NR, the vector passes) counts toward that budget. Under load
-it renders the 3D scene at 50 % (1920x1080 of 3840x2160) and upscales it itself before DLSS sees the image; DLAA then
-runs on the full-size image but cannot add detail the game never rendered. There is no game-side switch
-(`mgs4.savedsettings` only has the quality tiers). `Mode=Quality` is the way out: the add-on shrinks the game's targets to
-the DLSS render resolution, the game has nothing left to scale down, and DLSS super-resolves properly jittered samples -
-far better than DLAA over the game's bilinear 1080p upscale. Test the cause live with the overlay's "Enable DLSS"
-checkbox: with it off the "Game dynamic resolution" line should climb back to full size within seconds.
+**What the game does.** The port scales its 3D scene by the GPU time it measures against a budget (16 ms at its 60 fps):
+every 8 frames it steps the viewport scale by 0.02 up or down and clamps it between a minimum and a maximum scale
+factor - 0.5 and 1.0 - then rounds the width to 32 pixels. Everything the add-on runs inside its frame (DLAA, DLSS 5 NR,
+the vector passes, frame generation) counts toward that budget, so under load the scene walks down to 50 %
+(1920x1080 of 3840x2160) and the game upscales it itself, bilinearly, before DLSS sees the image; DLAA then runs on a
+full-size image that holds no more detail than 1080p. The game has no setting for it: `render.dynamicResolution` lives
+in its encrypted config, and `mgs4.savedsettings` only has the quality tiers.
+
+**`DRSMin=1.0` (live; off by default) holds the scene at full size.** The add-on finds the game's dynamic-resolution state
+in the running exe (by the byte pattern of the getter the renderer asks, checked against the constructor's values before
+anything is written) and holds its minimum scale factor at `DRSMin`; the game's own logic then keeps the scene there,
+with no code patched and the renderer on its normal path. The log says where the state was found and what is held
+(`DRSMin: the game's dynamic-resolution state is at mgs4.exe+...`, then `DRSMin=1.00: ... held at 1.00`); if a future
+build of the game moves it, the log says `not found` and the game keeps its own floor. The MGS4 DLSS tab has the same
+switch (*Keep the 3D scene at full size*, under Image) and a status line with the scale, the floor and the budget; it works
+while the game runs, in both directions - the game walks its scale up by 0.02 every 8 frames, so 1080p to 4K takes a
+few seconds. Values
+between 0.25 and 1 set a lower floor (`0.5` is the game's own at 4K); `0` leaves the game's value alone.
+
+What it costs: the game can no longer shed load by rendering less, so a GPU that cannot hold DLAA + NR + frame
+generation at full size in 16 ms drops below 60 fps instead of below 4K - measured on an RTX 5090 in the Act 1
+opening: 24 ms a frame and 34 fps at full 4K, where the game's own 50 % held 60. That is why it ships off. `Mode=Quality` is the other way out, and the
+cheaper one: the add-on shrinks the game's targets to the DLSS render resolution, the game has nothing left to scale
+down, and DLSS super-resolves properly jittered 1440p samples - far better than DLAA over the game's bilinear 1080p
+upscale. The overlay's "Game dynamic resolution" line says what the game is doing either way.
 
 ## Wide displays (`BorderGuard`)
 
