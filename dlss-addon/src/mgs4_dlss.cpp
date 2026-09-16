@@ -368,6 +368,7 @@ static float g_dofCbG[10 * 4] = {}; static bool g_dofCbGValid = false; // ... an
 static uint64_t g_dofDepth = 0;                                          // the depth copy the CoC pass sampled (t1)
 static bool g_dofCocSeen = false, g_dofSeenThisFrame = false, g_dofCocUnorm = false;
 static bool g_dofPrevOk = false;
+static uint32_t g_dofCocRescaled = 0;       // upscaling modes: the game's CoC passes whose depth constants were rescaled (dof_coc_rescale)
 static bool g_dofSkipFrame = false;      // decided at this frame's CoC draw: the game's DoF draws are skipped (re-applied after DLSS)
 static float g_dofKx = 1.0f, g_dofKy = 1.0f;   // this frame's dynamic-resolution scale, exact: the CoC pass viewport is half the scene sub-rect
 static int g_cfgDofSubRect = 1;          // 1 = PostDof also on sub-rect frames (depth / step / mask scaled by the exact k), 0 = leave those to the game
@@ -661,6 +662,11 @@ static bool vp_full_frame(const viewport& v, float rtW, float rtH)
     const float a = v.width / v.height, fa = rtW / rtH;
     return v.width >= rtW * 0.5f && v.height >= rtH * 0.5f && v.x <= 1.0f && v.y <= 1.0f && fabsf(a - fa) <= fa * 0.03f;
 }
+// The bound target's size in the game's own (internal) pixels, which its viewports are in: a target shrunk to the render
+// size in the upscaling modes is still the internal size to the game - it rescales nothing, the add-on does as they are bound.
+static float vp_rt_w(const cl_state& s) { return s.rt_scaled && g_internalW ? float(g_internalW) : float(s.rt_w); }
+static float vp_rt_h(const cl_state& s) { return s.rt_scaled && g_internalH ? float(g_internalH) : float(s.rt_h); }
+static bool vp_full_frame_of(const cl_state& s) { return vp_full_frame(s.vp, vp_rt_w(s), vp_rt_h(s)); }
 static bool rects_overlap(const viewport& a, const viewport& b) { return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height; }
 // The camera window of the briefings (F CAM, (2562,0 1278x900)): the scene write whose scissor fits one of the frame's
 // window viewports without overlapping the main view's rectangle; kept for two frames. Its objects rasterize into it and
@@ -876,7 +882,7 @@ static int jitter_scene_draw(const cl_state& s)
             uint64_t hsh = 1469598103934665603ull; const uint32_t* u = reinterpret_cast<const uint32_t*>(m);
             for (int i = 0; i < 16; ++i) { hsh ^= u[i]; hsh *= 1099511628211ull; }
             vp_vote& v = g_vpVotes[hsh]; if (v.count++ == 0) memcpy(v.m, m, 64);
-            if (s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp))) v.mainCount++;
+            if (s.vp_valid && (vp_full_frame_of(s) || vp_is_layout_scene(s.vp))) v.mainCount++;
             else if (s.vp_valid) { const viewport* wl = win_layout_now(); if (wl && vp_in_layout(s.vp, *wl)) v.winCount++; }
         }
         if (g_cfgJitter && !g_injectedThisFrame) {   // draws after DLSS ran (transparents, particles, HUD) stay unjittered
@@ -2123,7 +2129,9 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     ep.InFrameTimeDeltaInMsec = g_lastFrameDeltaMs;
     NVSDK_NGX_Result r = NVSDK_NGX_Result_Success;
     if (g_cfgProbe && !upscale) probe_dispatch(cmd, color, resource_usage::shader_resource_non_pixel, 0);
-    const uint32_t visInW = (g_cfgDRS == 2) ? subW : outW, visInH = (g_cfgDRS == 2) ? subH : outH;   // full grid: the MV texture and the output map 1:1
+    // full grid: the whole MV texture, which is the DLSS input's size - the output's in DLAA, the render size when upscaling
+    // (read as output-sized it put the field in the top-left render/output of the screen)
+    const uint32_t visInW = (g_cfgDRS == 2) ? subW : cd.texture.width, visInH = (g_cfgDRS == 2) ? subH : cd.texture.height;
     if (g_cfgDebugMode == 5) {
         vis_dispatch(cmd, visInW, visInH, outW, outH);   // show the MV field instead of the DLSS result
     } else if (g_cfgDebugMode == 7 && g_hudless.handle && g_preHudCaptured && !upscale) {
@@ -2151,7 +2159,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     } else if (g_cfgDebugMode == 13 && depthStretched) {
         // the scene depth as DLSS and the vector passes see it (the full-grid copy), in place of the DLSS result
         r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
-        if (!NVSDK_NGX_FAILED(r)) vis_dispatch(cmd, outW, outH, outW, outH, 0.0f, 1);
+        if (!NVSDK_NGX_FAILED(r)) vis_dispatch(cmd, cd.texture.width, cd.texture.height, outW, outH, 0.0f, 1);   // the depth copy is input-sized
     } else if (g_cfgDebugMode == 9) {
         // DLSS result with the motion-vector field blended over it: the vector silhouette of a character must sit exactly
         // on the rendered character (any offset = the vectors are on a different grid than the image)
@@ -2736,6 +2744,32 @@ static void prewarm_step(device* dev, command_list* cmd, const cl_state& s)
 }
 
 struct draw_args { bool indexed; uint32_t count, instances, first, first_instance; int32_t vertex_offset; };
+// Upscaling modes: the game's CoC pass reads its depth copy at uv = (2 * pixel + c12.xy) / c16.xy, with c16 the copy's
+// size and c12 an offset in its texels, both in the game's internal pixels. The copy is shrunk to the render size and the
+// pass's pixels with it, so the internal c16 read only the top-left render/internal of the depth: the blur map came out
+// 1.5x too large in Quality, blurring what is in focus and keeping sharp what is not. Rescaled here, in the draw's own
+// constants, to the copy's real size - once per region (a patched c16 already matches the texture, and is left alone).
+static void dof_coc_rescale(device* dev, const cl_state& s)
+{
+    static uint32_t nskip = 0;
+    if (!s.table_set[1] || !s.cbv_set[2] || !s.cbv_res[2].handle || !g_internalW || !g_internalH || !g_renderW || !g_renderH) { if (nskip++ < 3) logmsg("PostDof: f%u CoC pass without its tables or constants (table %d, cbv %d) - not rescaled", g_frame, (int)s.table_set[1], (int)s.cbv_set[2]); return; }
+    const resource dep = resolve_descriptor(dev, s.tables[1], 1);
+    if (!dep.handle || !is_live(dep.handle) || !is_scaled(dep)) { if (nskip++ < 3) logmsg("PostDof: f%u CoC pass reads %s, not a shrunk texture - not rescaled", g_frame, dep.handle ? desc_str(dev, dep).c_str() : "no depth copy"); return; }
+    const resource_desc dd = dev->get_resource_desc(dep);
+    uint64_t size = 0; uint8_t* base = map_upload(reinterpret_cast<ID3D12Resource*>(s.cbv_res[2].handle), &size);
+    if (!base || s.cbv_off[2] + 18 * 4 * 4 > size) return;
+    float* c = reinterpret_cast<float*>(base + s.cbv_off[2]);
+    float c12[2], c16[2]; memcpy(c12, c + 12 * 4, sizeof(c12)); memcpy(c16, c + 16 * 4, sizeof(c16));
+    const float kx = float(g_renderW) / float(g_internalW), ky = float(g_renderH) / float(g_internalH);
+    // still the internal size: the texture's size over the render scale, within a couple of pixels
+    const bool internal = fabsf(c16[0] * kx - float(dd.texture.width)) < 2.0f && fabsf(c16[1] * ky - float(dd.texture.height)) < 2.0f && c16[0] > float(dd.texture.width) + 1.5f;
+    static uint32_t nlog = 0;
+    if (!internal) { if (nlog < 3 && fabsf(c16[0] - float(dd.texture.width)) > 1.5f) { nlog++; logmsg("PostDof: f%u CoC constants c16 %.0fx%.0f are neither the depth copy's %ux%u nor its internal size - left alone", g_frame, c16[0], c16[1], dd.texture.width, dd.texture.height); } return; }
+    c16[0] *= kx; c16[1] *= ky; c12[0] *= kx; c12[1] *= ky;
+    memcpy(c + 16 * 4, c16, sizeof(c16)); memcpy(c + 12 * 4, c12, sizeof(c12));
+    g_dofCocRescaled++;
+    if (nlog++ < 3) logmsg("PostDof: f%u the game's CoC pass reads a %ux%u depth copy with internal-size constants - c16 -> %.0fx%.0f, c12 -> %.3f,%.3f (render scale %.3f x %.3f)", g_frame, dd.texture.width, dd.texture.height, c16[0], c16[1], c12[0], c12[1], kx, ky);
+}
 static void handle_draw(command_list* cmd, const draw_args& da)
 {
     if (t_reentrant) return;   // our replayed draw
@@ -2768,6 +2802,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                                (void*)src0.handle, sw, sh, "", big.c_str(), (int)g_sceneVpFrameValid, (int)g_winVpFrameValid, (int)g_injectedThisFrame);
                 }
             }
+            if (g_scaling && da.count <= 8 && objmv::pso_ps_hash(s.pso) == PS_DOF_COC) dof_coc_rescale(dev, s);
             if (g_cfgPostDof && !g_cfgPrePost && g_dofPrevOk && da.count <= 8 && s.rt_w >= 1280 && g_cfgEnabled) {
                 // The game's DoF: CoC pass (half-res viewport, samples the depth copy) -> spiral gather -> blend over the
                 // sharp image. Skip all three; the CoC is evaluated right here from the same depth copy and constants
@@ -2856,7 +2891,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     auto itSeen = r0.handle ? g_rtSeen.find(r0.handle) : g_rtSeen.end();
                     if (r0.handle && is_live(r0.handle) && (itSeen == g_rtSeen.end() || g_frame - itSeen->second > 600)) {
                         const resource_desc d0 = dev->get_resource_desc(r0);
-                        const bool vpok = s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp));
+                        const bool vpok = s.vp_valid && (vp_full_frame_of(s) || vp_is_layout_scene(s.vp));
                         const uint64_t key = (uint64_t)d0.texture.width << 48 | (uint64_t)d0.texture.height << 32 | (uint64_t)(uint32_t)d0.texture.format << 8 | (vpok ? 1 : 0) | (g_preHudLast ? 2 : 0) | (g_injectedThisFrame ? 4 : 0);
                         if (d0.type == resource_type::texture_2d && d0.texture.width <= 2048 && seen.insert(key).second) {
                             ++nlog;
@@ -2868,7 +2903,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
             }
             if (!depthTested && da.count == 6 && s.rt_w == g_dlssW && s.rt_h == g_dlssH && g_dlssW && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]
                 && g_depthOnDrawsThisFrame >= 20 && !g_injectedThisFrame && s.table_set[1] && g_preHudLast && g_cfgEnabled && !g_cfgPrePost && !g_scaling && g_cfgDebugMode != 2 && g_flashFrame != g_frame
-                && s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp))) {
+                && s.vp_valid && (vp_full_frame_of(s) || vp_is_layout_scene(s.vp))) {
                 resource r0 = resolve_descriptor(dev, s.tables[1], 0);   // the flashback footage pass: the video in slot 0 (see g_flashFrame)
                 auto itSeen = r0.handle ? g_rtSeen.find(r0.handle) : g_rtSeen.end();
                 if (r0.handle && is_live(r0.handle) && (itSeen == g_rtSeen.end() || g_frame - itSeen->second > 600)) {
@@ -2926,16 +2961,21 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     auto& e = g_dumpVpHist[(s.rt.handle * 1000003ull) ^ ((uint64_t)(uint32_t)(s.vp.x + 0.5f) << 48) ^ ((uint64_t)(uint32_t)(s.vp.y + 0.5f) << 32) ^ ((uint32_t)(s.vp.width + 0.5f) << 16) ^ (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) { e.second.first = s.rt.handle; e.second.second = s.vp; }
                 }
-                if (depthTested && s.vp_valid && s.rt_w >= 640 && s.vp.width <= s.rt_w && (g_dlssW == 0 || s.rt_w == g_dlssW)
+                // The game's viewports are in its internal pixels, also on a target shrunk to the render size (the add-on
+                // rescales them as they are bound): compare them with the target's size in those pixels. Against the shrunk
+                // size, Performance and Ultra Performance (a 3456-wide scene in a 1280-wide target) never matched, so the
+                // game's own dynamic-resolution sub-rect went unseen and depth and vectors were read at the wrong scale.
+                const float vpRtW = vp_rt_w(s), vpRtH = vp_rt_h(s);
+                if (depthTested && s.vp_valid && s.rt_w >= 640 && s.vp.width <= vpRtW && (g_dlssW == 0 || s.rt_w == g_dlssW)
                     && (g_curGeoRt == 0 || s.rt.handle == g_curGeoRt)          // only the scene target, not shadow/reflection passes
-                    && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h))   // a plausible full-frame viewport
+                    && (vp_full_frame_of(s)   // a plausible full-frame viewport
                         || vp_is_layout_scene(s.vp))) {                       // or the main view of a layout window (briefings)
                     // the 3D scene's viewport = the one most depth-tested draws use (a few full-size depth-tested quads exist too)
                     auto& e = g_vpHist[(uint64_t)(uint32_t)(s.vp.width + 0.5f) << 32 | (uint32_t)(s.vp.height + 0.5f)];
                     if (e.first++ == 0) e.second = s.vp;
                     if (!g_sceneVpFrameValid || e.first > g_vpHist[(uint64_t)(uint32_t)(g_sceneVpFrame.width + 0.5f) << 32 | (uint32_t)(g_sceneVpFrame.height + 0.5f)].first) { g_sceneVpFrame = e.second; g_sceneVpFrameValid = true; }
-                } else if (depthTested && s.vp_valid && s.rt_w >= 640 && (g_dlssW == 0 || s.rt_w == g_dlssW) && s.vp.width >= s.rt_w * 0.2f && s.vp.height >= s.rt_h * 0.2f
-                           && s.vp.width < s.rt_w - 1.0f && s.vp.x + s.vp.width <= s.rt_w + 1.0f && s.vp.y + s.vp.height <= s.rt_h + 1.0f) {
+                } else if (depthTested && s.vp_valid && s.rt_w >= 640 && (g_dlssW == 0 || s.rt_w == g_dlssW) && s.vp.width >= vpRtW * 0.2f && s.vp.height >= vpRtH * 0.2f
+                           && s.vp.width < vpRtW - 1.0f && s.vp.x + s.vp.width <= vpRtW + 1.0f && s.vp.y + s.vp.height <= vpRtH + 1.0f) {
                     // a 3D window (Codec caller, pause-menu model): smaller than the frame or at an offset, blitted 1:1 to the final image
                     { uint32_t& n = g_winGeoDrawsPerRt[s.rt.handle]; if (++n > g_winGeoDraws) { g_winGeoDraws = n; g_winGeoRt = s.rt.handle; } }
                     if (const viewport* fl = feed_layout_now()) if (vp_in_layout(s.vp, *fl)) { uint32_t& n = g_feedDrawsPerRt[s.rt.handle]; if (++n > g_feedGeoDraws) { g_feedGeoDraws = n; g_feedGeoRt = s.rt.handle; g_feedVpFrame = s.vp; g_feedVpFrameValid = true; } }
@@ -2973,7 +3013,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                     // no known place (pause-menu model, Codec caller) keeps its own viewport as before; anything else -
                     // the video call's caller, rendered at (0,0 2284x2160) and only seen on the Nomad's monitor - is not
                     // captured, its silhouette would land somewhere in the main view.
-                    const bool mainClass = !s.vp_valid || vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp);
+                    const bool mainClass = !s.vp_valid || vp_full_frame_of(s) || vp_is_layout_scene(s.vp);
                     const viewport* wl = mainClass ? nullptr : win_layout_now();
                     const bool winClass = !mainClass && wl && vp_in_layout(s.vp, *wl);
                     const viewport* fl = (mainClass || winClass) ? nullptr : feed_layout_now();
@@ -2988,7 +3028,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 // The in-world monitor showing the caller feed: a main-view draw sampling a texture that was copied from the
                 // final texture this frame. Captured with its texture coordinates for the projector pass (objmv view 3).
                 if (g_cfgMonitorProject && g_cfgObjectMV && objmv::ready() && !g_injectedThisFrame && s.ds.handle == g_lastDepth && s.pso && da.count >= 3 && !g_feedTexSet.empty() && s.table_set[1] && s.vp_valid
-                    && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp)) && feed_layout_now()) {
+                    && (vp_full_frame_of(s) || vp_is_layout_scene(s.vp)) && feed_layout_now()) {
                     bool monitor = false;
                     for (int i = 0; i < 8 && !monitor; ++i) { resource r = resolve_descriptor(dev, s.tables[1], i); if (r.handle && g_feedTexSet.count(r.handle)) monitor = true; }
                     if (monitor) {
@@ -3021,7 +3061,7 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 // in-frame detection of the 3D target: the first depth-bound RT that reaches 40% of last frame's peak,
                 // drawn with a plausible full-frame viewport - a picture-in-picture pass (the Mk. II's monitor: 1024x1024
                 // in a corner of the scene target, hundreds of draws) must not take the slot from the scene itself
-                const bool fullFrameVp = !s.vp_valid || vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp);
+                const bool fullFrameVp = !s.vp_valid || vp_full_frame_of(s) || vp_is_layout_scene(s.vp);
                 // counted per target: the briefing's camera window (hundreds of draws at its own viewport, plus a few
                 // full-viewport quads, rendered before the main view) must not take the slot from the main view either
                 const uint32_t ns = fullFrameVp ? ++g_sceneClassDrawsPerRt[s.rt.handle] : g_sceneClassDrawsPerRt[s.rt.handle];
@@ -3163,8 +3203,16 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                         // the final image (see g_layoutRect), the whole texture unless the scene is a layout window. The
                         // main view's is the one the frame's scene viewport fits - same origin, the window's aspect - and
                         // the tightest if several do.
-                        const viewport R = (s.sc_valid && s.sc.right > s.sc.left && s.sc.bottom > s.sc.top) ? viewport{ float(s.sc.left), float(s.sc.top), float(s.sc.right - s.sc.left), float(s.sc.bottom - s.sc.top), 0.0f, 1.0f }
-                                                                                                             : viewport{ 0.0f, 0.0f, float(s.rt_w), float(s.rt_h), 0.0f, 1.0f };
+                        viewport R = (s.sc_valid && s.sc.right > s.sc.left && s.sc.bottom > s.sc.top) ? viewport{ float(s.sc.left), float(s.sc.top), float(s.sc.right - s.sc.left), float(s.sc.bottom - s.sc.top), 0.0f, 1.0f }
+                                                                                                       : viewport{ 0.0f, 0.0f, float(s.rt_w), float(s.rt_h), 0.0f, 1.0f };
+                        // Upscaling modes shrink the final texture to the render size, and the game scissors this pass to
+                        // the size the texture reports: the whole target reads 2560x1440 in Quality. The layout rectangle
+                        // is in the game's internal pixels (it is compared with the internal size and scaled by
+                        // texture / internal where it is used), so the whole shrunk target is the whole internal frame -
+                        // taken as it was, it made a 1707x960 "layout window" of the full-screen view: the camera vectors
+                        // were mapped into the top-left 2/3 of the image and the depth sampled at the wrong scale.
+                        if (s.rt_scaled && g_internalW && g_internalH && R.x < 0.5f && R.y < 0.5f && fabsf(R.width - float(s.rt_w)) < 1.5f && fabsf(R.height - float(s.rt_h)) < 1.5f)
+                            R = viewport{ 0.0f, 0.0f, float(g_internalW), float(g_internalH), 0.0f, 1.0f };
                         // this frame's scene viewport only: the camera window's upscale runs before the main view is even
                         // drawn, and matching it against the window viewport of the frame adopted the camera window's rectangle
                         const bool fits = g_sceneVpFrameValid && vp_in_layout(g_sceneVpFrame, R);
@@ -3841,7 +3889,7 @@ static void frame_rollover()
         { const objmv::Stats& os = objmv::stats(); logmsg("   frozen-background insertions %u (DLSS run before the game's screen capture for the pause menu / Codec); frozen pass-through frames %u; seed textures %zu; seed-blit redirects to the kept frame %u", g_frozenInjections, g_frozenPassFrames, g_seedTex.size(), g_keepRedirects);
         logmsg("   window-scene insertions %u (3D window rendered into its own target: Codec caller / pause model); flashback frames (footage pass up: DLSS took the current frame) %u", g_windowInjections, g_flashFrames);
         if (g_cfgProbe && g_probeReady) logmsg("   probe: %u frames read back; sub-rect layout flags: DLSS input %u / DoF output %u / composite input %u / presented %u", g_probeFrames, g_probeFlags[0], g_probeFlags[1], g_probeFlags[2], g_probeFlags[3]);
-        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, input fallbacks to the game's DoF %u, sub-rect frames handled %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofFallbacks, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none");
+        if (g_cfgPostDof) logmsg("   PostDof: frames re-applied %u, draws skipped %u, skipped without re-apply %u, input fallbacks to the game's DoF %u, sub-rect frames handled %u, overlay draws masked %u, pre-warm evaluations %u, LATE scene writes %u, step-frame holds %u, wipe captures redirected %u, CoC constants %s, game CoC passes rescaled to the render size %u", g_dofFrames, g_dofSkipped, g_dofMissed, g_dofFallbacks, g_dofSubRectFrames, g_dofOverlays, g_warmEvals, g_lateSceneWrites, g_stepFreezes, g_wipeRedirects, g_dofCbValid ? "captured" : "none", g_dofCocRescaled);
         logmsg("   object motion: ready %d, last frame captured %u (with history %u, re-paired by signature %u, skipped %u, overflow %u); SO PSOs %u (%u failed), velocity PSOs %u, root sigs %u (%u SO-enabled), PSOs seen %u, slots %u, velocity passes %u | GPU ms: scene %.2f, stream-out %.2f, velocity %.2f; CPU %.2f ms/frame", (int)os.ready, os.capturedLast, os.withPrevLast, os.reorderedLast, os.skippedLast, os.overflowLast, os.soPsos, os.soPsoFailures, os.velPsos, os.rootSigsSeen, os.rootSigsSoEnabled, os.psosSeen, os.slotsUsed, os.velocityFrames, os.frameGpuMs, os.soGpuMs, os.velGpuMs, os.cpuMs); }
         for (int i = 0; i < 3; ++i) if (g_topVotes[i].count)
             logmsg("   vote #%d: %u regions, w-row (%.3f %.3f %.3f | %.1f), x-row (%.3f %.3f %.3f | %.1f), near %.2f", i, g_topVotes[i].count, g_topVotes[i].m[12], g_topVotes[i].m[13], g_topVotes[i].m[14], g_topVotes[i].m[15], g_topVotes[i].m[0], g_topVotes[i].m[1], g_topVotes[i].m[2], g_topVotes[i].m[3], g_topVotes[i].m[11]);
