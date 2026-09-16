@@ -34,11 +34,8 @@ namespace Mgs4Launcher
     {
         public string File { get; private set; }
         // The title, with where it is from for the ones that are known, and nothing else: what the editor's
-        // rows show, each with its heart drawn beside it rather than in it.
+        // rows and the Menu music choice show, each with its heart drawn beside it rather than in it.
         public string Name { get; private set; }
-        // The same with a ♥ in front of a favourite's: what the Menu music choice shows, which has no room for
-        // a heart of its own.
-        public string Label { get; private set; }
         public bool Favorite { get; private set; }
         // The heart at the row's end: filled for a favourite, an outline for the rest, one character wide either
         // way so the column holds still. Tag="heart" in the template is what a click on it is told apart by.
@@ -67,7 +64,6 @@ namespace Mgs4Launcher
             Favorite = Music.Favorites.Contains(file);
             Music.Known k = Music.Lookup(file);
             Name = k != null ? k.Title + "  ·  " + k.From : Music.Pretty(file);
-            Label = (Favorite ? "♥ " : "") + Name;
         }
     }
 

@@ -21,6 +21,9 @@ namespace Mgs4Launcher
     {
         public string Group, Key, Type, Label, Help;
         public string[] Choices, ChoiceLabels;
+        // Segoe MDL2 Assets glyphs drawn to the left of a choice's label, one string per choice, empty for none.
+        // Named by code point for the reason MainWindow.Music.cs gives: an editor shows them as nothing.
+        public string[] ChoiceIcons;
         public IniSource Source;
         public string TrueWord, FalseWord;      // the game writes true/false where the add-on writes 1/0
         public string Section;                  // the [Section] inside its file, when the file has any
@@ -282,22 +285,35 @@ namespace Mgs4Launcher
             if (spec == null) return;
             var ids = new List<string> { Music.Off };
             var labels = new List<string> { "None" };
+            var icons = new List<string> { "" };
+            const string heart = "";
             List<string> tracks = Music.Tracks(gameDir);
             if (tracks.Count > 0)
             {
+                // The ones that play more than one track say how with icons: a playlist, a heart, a shuffle.
+                const string shuffle = "", playlist = "";
                 ids.Add(Music.Shuffle);
                 labels.Add("Shuffle  -  the whole iPod, each track once before any repeats");
+                icons.Add(shuffle);
                 ids.Add(Music.Playlist);
                 labels.Add("Playlist  -  your list, in order");
+                icons.Add(playlist);
                 ids.Add(Music.PlaylistShuffle);
                 labels.Add("Playlist, shuffled");
+                icons.Add(playlist + shuffle);
                 ids.Add(Music.FavoritesShuffle);
                 labels.Add("Hearted, shuffled  -  the tracks with a heart, dealt");
-                // The hearted tracks first, each with a heart in front of its name, then the rest, A to Z.
-                foreach (string t in Music.Ordered(tracks)) { ids.Add(t); labels.Add(new TrackItem(t).Label); }
+                icons.Add(heart + shuffle);
+                // The hearted tracks first, each with the same heart in front of its name, then the rest, A to Z.
+                foreach (string t in Music.Ordered(tracks))
+                {
+                    var item = new TrackItem(t);
+                    ids.Add(t); labels.Add(item.Name); icons.Add(item.Favorite ? heart : "");
+                }
             }
             spec.Choices = ids.ToArray();
             spec.ChoiceLabels = labels.ToArray();
+            spec.ChoiceIcons = icons.ToArray();
         }
 
         public static string IniPath(string gameDir) { return Paths.Join(gameDir, "mgs4_dlss.ini"); }

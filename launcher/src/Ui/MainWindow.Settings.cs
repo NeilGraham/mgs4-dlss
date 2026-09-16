@@ -13,6 +13,57 @@ namespace Mgs4Launcher
     {
         // One entry per row: the key it belongs to (which knows its file), how to read the control back, and what
         // the file said when the form was built. The third is what makes "has anything changed?" answerable.
+        // A choice with icons to the left of its label. The items are data, not elements, so the closed box and the
+        // open list can both draw one: an element can only have one parent, and a selected one would leave the list.
+        class IconChoice
+        {
+            public string Label { get; private set; }
+            public string Icon1 { get; private set; }
+            public string Icon2 { get; private set; }
+            public string Ink1 { get { return Ink(Icon1); } }
+            public string Ink2 { get { return Ink(Icon2); } }
+            public Visibility Show1 { get { return Icon1.Length > 0 ? Visibility.Visible : Visibility.Collapsed; } }
+            public Visibility Show2 { get { return Icon2.Length > 0 ? Visibility.Visible : Visibility.Collapsed; } }
+            public IconChoice(string icons, string label)
+            {
+                Label = label;
+                icons = icons ?? "";
+                Icon1 = icons.Length > 0 ? icons.Substring(0, 1) : "";
+                Icon2 = icons.Length > 1 ? icons.Substring(1, 1) : "";
+            }
+            // The heart in the pink the deck and the playlist editor draw it in; the rest in the text's own colour.
+            static string Ink(string glyph) { return glyph == "" ? "#F27E9A" : "#ECECEE"; }
+            public override string ToString() { return Label; }
+        }
+
+        // The icons sit inline in front of the label; a row without any starts at the edge like any other choice.
+        static DataTemplate IconChoiceTemplate()
+        {
+            var row = new FrameworkElementFactory(typeof(StackPanel));
+            row.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+            var icons = new FrameworkElementFactory(typeof(StackPanel));
+            icons.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+            icons.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            foreach (string n in new[] { "1", "2" })
+            {
+                var glyph = new FrameworkElementFactory(typeof(TextBlock));
+                glyph.SetValue(TextBlock.FontFamilyProperty, new System.Windows.Media.FontFamily("Segoe MDL2 Assets"));
+                glyph.SetValue(TextBlock.FontSizeProperty, 13.0);
+                glyph.SetValue(FrameworkElement.MarginProperty, new Thickness(0, 0, 5, 0));
+                glyph.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+                glyph.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("Icon" + n));
+                glyph.SetBinding(TextBlock.ForegroundProperty, new System.Windows.Data.Binding("Ink" + n));
+                glyph.SetBinding(UIElement.VisibilityProperty, new System.Windows.Data.Binding("Show" + n));
+                icons.AppendChild(glyph);
+            }
+            row.AppendChild(icons);
+            var label = new FrameworkElementFactory(typeof(TextBlock));
+            label.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+            label.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("Label"));
+            row.AppendChild(label);
+            return new DataTemplate { VisualTree = row };
+        }
+
         class Binding
         {
             public IniKey Spec;
@@ -365,8 +416,13 @@ namespace Mgs4Launcher
                 {
                     var combo = new ComboBox { MinWidth = 190, VerticalAlignment = VerticalAlignment.Center };
                     for (int i = 0; i < spec.Choices.Length; i++)
-                        combo.Items.Add(spec.ChoiceLabels != null && i < spec.ChoiceLabels.Length
-                                        ? spec.ChoiceLabels[i] : spec.Choices[i]);
+                    {
+                        string text = spec.ChoiceLabels != null && i < spec.ChoiceLabels.Length
+                                      ? spec.ChoiceLabels[i] : spec.Choices[i];
+                        if (spec.ChoiceIcons == null) combo.Items.Add(text);
+                        else combo.Items.Add(new IconChoice(i < spec.ChoiceIcons.Length ? spec.ChoiceIcons[i] : "", text));
+                    }
+                    if (spec.ChoiceIcons != null) combo.ItemTemplate = IconChoiceTemplate();
                     int idx = Array.IndexOf(spec.Choices, value ?? "");
                     combo.SelectedIndex = idx >= 0 ? idx : -1;
                     // What the file said, for a value that is none of the choices: the control cannot hold it, so
