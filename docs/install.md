@@ -24,6 +24,11 @@ add-on. None of those can be redistributed here.
      It is named for the versions it carries (`DLSS310.8.0-Streamline2.13.zip` at the time of writing; older pins
      called it `streamline.zip`), and holds `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` and the `sl.*.dll`
      set, matched to each other. Any zip name is fine: what is taken out of it is decided by the file names inside.
+     **On an RTX 40 series or older card, also drop the RTX 40 build of `nvngx_dlssnr.dll` after the zip.** The zip's
+     `nvngx_dlssnr.dll` is the build for RTX 50 series cards; the RTX 40 build has the same version (310.8.0), size
+     and signature and is told apart only by its SHA-256. With the wrong build NVIDIA refuses to create Neural
+     Rendering, so Setup shows the file as an error for your GPU, refuses to install a dropped build made for the
+     other kind of card, and keeps the RTX 40 build in place when the zip is dropped again.
    - **`renodx-dlss.addon64`** from the same Pinned Messages (older pins named it `renodx-dlss5.addon64`; either works,
      but keep only one): drop it on the tab. Optional, and the reason to bother -
      with it present DLAA runs on the final image so DLSS 5 Neural Rendering works at full strength. **Then set
@@ -84,7 +89,7 @@ from Off needs a restart.
 | component | file in `MGS4\` | version |
 | --- | --- | --- |
 | ReShade with add-on support | `dxgi.dll` | 6.8.0 |
-| DLSS / DLSS-G / DLSS NR | `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` | 310.8.0 |
+| DLSS / DLSS-G / DLSS NR | `nvngx_dlss.dll`, `nvngx_dlssg.dll`, `nvngx_dlssnr.dll` | 310.8.0 (`nvngx_dlssnr.dll`: the RTX 50 build from the zip, or the separate RTX 40 build on RTX 40 series and older - see `tools/install_manifest.json` for both hashes; the RTX 40 build has not been run through a full session here yet) |
 | Streamline | `sl.interposer.dll` and the other `sl.*.dll` | 2.13.0 (2.12.129 through the NVIDIA app's override) |
 | DLSS 5 Neural Rendering add-on | `renodx-dlss.addon64` | the RenoDX Discord's current build (`renodx-dlss5.addon64` before September 2026) |
 
@@ -106,7 +111,7 @@ Settings that are not files this repo installs:
 - **Nothing happens.** Check `MGS4\logs\mgs4_dlss.log` for `device created: api=...` - if it says the API is not D3D12
   the game is still on DirectX 11 - and for `NGX ... Init` and `CreateFeature ... -> 0x00000001`. `ReShade.log` must
   list `mgs4_dlss.addon64` as loaded; a ReShade without add-on support does not.
-- **Neural Rendering does not show.** `ReShade.log` should contain `signed DLSSNR ... runtime initialized` followed by
+- **Neural Rendering does not show.** If `ReShade.log` repeats `CreateFeature(Reserved18) failed with 0xbad00001`, NVIDIA is refusing the feature: on an RTX 40 series or older card that is the RTX 50 build of `nvngx_dlssnr.dll` - `mgs4_dlss.log` says so on a line starting `NR runtime check: ERROR`, and the overlay shows it in red. Otherwise, `ReShade.log` should contain `signed DLSSNR ... runtime initialized` followed by
   `feature 18 created ... for NR input`. Streamline's `DLSS-NR feature is not supported` warning in `mgs4_dlss.log`
   is about a Streamline plugin nothing here uses and says nothing about whether NR works.
 - **A frame limiter mod is present.** Above 60 fps it works against this port; use frame generation instead. Setup

@@ -219,6 +219,8 @@ namespace Mgs4Launcher
                                 if (!DropAllowed(entry.Name)) { skipped++; continue; }
                                 string into = DropFolder(gameDir);
                                 if (!Paths.Exists(into)) Directory.CreateDirectory(into);
+                                string keep = KeepGpuBuild(sections, Paths.Join(into, entry.Name));
+                                if (keep != null) { log.Add(keep); skipped++; continue; }
                                 entry.ExtractToFile(Paths.Join(into, entry.Name), true);
                                 took++;
                             }
@@ -234,6 +236,8 @@ namespace Mgs4Launcher
                 Section sec = DropTarget(sections, name);
                 string dest = DropFolder(gameDir);
                 if (!Paths.Exists(dest)) Directory.CreateDirectory(dest);
+                string wrong = WrongGpuBuild(sections, name, path);
+                if (wrong != null) { log.Add(wrong); continue; }
                 try
                 {
                     File.Copy(path, Paths.Join(dest, name), true);
@@ -242,6 +246,41 @@ namespace Mgs4Launcher
                 catch (Exception e) { log.Add("could not copy " + name + ": " + e.Message); }
             }
             return log;
+        }
+
+        // A file the manifest keeps per-GPU builds of (nvngx_dlssnr.dll), and which of them a file on disk is.
+        static BuildSpec GpuBuild(List<Section> sections, string name, string path, out FileSpec spec)
+        {
+            spec = (sections ?? new List<Section>()).SelectMany(s => s.Files)
+                .FirstOrDefault(f => string.Equals(f.Path, name, StringComparison.OrdinalIgnoreCase) && f.Builds.Any(b => !string.IsNullOrEmpty(b.Gpu)));
+            if (spec == null || !Paths.Exists(path)) return null;
+            string sha = Checks.Sha256Cached(path);
+            return sha == null ? null : spec.Builds.FirstOrDefault(b => b.Sha256 == sha);
+        }
+
+        // The Streamline zip carries the RTX 50 build of nvngx_dlssnr.dll. Dropping the zip again on a machine that
+        // already has the build for its own GPU must not put the other one back over it. Null means extract.
+        static string KeepGpuBuild(List<Section> sections, string target)
+        {
+            FileSpec spec;
+            BuildSpec have = GpuBuild(sections, Path.GetFileName(target), target, out spec);
+            if (have == null) return null;
+            Checks.Gpu gpu = Checks.DetectGpu();
+            if (!gpu.Known || have.Gpu != gpu.Tag) return null;
+            return Path.GetFileName(target) + ": kept the " + have.Label + " already in place - it is the one the " + gpu.Name + " needs";
+        }
+
+        // A dropped build made for the other kind of GPU is refused: NVIDIA will not create NR with it. Null means copy.
+        static string WrongGpuBuild(List<Section> sections, string name, string path)
+        {
+            FileSpec spec;
+            BuildSpec build = GpuBuild(sections, name, path, out spec);
+            if (build == null) return null;
+            Checks.Gpu gpu = Checks.DetectGpu();
+            if (!gpu.Known || build.Gpu == gpu.Tag) return null;
+            return "ERROR: " + name + " is the " + build.Label + ", and this machine's GPU is the " + gpu.Name +
+                   " - NVIDIA refuses to create Neural Rendering with it, so it was not installed. " +
+                   (gpu.Tag == "rtx40" ? "RTX 40 series and older cards need the RTX 40 build" : "RTX 50 series cards need the build from the Streamline zip");
         }
 
         // The manifest's downloads, by hash. Null when the name is not one the list knows about at all - a zip or

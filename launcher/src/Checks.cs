@@ -28,10 +28,18 @@ namespace Mgs4Launcher
         // renodx-dlss.addon64 - so either satisfies the check, and both at once is called out.
         public string Alt;
         public bool Optional, Required, OptionalIfDriverOverride;
-        // The builds this add-on was verified with, by SHA-256 of the file, each with a label for the row. Only for
-        // files whose version resource says nothing (RenoDX's add-on reports 0.0.0.0): any other file is an
-        // untested build and is said so.
-        public List<KeyValuePair<string, string>> Builds = new List<KeyValuePair<string, string>>();
+        // The builds this add-on was verified with, by SHA-256 of the file, each with a label for the row. For
+        // files whose version resource says nothing (RenoDX's add-on reports 0.0.0.0) or cannot tell the builds
+        // apart (both nvngx_dlssnr.dll 310.8.0 builds): any other file is an untested build and is said so.
+        public List<BuildSpec> Builds = new List<BuildSpec>();
+    }
+
+    class BuildSpec
+    {
+        public string Sha256, Label;
+        // "rtx50", "rtx40" or null: the GPUs this build is for. NVIDIA ships nvngx_dlssnr.dll 310.8.0 twice, one
+        // build for RTX 50 series cards and one for RTX 40 and older, and the wrong one fails at CreateFeature.
+        public string Gpu;
     }
 
     // One download the install was verified with: the file as it came from its source, by SHA-256. A dropped file
@@ -74,6 +82,10 @@ namespace Mgs4Launcher
         // never getting there on its own - this many "BindDevice rejected unavailable runtime state" lines - until
         // a setting in its tab was changed.
         public int NrRejections;
+        // NVIDIA refusing the NR feature itself - "CreateFeature(Reserved18) failed with 0xbad00001", FeatureNotSupported.
+        // Seen with the RTX 50 build of nvngx_dlssnr.dll on an RTX 40 card; the add-on's own check names the build.
+        public int NrUnsupported;
+        public string NrDllError;
         // Whether ReShade's init_device reached RenoDX at all - it never did for the game's own device in any run
         // here, so this add-on raises it once more with a WARP device (NrKick), and RenoDX attaches its runtime then.
         public bool NrInitDevice, NrKicked;
@@ -289,6 +301,71 @@ namespace Mgs4Launcher
             return 0;
         }
 
+        // A large file hashed once per size and write time: nvngx_dlssnr.dll is 160 MB, and Setup checks again on
+        // every visit.
+        static readonly Dictionary<string, KeyValuePair<string, string>> _shaCache = new Dictionary<string, KeyValuePair<string, string>>(StringComparer.OrdinalIgnoreCase);
+        public static string Sha256Cached(string path)
+        {
+            string stamp;
+            try { var fi = new FileInfo(path); stamp = fi.Length + ":" + fi.LastWriteTimeUtc.Ticks; }
+            catch { return null; }
+            lock (_shaCache)
+            {
+                KeyValuePair<string, string> hit;
+                if (_shaCache.TryGetValue(path, out hit) && hit.Key == stamp) return hit.Value;
+            }
+            string sha = Sha256(path);
+            if (sha != null) lock (_shaCache) _shaCache[path] = new KeyValuePair<string, string>(stamp, sha);
+            return sha;
+        }
+
+        // The NVIDIA GPU in the machine, as far as a build of nvngx_dlssnr.dll cares: RTX 50 series and newer
+        // ("rtx50") or RTX 40 series and older ("rtx40"). Tag is null when there is no NVIDIA card or its name
+        // says nothing about its generation, and then no build is called wrong.
+        public class Gpu
+        {
+            public string Name, Tag;
+            public bool Known { get { return Tag != null; } }
+        }
+
+        // The generation from the marketing name, in thousands: RTX 5090 -> 5, RTX 4070 Ti Laptop GPU -> 4,
+        // GTX 1080 -> 1, GTX 980 -> 0. Workstation cards carry the architecture instead of a series number
+        // (RTX PRO 6000 Blackwell, RTX 6000 Ada Generation, RTX A6000, Quadro RTX 8000). -1 when it cannot be told.
+        // The add-on has the same parse (gpu_generation in mgs4_dlss.cpp) - change both together.
+        public static int GpuGeneration(string name)
+        {
+            if (string.IsNullOrEmpty(name) || name.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) < 0) return -1;
+            if (Regex.IsMatch(name, @"\bBlackwell\b", RegexOptions.IgnoreCase)) return 5;
+            if (Regex.IsMatch(name, @"\bAda\b", RegexOptions.IgnoreCase)) return 4;
+            if (Regex.IsMatch(name, @"\bRTX\s+A\d{3,4}\b", RegexOptions.IgnoreCase)) return 3;
+            if (Regex.IsMatch(name, @"\b(Quadro|TITAN)\b", RegexOptions.IgnoreCase)) return 2;
+            Match m = Regex.Match(name, @"\b(?:RTX|GTX)\s+(?:PRO\s+)?(\d{3,4})\b", RegexOptions.IgnoreCase);
+            if (!m.Success) return -1;
+            string n = m.Groups[1].Value;
+            return n.Length == 4 ? n[0] - '0' : 0;
+        }
+
+        public static Gpu DetectGpu()
+        {
+            // Every NVIDIA adapter, and the newest generation among them: a machine with two cards is not told its
+            // install is wrong on the strength of the older one.
+            var gpu = new Gpu();
+            int best = -1;
+            try
+            {
+                using (var s = new System.Management.ManagementObjectSearcher("SELECT Name FROM Win32_VideoController"))
+                    foreach (System.Management.ManagementObject o in s.Get())
+                    {
+                        string name = o["Name"] as string;
+                        int g = GpuGeneration(name);
+                        if (g > best) { best = g; gpu.Name = name.Replace("NVIDIA ", "").Trim(); }
+                    }
+            }
+            catch { }
+            if (best >= 0) gpu.Tag = best >= 5 ? "rtx50" : "rtx40";
+            return gpu;
+        }
+
         public static bool GameRunning()
         {
             try { return Process.GetProcessesByName("mgs4").Length > 0; } catch { return false; }
@@ -357,7 +434,7 @@ namespace Mgs4Launcher
                             foreach (object bObj in (object[])f["builds"])
                             {
                                 var b = (Dictionary<string, object>)bObj;
-                                fs.Builds.Add(new KeyValuePair<string, string>(Str(b, "sha256").ToLowerInvariant(), Str(b, "label")));
+                                fs.Builds.Add(new BuildSpec { Sha256 = Str(b, "sha256").ToLowerInvariant(), Label = Str(b, "label"), Gpu = Str(b, "gpu") });
                             }
                         sec.Files.Add(fs);
                     }
@@ -418,6 +495,7 @@ namespace Mgs4Launcher
                 { r.Driver = m.Groups[1].Value; r.DriverMin = m.Groups[2].Value; }
                 if ((m = Regex.Match(line, "NGX EvaluateFeature ok \\(#(\\d+)\\)")).Success) r.Evaluations = m.Groups[1].Value;
                 if ((m = Regex.Match(line, "NGX CreateFeature DLSS \\((.+?)\\)")).Success) r.Feature = m.Groups[1].Value;
+                if ((m = Regex.Match(line, "NR runtime check: ERROR (.+)$")).Success) r.NrDllError = m.Groups[1].Value;
             }
             string rl = Paths.Join(game, "ReShade.log");
             if (Paths.Exists(rl))
@@ -447,6 +525,7 @@ namespace Mgs4Launcher
                     if (line.Contains("ngx_evaluate.dlssg_observed") || line.Contains("ngx_evaluate.dlssg_copyback") || line.Contains("source-role=Backbuffer"))
                         r.NrOnBackbuffer = true;
                     if (line.Contains("BindDevice rejected unavailable runtime state")) r.NrRejections++;
+                    if (Regex.IsMatch(line, "CreateFeature\\(Reserved18\\) failed with 0xbad00001", RegexOptions.IgnoreCase)) r.NrUnsupported++;
                     if (line.Contains("RenoDX DLSS init_device begin")) r.NrInitDevice = true;
                 }
             }
@@ -459,6 +538,8 @@ namespace Mgs4Launcher
         {
             var sections = new List<Section>();
             LastRun run = ReadLastRun(game);
+            Gpu gpu = DetectGpu();
+            bool gpuBuildRight = false;   // a GPU-tagged build in place is the one for this GPU: an older run's refusal is history
 
             foreach (Section spec in Manifest())
             {
@@ -497,15 +578,35 @@ namespace Mgs4Launcher
                         // A file whose version says nothing is known by its hash: one of the verified builds, or not.
                         if (f.Builds.Count > 0)
                         {
-                            string sha = Sha256(full);
-                            string label = sha == null ? null : f.Builds.Where(b => b.Key == sha).Select(b => b.Value).FirstOrDefault();
-                            if (label != null) value = label;
+                            string sha = Sha256Cached(full);
+                            BuildSpec build = sha == null ? null : f.Builds.FirstOrDefault(b => b.Sha256 == sha);
+                            bool gpuTagged = f.Builds.Any(b => !string.IsNullOrEmpty(b.Gpu));
+                            if (build != null)
+                            {
+                                value = build.Label;
+                                if (gpu.Known && build.Gpu == gpu.Tag) gpuBuildRight = true;
+                                // A build for the other kind of GPU is not a warning: NVIDIA refuses the feature
+                                // outright, so it is an error until the right build is in.
+                                if (gpu.Known && !string.IsNullOrEmpty(build.Gpu) && build.Gpu != gpu.Tag)
+                                {
+                                    BuildSpec want = f.Builds.FirstOrDefault(b => b.Gpu == gpu.Tag);
+                                    status = "bad";
+                                    value = "wrong build for this GPU";
+                                    detail = "this is the " + build.Label + ", and this machine's GPU is the " + gpu.Name + ". " +
+                                        (gpu.Tag == "rtx40"
+                                            ? "RTX 40 series and older cards need the separate RTX 40 build of " + f.Path + " - with this one NVIDIA refuses to create Neural Rendering (CreateFeature FeatureNotSupported, 0xbad00001). Drop the RTX 40 build here to replace it"
+                                            : "RTX 50 series cards need the build from the Streamline zip - drop the zip again to replace it") +
+                                        (want != null ? " (SHA-256 " + want.Sha256.Substring(0, 12) + ")" : "");
+                                }
+                            }
                             else
                             {
                                 status = "warn";
                                 value = "untested build";
-                                detail = "not one of the builds this add-on was verified with (" + string.Join("; ", f.Builds.Select(b => b.Value)) +
-                                    "). RenoDX changes where it applies NR and how it starts between builds, so the last-run rows below say what this one did" +
+                                detail = "not one of the builds this add-on was verified with (" + string.Join("; ", f.Builds.Select(b => b.Label)) +
+                                    (gpuTagged
+                                        ? (gpu.Known ? "). This machine's GPU is the " + gpu.Name + ", which wants the " + (f.Builds.Where(b => b.Gpu == gpu.Tag).Select(b => b.Label).FirstOrDefault() ?? "matching build") : ")")
+                                        : "). RenoDX changes where it applies NR and how it starts between builds, so the last-run rows below say what this one did") +
                                     (sha != null ? ". SHA-256 " + sha.Substring(0, 12) : "") + ", " +
                                     string.Format(CultureInfo.InvariantCulture, "{0:n0} KB", Math.Round(new FileInfo(full).Length / 1024.0));
                             }
@@ -540,7 +641,7 @@ namespace Mgs4Launcher
             }
 
             sections.Add(SettingsSection(game));
-            sections.Add(LastRunSection(run));
+            sections.Add(LastRunSection(run, gpuBuildRight));
             return sections;
         }
 
@@ -670,7 +771,7 @@ namespace Mgs4Launcher
             return sec;
         }
 
-        static Section LastRunSection(LastRun run)
+        static Section LastRunSection(LastRun run, bool gpuBuildRight)
         {
             var sec = new Section
             {
@@ -716,14 +817,16 @@ namespace Mgs4Launcher
                         "the local file was not used; the driver's _nvngx provided DLSS", "driver override", null));
             }
             // "it loaded" is only worth its own row when it did not go on to do anything.
-            bool nrRan = !string.IsNullOrEmpty(run.NrRuntime) || run.NrCreated;
+            // An attached runtime whose feature NVIDIA then refused every time did not run: that is the wrong
+            // nvngx_dlssnr.dll build for the GPU, not NR working.
+            bool nrRan = run.NrCreated || (!string.IsNullOrEmpty(run.NrRuntime) && run.NrUnsupported == 0);
             if (run.Nr == "loaded" && !nrRan && run.NrRejections > 0)
                 sec.Rows.Add(new Row("warn", "Neural Rendering add-on",
                     "RenoDX loaded but never attached its NR runtime - " + run.NrRejections + " rejected passes. This build attaches it from ReShade's init_device, which never reached it here, " +
                     "or from a change in its own tab; this add-on raises init_device once more for it (NrKick=1 in the ini)" + (run.NrKicked ? ", which this run did without RenoDX attaching" : ", which this run did not get to") +
                     ". Until then: open the ReShade overlay, RenoDX DLSS, flip one setting and back",
                     "never attached", null));
-            else if (run.Nr == "loaded" && !nrRan)
+            else if (run.Nr == "loaded" && !nrRan && run.NrUnsupported == 0)
                 sec.Rows.Add(new Row("warn", "Neural Rendering add-on", "RenoDX loaded but no NR pass followed", "loaded", null));
             else if (run.Nr == "absent")
                 sec.Rows.Add(new Row("info", "Neural Rendering add-on", "not present - DLAA runs before the HUD instead", "absent", null));
@@ -764,9 +867,25 @@ namespace Mgs4Launcher
                 sec.Rows.Add(new Row("ok", "Neural Rendering", d,
                     !string.IsNullOrEmpty(run.NrRuntime) ? (run.NrRuntime == "direct" ? "nvngx_dlssnr, direct" : "nvngx_dlssnr " + run.NrRuntime) : "active", null));
             }
+            else if (run.Nr == "loaded" && run.NrUnsupported > 0 && gpuBuildRight)
+                // The logs are from before the right build went in (a drop does not rewrite them): the refusal
+                // says nothing about the file there now, only the next game run can.
+                sec.Rows.Add(new Row("info", "Neural Rendering",
+                    "NVIDIA refused the NR feature " + run.NrUnsupported + " time(s) on the last run, with the build that was in place then. " +
+                    "The nvngx_dlssnr.dll there now is the one for this GPU - start the game to check NR again",
+                    "re-run the game", null));
+            else if (run.Nr == "loaded" && run.NrUnsupported > 0)
+                sec.Rows.Add(new Row("bad", "Neural Rendering",
+                    "NVIDIA refused to create the NR feature " + run.NrUnsupported + " time(s) (CreateFeature FeatureNotSupported, 0xbad00001). " +
+                    (!string.IsNullOrEmpty(run.NrDllError)
+                        ? run.NrDllError
+                        : "On an RTX 40 series or older card this is the RTX 50 build of nvngx_dlssnr.dll - the runtimes row above says which build is in"),
+                    "refused by NVIDIA", null));
             else if (run.Nr == "loaded")
                 sec.Rows.Add(new Row("warn", "Neural Rendering",
                     "the add-on loaded but no NR feature was created - check nvngx_dlssnr.dll and the driver", "no NR pass", null));
+            if (!string.IsNullOrEmpty(run.NrDllError) && !gpuBuildRight && !(run.Nr == "loaded" && !nrRan && run.NrUnsupported > 0))
+                sec.Rows.Add(new Row("bad", "NR runtime build", run.NrDllError, "wrong build for this GPU", null));
             if (!string.IsNullOrEmpty(run.Insertion))
                 sec.Rows.Add(new Row("ok", "Insertion point", "where DLAA runs in the frame", run.Insertion, null));
             if (!string.IsNullOrEmpty(run.Sl))

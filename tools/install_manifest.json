@@ -12,11 +12,14 @@
     "  bundled         this group's files ship with the app - built into the release exe - so Setup can install them itself (Install.BundledAddon)",
     "  drop            the headline file to drag in, named in the drop area; accepts is the full match list",
     "  files[].path    relative to the game folder - the row's label",
-    "  files[].builds  SHA-256 of the builds verified, for a file whose version resource says nothing",
+    "  files[].builds  SHA-256 of the builds verified, for a file whose version resource says nothing - or whose",
+    "                  builds all carry one version, as nvngx_dlssnr.dll's do",
+    "  builds[].gpu    the GPUs a build is for: rtx50 (RTX 50 series and newer) or rtx40 (RTX 40 series and older).",
+    "                  A build for the other kind of GPU than the one in the machine is an error on Setup and in game",
     "  revision        the date this list last changed; the launcher fetches the copy on master when it is newer",
     "  downloads       the downloads the install was verified with, by SHA-256: a dropped file is matched here"
   ],
-  "revision": "2026-09-10",
+  "revision": "2026-09-16",
   "downloads": [
     {
       "name": "ReShade_Setup_6.8.0_Addon.exe",
@@ -45,6 +48,11 @@
       "label": "renodx-dlss5 as downloaded on 2026-08-31, the build this add-on ran with through August",
       "source": "https://discord.gg/renodx",
       "sourceLabel": "RenoDX Discord, Pinned Messages"
+    },
+    {
+      "name": "nvngx_dlssnr.dll",
+      "sha256": "e67dee209320cdafe0e93e45675d7aa34323a53acc57a72b2e40a181581c989a",
+      "label": "nvngx_dlssnr.dll 310.8.0, the build for RTX 40 series and older"
     },
     {
       "name": "renodx-dlss5.addon64",
@@ -124,7 +132,11 @@
         {
           "path": "nvngx_dlssnr.dll",
           "verified": "310.8.0",
-          "detail": "the Neural Rendering runtime"
+          "detail": "the Neural Rendering runtime. 310.8.0 comes in two builds, told apart only by hash: the zip's is for RTX 50 series cards, and an RTX 40 series or older card needs the separate RTX 40 build - with the other one NVIDIA refuses to create NR (FeatureNotSupported). On an RTX 40 or older, drop that build here after the zip",
+          "builds": [
+            { "sha256": "e16bcf15e16e13f527491cdf7845b2fe6521a738d8f7c9c721866a8496e1fc8e", "label": "310.8.0, the RTX 50 build (the zip's)", "gpu": "rtx50" },
+            { "sha256": "e67dee209320cdafe0e93e45675d7aa34323a53acc57a72b2e40a181581c989a", "label": "310.8.0, the RTX 40 and older build", "gpu": "rtx40" }
+          ]
         },
         {
           "path": "nvngx_dlssg.dll",

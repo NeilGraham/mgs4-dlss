@@ -17,7 +17,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <d3d12.h>
-#include <dxgi1_4.h>   // IDXGIFactory4::EnumWarpAdapter (NrKick)
+#include <dxgi1_4.h>   // IDXGIFactory4::EnumWarpAdapter (NrKick), EnumAdapterByLuid (NR runtime check)
+#include <bcrypt.h>    // SHA-256 of nvngx_dlssnr.dll (NR runtime check)
 #include <imgui.h>
 #include <reshade.hpp>
 #include <nvsdk_ngx.h>
@@ -47,6 +48,9 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#include <atomic>
+#include <regex>
+#include <thread>
 
 using namespace reshade::api;
 
@@ -3492,6 +3496,99 @@ static void nr_detect()
         if (*tok && GetModuleHandleA(tok) != nullptr) { g_nrAddonLoaded = true; strncpy_s(g_nrAddonName, tok, _TRUNCATE); break; }
     }
 }
+// NR runtime check: NVIDIA ships nvngx_dlssnr.dll 310.8.0 twice - one build for RTX 50 series cards (the one in the
+// Streamline zip) and one for RTX 40 series and older. Both carry the same version, size and signature; only the
+// content differs. With the RTX 50 build on an RTX 40 card RenoDX attaches the runtime and then every
+// CreateFeature(Reserved18) comes back 0xbad00001 (FeatureNotSupported), so NR silently never runs. Once the game's
+// device exists, its adapter's name gives the generation and the file's SHA-256 gives the build; the wrong one is
+// logged as an error and shown on both overlay tabs. The hashes are tools/install_manifest.json's builds[] for
+// nvngx_dlssnr.dll, and gpu_generation is Checks.GpuGeneration in the launcher - change them together.
+static const char* kNrBuildRtx50 = "e16bcf15e16e13f527491cdf7845b2fe6521a738d8f7c9c721866a8496e1fc8e";
+static const char* kNrBuildRtx40 = "e67dee209320cdafe0e93e45675d7aa34323a53acc57a72b2e40a181581c989a";
+static char g_nrDllError[512] = "";
+static std::atomic<bool> g_nrDllBad{ false };
+static bool g_nrDllCheckStarted = false;
+
+// The generation from the adapter name, in thousands: RTX 5090 -> 5, RTX 4070 Ti Laptop GPU -> 4, GTX 1080 -> 1,
+// GTX 980 -> 0. Workstation names carry the architecture instead (RTX PRO 6000 Blackwell, RTX 6000 Ada Generation,
+// RTX A6000, Quadro RTX 8000). -1 when it cannot be told, and then nothing is called wrong.
+static int gpu_generation(const std::string& name)
+{
+    using std::regex; const auto ic = regex::icase;
+    if (name.empty()) return -1;
+    if (std::regex_search(name, regex("\\bBlackwell\\b", ic))) return 5;
+    if (std::regex_search(name, regex("\\bAda\\b", ic))) return 4;
+    if (std::regex_search(name, regex("\\bRTX\\s+A\\d{3,4}\\b", ic))) return 3;
+    if (std::regex_search(name, regex("\\b(Quadro|TITAN)\\b", ic))) return 2;
+    std::smatch m;
+    if (!std::regex_search(name, m, regex("\\b(?:RTX|GTX)\\s+(?:PRO\\s+)?(\\d{3,4})\\b", ic))) return -1;
+    return m[1].length() == 4 ? m[1].str()[0] - '0' : 0;
+}
+
+static bool sha256_file(const wchar_t* path, char hex[65])
+{
+    HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    BCRYPT_ALG_HANDLE alg = nullptr; BCRYPT_HASH_HANDLE h = nullptr; bool ok = false;
+    if (BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0)) &&
+        BCRYPT_SUCCESS(BCryptCreateHash(alg, &h, nullptr, 0, nullptr, 0, 0))) {
+        std::vector<UCHAR> buf(1 << 20); DWORD got = 0; ok = true;
+        while (ReadFile(f, buf.data(), (DWORD)buf.size(), &got, nullptr) && got)
+            if (!BCRYPT_SUCCESS(BCryptHashData(h, buf.data(), got, 0))) { ok = false; break; }
+        UCHAR digest[32];
+        if (ok && BCRYPT_SUCCESS(BCryptFinishHash(h, digest, sizeof(digest), 0)))
+            for (int i = 0; i < 32; ++i) sprintf_s(hex + i * 2, 3, "%02x", digest[i]);
+        else ok = false;
+    }
+    if (h) BCryptDestroyHash(h);
+    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    CloseHandle(f);
+    return ok;
+}
+
+// On its own thread: hashing 160 MB takes a moment, and the game's device creation is not the place to wait.
+static void nr_dll_check(ID3D12Device* d3d)
+{
+    if (g_nrDllCheckStarted || !d3d) return;
+    g_nrDllCheckStarted = true;
+    wchar_t path[MAX_PATH]; swprintf_s(path, L"%s\\nvngx_dlssnr.dll", g_gameDirW);
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return;   // no NR runtime here: nothing to check
+    // The adapter the game's device is on, by name - not the first one DXGI lists.
+    std::string gpu; UINT vendor = 0;
+    const LUID luid = d3d->GetAdapterLuid();
+    IDXGIFactory4* factory = nullptr; IDXGIAdapter1* adapter = nullptr; DXGI_ADAPTER_DESC1 desc = {};
+    if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) && SUCCEEDED(factory->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter))) &&
+        SUCCEEDED(adapter->GetDesc1(&desc))) {
+        char name[400] = "";   // 128 UTF-16 units, up to three UTF-8 bytes each
+        if (WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, sizeof(name), nullptr, nullptr) > 0) gpu = name;
+        vendor = desc.VendorId;
+    }
+    if (adapter) adapter->Release();
+    if (factory) factory->Release();
+    const int gen = vendor == 0x10DE ? gpu_generation(gpu) : -1;
+    std::wstring wpath = path;
+    std::thread([wpath, gpu, gen]() {
+        char sha[65] = "";
+        if (!sha256_file(wpath.c_str(), sha)) { logmsg("NR runtime check: could not hash nvngx_dlssnr.dll"); return; }
+        const bool is50 = strcmp(sha, kNrBuildRtx50) == 0, is40 = strcmp(sha, kNrBuildRtx40) == 0;
+        const char* build = is50 ? "the RTX 50 build" : (is40 ? "the RTX 40 and older build" : "an unknown build");
+        if (gen < 0) { logmsg("NR runtime check: nvngx_dlssnr.dll is %s (SHA-256 %.12s); GPU '%s' - generation not known, not checked", build, sha, gpu.c_str()); return; }
+        if (gen < 5 && is50)
+            snprintf(g_nrDllError, sizeof(g_nrDllError), "nvngx_dlssnr.dll is the RTX 50 build, and the %s is an RTX 40 series or older card - NVIDIA refuses to create Neural Rendering with it (0xbad00001, FeatureNotSupported). Replace it with the RTX 40 build of nvngx_dlssnr.dll (SHA-256 %.12s) and restart the game", gpu.c_str(), kNrBuildRtx40);
+        else if (gen >= 5 && is40)
+            snprintf(g_nrDllError, sizeof(g_nrDllError), "nvngx_dlssnr.dll is the RTX 40 and older build, and the %s is an RTX 50 series card - put back the nvngx_dlssnr.dll from the Streamline zip (SHA-256 %.12s) and restart the game", gpu.c_str(), kNrBuildRtx50);
+        if (g_nrDllError[0]) { g_nrDllBad = true; logmsg("NR runtime check: ERROR %s", g_nrDllError); }
+        else logmsg("NR runtime check: nvngx_dlssnr.dll is %s (SHA-256 %.12s) on the %s%s", build, sha, gpu.c_str(), (is50 || is40) ? " - the right one" : " - not a build this add-on knows; if NR does not run, this is the first thing to check");
+    }).detach();
+}
+static void draw_nr_dll_error()
+{
+    if (!g_nrDllBad) return;
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.35f, 0.3f, 1.0f));
+    ImGui::TextWrapped("Neural Rendering cannot run: %s", g_nrDllError);
+    ImGui::PopStyleColor();
+}
+
 // The NrKick (see g_cfgNrKick): one WARP device, created through ReShade's D3D12CreateDevice hook once the game's
 // device and swapchain exist, so that init_device reaches RenoDX with its settings loaded. Runs from on_present
 // until it has happened, before the pre-warm evaluations, so the first NR pass is on the first scene frame.
@@ -3940,6 +4037,7 @@ static void on_init_device(device* dev)
     if (dev->get_api() != device_api::d3d12) { logmsg("not D3D12 - add-on inactive (set Options -> Graphics -> API to DirectX 12)"); g_cfgEnabled = 0; return; }
     g_d3d = reinterpret_cast<ID3D12Device*>(dev->get_native());
     objmv::init(g_d3d, logmsg);   // hooks root signature / PSO creation: must precede the game's pipelines
+    nr_dll_check(g_d3d);          // the nvngx_dlssnr.dll build against this GPU, in the background
     // Streamline (frame generation) is only loaded when FrameGen is enabled at startup: it takes over the swapchain,
     // so everything else (ReShade, the DLAA path, NGX add-ons) must be known to work with it before it is on by default.
     if (g_cfgFgMode != 0) { fg::init(g_d3d, g_gameDirW, logmsg); fg::set_frame_callback(frame_rollover); }   // before the game creates its swapchain
@@ -4038,6 +4136,7 @@ static void draw_overlay(effect_runtime*)
 {
     { static DWORD seen[8]; static int n = 0; note_thread("overlay drawn", seen, n); }
     if (g_uiMode < 0) g_uiMode = mode_index(g_cfgMode);
+    draw_nr_dll_error();
     ImGui::SeparatorText("Image");
     bool en = g_cfgEnabled != 0;
     if (ImGui::Checkbox("Enable DLSS", &en)) { g_cfgEnabled = en ? 1 : 0; write_ini_int("Enabled", g_cfgEnabled); }
@@ -4263,6 +4362,7 @@ static void draw_settings(effect_runtime*)
     if (g_dlss) ImGui::Text("%s  %ux%u -> %ux%u, preset %s%s", g_cfgModeName, g_dlssW, g_dlssH, g_dlssOutW, g_dlssOutH, g_cfgPreset == 10 ? "J" : "K",
                             g_nrAddonLoaded ? ", DLSS 5 NR add-on loaded" : "");
     else ImGui::Text("NGX: %s", g_ngxReady ? "ready, no feature yet" : (g_ngxInitTried ? "FAILED" : "not initialized yet"));
+    draw_nr_dll_error();
     ImGui::TextDisabled("Every setting is on the MGS4 DLSS tab, and in the launcher's Settings.");
 }
 
