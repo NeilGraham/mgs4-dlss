@@ -221,9 +221,10 @@ namespace Mgs4Launcher
                 null, null, IniSource.Renodx) { Section = "RENODX-DLSS", Fallback = "0" },
 
             new IniKey("Diagnostics", "DebugMode", "choice", "Debug view", "costs frames; 0 for normal play",
-                new[] { "0", "1", "2", "3", "4", "5", "9" },
-                new[] { "off", "magenta path test", "bypass DLSS (A/B)", "trace 3 frames", "draw constants",
-                        "motion-vector field", "vectors over the image" }),
+                new[] { "0", "2", "13", "9", "5", "6", "7", "10", "11", "12", "3", "4" },
+                new[] { "off", "bypass DLSS and NR (A/B)", "depth buffer", "vectors over the image", "motion-vector field",
+                        "UI layer (frame generation)", "HUD-less color (frame generation)", "DoF: blurred layer", "DoF: blur coverage", "DoF: overlay mask",
+                        "trace 3 frames (log only)", "draw constants (log only)" }),
             // The key that flips a debug view on and off in the game, without the ReShade overlay - for showing
             // someone the motion vectors. The add-on reads both keys live and writes DebugMode back through the
             // ini, so this form, the overlay and the key all see the same state.
@@ -238,9 +239,9 @@ namespace Mgs4Launcher
                 new[] { "none", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" }, null) { Fallback = "none" },
             new IniKey("Diagnostics", "DebugKeyMode", "choice", "Debug key view",
                 "what the debug key switches on; 9 puts the vector field over the image, so a character's vectors show on the character",
-                new[] { "1", "2", "5", "6", "7", "9", "10", "11", "12" },
-                new[] { "magenta path test", "bypass DLSS (A/B)", "motion-vector field", "UI layer", "HUD-less color",
-                        "vectors over the image", "DoF: blurred layer", "DoF: blur coverage", "DoF: overlay mask" }) { Fallback = "9" },
+                new[] { "9", "13", "2", "5", "6", "7", "10", "11", "12" },
+                new[] { "vectors over the image", "depth buffer", "bypass DLSS and NR (A/B)", "motion-vector field", "UI layer", "HUD-less color",
+                        "DoF: blurred layer", "DoF: blur coverage", "DoF: overlay mask" }) { Fallback = "9" },
             new IniKey("Diagnostics", "SceneLog", "bool", "Scene-state log",
                 "the SCENE-STATE lines this launcher reads to tell a cutscene from gameplay - leave it on"),
             new IniKey("Diagnostics", "TraceFrames", "int", "Trace frames",

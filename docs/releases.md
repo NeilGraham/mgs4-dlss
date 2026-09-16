@@ -8,8 +8,12 @@ launcher that built itself on first run.
 
 ## v1.3.4 (2026-09-10)
 
-The game's dynamic resolution can be held at full size, and the MGS4 DLSS tab puts what you set first.
+The game's dynamic resolution can be held at full size, the MGS4 DLSS tab puts what you set first, and there is a depth view.
 
+- **A depth view.** `DebugMode=13` (*Depth buffer* in the Debug list) shows the scene depth as DLSS and the vector
+  passes see it - view distance on a log scale, white at the near plane, black far out and where nothing was drawn.
+  The magenta path test is gone (it had been a no-op on the composite path since NR), the two log-only modes say
+  so in their names, and the list is ordered by use.
 - **The MGS4 DLSS tab is in order.** What a person sets comes first, under three headings: **Image** (DLSS on,
   mode, preset, sharpness, the 3D scene held at full size), **Frame generation** (mode, target frame rate,
   Reflex, off while the overlay is open) and **Tools** (the debug view, pause the world); everything below

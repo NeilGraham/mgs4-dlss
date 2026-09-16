@@ -934,7 +934,7 @@ static resource_usage g_mvState = resource_usage::shader_resource_non_pixel;
 static uint32_t g_mvDispatches = 0, g_mvResets = 0;
 static float g_camDeltaRot = 0, g_camDeltaPos = 0, g_camDeltaRotMax = 0, g_camDeltaPosMax = 0;
 static uint32_t g_vpChanges = 0;   // frames (in the logging window) whose VP differed from the previous frame's
-struct VisCB { float inSize[2]; float outSize[2]; float scale; float blend; float pad[2]; };
+struct VisCB { float inSize[2]; float outSize[2]; float scale; float blend; float mode; float nearZ; };   // mode 1 = depth view (DebugMode=13)
 struct MvCB { float invVP[16]; float prevVP[16]; float size[2]; float nearZ; float reset; float dynZeroMV; float depthScale[2]; float pad; float rect[4]; float depthOrigin[2]; float pad2[2]; };
 
 static bool invert4x4(const float* m, float* out)
@@ -1535,11 +1535,13 @@ static void fg_scale_hints(command_list* cmd)
     }
     g_fgScaledFrames++;
 }
-static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH, float blend = 0.0f)
+static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t outW, uint32_t outH, float blend = 0.0f, int mode = 0)
 {
     if (!g_mvReady || !g_visPso) return;
+    if (mode == 1 && !g_depthFull.handle) return;
     const uint32_t slot = 8 + (g_mvSlot % 4);
     VisCB cb = {}; cb.inSize[0] = float(inW); cb.inSize[1] = float(inH); cb.outSize[0] = float(outW); cb.outSize[1] = float(outH); cb.scale = 0.05f; cb.blend = blend;   // 10 px of motion = full swing
+    cb.mode = float(mode); cb.nearZ = (g_haveLiveVP && g_liveVP[11] != 0.0f) ? g_liveVP[11] : 1.0f;
     memcpy(g_mvCbPtr + (4 + slot % 4) * 256, &cb, sizeof(cb));
     // descriptors: [0] SRV motion vectors, [1] SRV mask, [2] UAV output, [3] UAV mask (unused dummy)
     const UINT inc = g_d3d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1548,8 +1550,14 @@ static void vis_dispatch(command_list* cmd, uint32_t inW, uint32_t inH, uint32_t
     D3D12_SHADER_RESOURCE_VIEW_DESC srv = {}; srv.Format = DXGI_FORMAT_R16G16_FLOAT; srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Texture2D.MipLevels = 1;
     g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_mv.handle), &srv, cpu);
     D3D12_CPU_DESCRIPTOR_HANDLE h1 = cpu; h1.ptr += inc;
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvMask = srv; srvMask.Format = DXGI_FORMAT_R8_UNORM;
-    g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_mask.handle), &srvMask, h1);
+    if (mode == 1) {   // the depth view reads the full-grid depth copy at t1 in place of the mask
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvDepth = srv; srvDepth.Format = DXGI_FORMAT_R32_FLOAT;
+        g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_depthFull.handle), &srvDepth, h1);
+        if (g_depthFullState != resource_usage::shader_resource_non_pixel) { cmd->barrier(g_depthFull, g_depthFullState, resource_usage::shader_resource_non_pixel); g_depthFullState = resource_usage::shader_resource_non_pixel; }
+    } else {
+        D3D12_SHADER_RESOURCE_VIEW_DESC srvMask = srv; srvMask.Format = DXGI_FORMAT_R8_UNORM;
+        g_d3d->CreateShaderResourceView(reinterpret_cast<ID3D12Resource*>(g_mask.handle), &srvMask, h1);
+    }
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {}; uav.Format = DXGI_FORMAT_R8G8B8A8_UNORM; uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     D3D12_CPU_DESCRIPTOR_HANDLE h2 = cpu; h2.ptr += 2 * inc;
     g_d3d->CreateUnorderedAccessView(reinterpret_cast<ID3D12Resource*>(g_out.handle), nullptr, &uav, h2);
@@ -1981,7 +1989,7 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
     // The camera window's depth was copied into the full-grid depth at the window's first reader (g_winDepthRect): the
     // main view's stretch keeps that region, and runs even at full scale so the velocity pass and DLSS read the copy.
     const bool winDepth = g_winDepthFrame == g_frame && !g_windowMode;
-    if (fullGrid && (drsActive || winDepth) && g_depthFull.handle && g_stretchPso) {
+    if (fullGrid && (drsActive || winDepth || g_cfgDebugMode == 13) && g_depthFull.handle && g_stretchPso) {   // 13: the depth view reads the copy
         const float layRect[4] = { lay.x, lay.y, lay.width, lay.height };
         depth_stretch_dispatch(cmd, depth, dd.texture.format, cd.texture.width, cd.texture.height, kx, ky, depthOrigin, layRect, true, winDepth ? g_winDepthRect : nullptr);
         dlssDepth = g_depthFull; depthStretched = true;
@@ -2136,6 +2144,10 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         if (g_uiState != resource_usage::copy_source) { cmd->barrier(g_ui, g_uiState, resource_usage::copy_source); g_uiState = resource_usage::copy_source; }
         cmd->copy_resource(g_ui, g_out);
         cmd->barrier(g_out, resource_usage::copy_dest, resource_usage::unordered_access);
+    } else if (g_cfgDebugMode == 13 && depthStretched) {
+        // the scene depth as DLSS and the vector passes see it (the full-grid copy), in place of the DLSS result
+        r = NGX_D3D12_EVALUATE_DLSS_EXT(native, g_dlss, g_ngxParams, &ep);
+        if (!NVSDK_NGX_FAILED(r)) vis_dispatch(cmd, outW, outH, outW, outH, 0.0f, 1);
     } else if (g_cfgDebugMode == 9) {
         // DLSS result with the motion-vector field blended over it: the vector silhouette of a character must sit exactly
         // on the rendered character (any offset = the vectors are on a different grid than the image)
@@ -2313,20 +2325,6 @@ static void run_dlss(command_list* cmd, const cl_state* restore, resource color,
         const resource_usage from2[2] = { resource_usage::copy_dest, resource_usage::copy_source };
         const resource_usage to2[2] = { colorState, resource_usage::unordered_access };
         cmd->barrier(2, res2, from2, to2); g_outState = resource_usage::unordered_access;
-    }
-    if (g_cfgDebugMode == 1 && !g_finalPreHudThisFrame) {   // (the magenta test clears the game's bound final texture; skipped at the pre-HUD insertion)
-        resource target = upscale ? g_out : color;
-        resource_usage tstate = upscale ? g_outState : colorState;
-        resource_view rtv = { 0 };
-        const resource_desc td = dev->get_resource_desc(target);
-        if ((td.usage & resource_usage::render_target) == 0) { static bool once = false; if (!once) { once = true; logmsg("debug: target %p has no render-target usage; magenta test skipped", (void*)target.handle); } }
-        else if (dev->create_resource_view(target, resource_usage::render_target, resource_view_desc(cd.texture.format), &rtv)) {
-            const float magenta[4] = { 1.0f, 0.0f, 1.0f, 1.0f };
-            cmd->barrier(target, tstate, resource_usage::render_target);
-            cmd->clear_render_target_view(rtv, magenta);
-            cmd->barrier(target, resource_usage::render_target, tstate);
-            dev->destroy_resource_view(rtv);
-        } else { static bool once = false; if (!once) { once = true; logmsg("debug: could not create RTV on %p", (void*)target.handle); } }
     }
     if (restore) restore_state(dev, cmd, *restore);
 }
@@ -2843,6 +2841,27 @@ static void handle_draw(command_list* cmd, const draw_args& da)
                 }
             }
             if (s.ds.handle && depthTested) g_depthOnDrawsThisFrame++;
+            // Near misses of the flashback rule below, for the log: every frame-sized 6-vertex quad whose slot-0 texture is an
+            // uploaded (never rendered) 2D texture, with the tests the rule would apply - so a footage pass of another shape
+            // or size, or a rule gate that no longer holds, can be read off the log rather than guessed at.
+            if (!depthTested && da.count == 6 && s.rt_w == g_dlssW && s.rt_h == g_dlssH && g_dlssW && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]
+                && g_depthOnDrawsThisFrame >= 20 && s.table_set[1] && g_flashFrame != g_frame) {
+                static uint32_t nlog = 0; static std::unordered_set<uint64_t> seen;
+                if (nlog < 16) {
+                    resource r0 = resolve_descriptor(dev, s.tables[1], 0);
+                    auto itSeen = r0.handle ? g_rtSeen.find(r0.handle) : g_rtSeen.end();
+                    if (r0.handle && is_live(r0.handle) && (itSeen == g_rtSeen.end() || g_frame - itSeen->second > 600)) {
+                        const resource_desc d0 = dev->get_resource_desc(r0);
+                        const bool vpok = s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp));
+                        const uint64_t key = (uint64_t)d0.texture.width << 48 | (uint64_t)d0.texture.height << 32 | (uint64_t)(uint32_t)d0.texture.format << 8 | (vpok ? 1 : 0) | (g_preHudLast ? 2 : 0) | (g_injectedThisFrame ? 4 : 0);
+                        if (d0.type == resource_type::texture_2d && d0.texture.width <= 2048 && seen.insert(key).second) {
+                            ++nlog;
+                            logmsg("flashback? f%u 6-vertex quad into a frame-sized target, slot 0 = %ux%u fmt %u (uploaded texture), vp (%.0f,%.0f %.0fx%.0f) %s, preHudLast %d, injected %d, prePost %d, scaling %d",
+                                   g_frame, d0.texture.width, d0.texture.height, (unsigned)d0.texture.format, s.vp.x, s.vp.y, s.vp.width, s.vp.height, vpok ? "ok" : "REJECTED", (int)g_preHudLast, (int)g_injectedThisFrame, g_cfgPrePost, (int)g_scaling);
+                        }
+                    }
+                }
+            }
             if (!depthTested && da.count == 6 && s.rt_w == g_dlssW && s.rt_h == g_dlssH && g_dlssW && s.rt.handle != g_finalRt[0] && s.rt.handle != g_finalRt[1]
                 && g_depthOnDrawsThisFrame >= 20 && !g_injectedThisFrame && s.table_set[1] && g_preHudLast && g_cfgEnabled && !g_cfgPrePost && !g_scaling && g_cfgDebugMode != 2 && g_flashFrame != g_frame
                 && s.vp_valid && (vp_full_frame(s.vp, float(s.rt_w), float(s.rt_h)) || vp_is_layout_scene(s.vp))) {
@@ -4060,9 +4079,10 @@ static void draw_overlay(effect_runtime*)
         else if (st.loaded && !st.supported) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "DLSS Frame Generation not supported: %s", st.lastError[0] ? st.lastError : "adapter/driver");
     }
     ImGui::SeparatorText("Tools");
-    static const int dbgModes[] = { 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12 };
-    const char* dbg[] = { "Off", "Magenta path test", "Bypass DLSS (A/B)", "Trace 3 frames", "Analyze draw constants", "Motion vectors (field only)", "UI layer (frame generation)", "HUD-less color (frame generation)",
-                          "Motion vectors blended over the image (a character's vector silhouette must sit on the character)", "DoF: blurred layer only", "DoF: blur coverage", "DoF: overlay mask" };
+    static const int dbgModes[] = { 0, 2, 13, 9, 5, 6, 7, 10, 11, 12, 3, 4 };
+    const char* dbg[] = { "Off", "Bypass DLSS and NR (A/B against the native image)", "Depth buffer (white near, black far, log scale)", "Motion vectors blended over the image (a character's vector silhouette must sit on the character)",
+                          "Motion vectors (field only)", "UI layer (frame generation)", "HUD-less color (frame generation)", "DoF: blurred layer only", "DoF: blur coverage", "DoF: overlay mask",
+                          "Trace 3 frames (to the log only)", "Analyze draw constants (to the log only)" };
     int d = 0; for (int i = 0; i < 12; ++i) if (dbgModes[i] == g_cfgDebugMode) d = i;
     if (ImGui::Combo("Debug", &d, dbg, 12)) { write_ini_int("DebugMode", dbgModes[d]); reload_config(); }
     if (g_cfgDebugKey) {
@@ -4257,6 +4277,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         if (char* p = strrchr(g_gameDir, '\\')) *p = 0;
         MultiByteToWideChar(CP_ACP, 0, g_gameDir, -1, g_gameDirW, MAX_PATH);
         char path[MAX_PATH]; snprintf(path, MAX_PATH, "%s\\logs\\mgs4_dlss.log", g_gameDir);
+        // the previous run's log is kept as mgs4_dlss.log.1, so a session can still be read after a test run
+        { char prev[MAX_PATH]; snprintf(prev, MAX_PATH, "%s.1", path); MoveFileExA(path, prev, MOVEFILE_REPLACE_EXISTING); }
         g_log = fopen(path, "w");
         if (!reshade::register_addon(hModule)) { logmsg("register_addon failed (ReShade API mismatch?)"); return FALSE; }
         logmsg("mgs4_dlss v" MGS4_DLSS_VERSION " registered (header API %u)", RESHADE_API_VERSION);

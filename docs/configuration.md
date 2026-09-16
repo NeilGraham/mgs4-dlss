@@ -16,7 +16,7 @@ Preset=11                ; NVSDK_NGX_DLSS_Hint_Render_Preset_K (transformer). 10
 Sharpness=0              ; 0..100 (live)
 LogEveryN=600
 RecreateAfter=0          ; 0 = never re-create the feature (NGX-hooking add-ons are detected and handled automatically)
-DebugMode=0              ; live: 1 = magenta path test, 2 = bypass DLSS (A/B), 3 = trace 3 frames, 4 = analyze draw constants, 5 = motion-vector field, 9 = vector field blended over the image (alignment check)
+DebugMode=0              ; live: 2 = bypass DLSS and NR (A/B), 13 = depth buffer, 9 = vector field blended over the image (alignment check), 5 = the field alone, 6/7 = frame-generation inputs, 10-12 = DoF layers, 3/4 = log only
 NrPreload=1              ; with RenoDX present, load nvngx_dlssnr.dll ourselves once - RenoDX has been seen never binding its NR runtime on its own with Streamline in the process
 NrKick=1                 ; with RenoDX present, create one WARP D3D12 device once the game runs: ReShade raises init_device again and RenoDX attaches its NR runtime. Without it the current RenoDX build only attaches after a change in its own settings tab, and every NR pass before that is refused ("BindDevice rejected unavailable runtime state"). The WARP device is kept for the run and ignored by this add-on.
 BorderGuard=1            ; live: on a display wider than 16:9, clear the backbuffer outside the game image at every present (see "Wide displays" below)
@@ -69,7 +69,7 @@ FileTrace=0              ; diagnostics: log every file the game opens, and every
 AssetTrace=0             ; diagnostics: one SCENE-ASSET line per named file opened under the game folder (the scene's demo / environment / video)
 ```
 
-Log: `MGS4\logs\mgs4_dlss.log`.
+Log: `MGS4\logs\mgs4_dlss.log`; the previous run's is kept beside it as `mgs4_dlss.log.1`.
 
 The diagnostic keys at the bottom (`TraceFreeze`, `TraceFrames`, `Probe`, `DumpShaders`, `FileTrace`, `AssetTrace`) and the debug views cost frames; leave them off for normal play.
 
@@ -177,10 +177,9 @@ shows the rectangle and a count of the clears.
 | value | what is shown |
 | --- | --- |
 | 0 | off |
-| 1 | magenta path test: the displayed image is painted magenta (proves the insertion path) |
-| 2 | bypass DLSS (A/B against the native image) |
-| 3 | trace three frames to the log |
-| 4 | analyze draw constants (log) |
+| 2 | bypass DLSS (A/B against the native image; RenoDX's NR goes with it, since it post-processes the DLSS output) |
+| 3 | trace three frames to the log - nothing changes on screen |
+| 4 | analyze draw constants to the log - nothing changes on screen |
 | 5 | the motion-vector field on its own |
 | 6 | the replayed UI layer (frame generation input) |
 | 7 | the HUD-less color (frame generation input) |
@@ -188,6 +187,7 @@ shows the rectangle and a count of the clears.
 | 10 | PostDof: the blurred layer only |
 | 11 | PostDof: blur coverage |
 | 12 | PostDof: the overlay mask |
+| 13 | the depth buffer as DLSS sees it: view distance on a log scale, white at the near plane, black about 4000 near-planes out, and where the game wrote no depth (the sky) |
 
 All of them are in the overlay's Debug combo, which is on the add-on's own **MGS4 DLSS** tab in ReShade's window
 (and, in shorter form, under the add-on's entry on the Add-ons page).
